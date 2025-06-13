@@ -6,7 +6,7 @@ Experiments with `jfr` tool code and JFR queries.
 It's essentially a standalone version of the `jfr view` command,
 based, currently, on the [JDK 21](https://github.com/openjdk/jdk21u) code.
 
-And it has a web mode to easily test JFR queries:
+And it has a (highly experimental) web mode to easily test JFR queries:
 
 ```shell
 java -jar target/query.jar web
