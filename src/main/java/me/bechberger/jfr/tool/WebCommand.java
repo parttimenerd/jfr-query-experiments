@@ -93,6 +93,28 @@ public class WebCommand implements Callable<Integer>, Footerable {
                 return;
             }
 
+            if (query.equals("grammar")) {
+                sendResponse(exchange, 200, QueryPrinter.getGrammarText());
+                return;
+            }
+            if (query.equals("views")) {
+                // read the views from views.ini in the resources folder
+                StringWriter writer = new StringWriter();
+                try (var stream = this.getClass().getResourceAsStream("/view.ini")) {
+                    if (stream == null) {
+                        sendResponse(exchange, 500, "Views file not found");
+                        return;
+                    }
+                    writer.write(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+                } catch (IOException e) {
+                    sendResponse(exchange, 500, "Error reading views file: " + e.getMessage());
+                    return;
+                }
+                exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                sendResponse(exchange, 200, writer.toString());
+                return;
+            }
+
             // Execute query
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             BufferedPrinter printer = new BufferedPrinter(new PrintStream(buffer));
@@ -142,46 +164,16 @@ public class WebCommand implements Callable<Integer>, Footerable {
     }
 
     private String getSimpleUI() {
-        return """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>JFR Query Tool</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                        textarea { width: 100%; height: 100px; }
-                        button { padding: 10px; margin-top: 10px; }
-                        pre { background-color: #f5f5f5; padding: 10px; white-space: pre-wrap; }
-                    </style>
-                </head>
-                <body>
-                    <h1>JFR Query Tool</h1>
-                    <p>File: %s</p>
-                    <textarea id="queryInput" placeholder="Enter your JFR query here..."></textarea>
-                    <button onclick="executeQuery()">Execute Query</button>
-                    <h2>Result:</h2>
-                    <pre id="result"></pre>
-                    
-                    <script>
-                        function executeQuery() {
-                            const query = document.getElementById('queryInput').value;
-                            if (!query) return;
-                            
-                            document.getElementById('result').textContent = 'Executing query...';
-                            
-                            fetch(`/query?q=${encodeURIComponent(query)}`)
-                                .then(response => response.text())
-                                .then(data => {
-                                    document.getElementById('result').textContent = data;
-                                })
-                                .catch(error => {
-                                    document.getElementById('result').textContent = 'Error: ' + error;
-                                });
-                        }
-                    </script>
-                </body>
-                </html>
-                """.formatted(file.getFileName());
+        // load from resources file webui.html
+        var resource = this.getClass().getResource("/webui.html");
+        if (resource == null) {
+            return "<html><body><h1>Error: Web UI not found</h1></body></html>";
+        }
+        try (var stream = resource.openStream()) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

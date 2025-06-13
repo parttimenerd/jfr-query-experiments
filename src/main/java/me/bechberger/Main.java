@@ -29,7 +29,7 @@ public class Main implements Callable<Integer> {
     private static String INFO = """
             Before using this tool, you must have a recording file.
             A file can be created by starting a recording from command line:
-
+            
              java -XX:StartFlightRecording:filename=recording.jfr,duration=30s ...
             
             A recording can also be started on an already running Java Virtual Machine:

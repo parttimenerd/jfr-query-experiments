@@ -65,39 +65,39 @@ public final class QueryCommand implements Callable<Integer>, Footerable {
     @Override
     public String footer() {
         return """
-            Examples:
-              $ jcmd <pid> JFR.query "types"
-
-              $ jcmd <pid> JFR.query "SHOW FIELDS ObjectAllocationSample"
-
-              $ jcmd <pid> JFR.query "SELECT * FROM ObjectAllocationSample"
-                            verbose=true maxsize=10M
-
-              $ jcmd <pid> JFR.query "SELECT pid, path FROM SystemProcess"
-                            width=100
-
-              $ jcmd <pid> JFR.query "SELECT stackTrace.topFrame AS T, SUM(weight)
-                            FROM ObjectAllocationSample GROUP BY T"
-                            maxage=100s
-
-              $ jcmd <pid> JFR.query "CAPTION 'Method', 'Percentage'
-                            FORMAT default, normalized;width:10
-                            SELECT stackTrace.topFrame AS T, COUNT(*) AS C
-                            GROUP BY T
-                            FROM ExecutionSample ORDER BY C DESC"
-
-              $ jcmd <pid> JFR.query "CAPTION 'Start', 'GC ID', 'Heap Before GC',
-                            'Heap After GC', 'Longest Pause'
-                            SELECT G.startTime, G.gcId, B.heapUsed,
-                                   A.heapUsed, longestPause
-                            FROM GarbageCollection AS G,
-                                 GCHeapSummary AS B,
-                                 GCHeapSummary AS A
-                            WHERE B.when = 'Before GC' AND A.when = 'After GC'
-                            GROUP BY gcId
-                            ORDER BY G.startTime"
-
-            """ + QueryPrinter.getGrammarText();
+                Examples:
+                  $ java -jar query.jar query "types"
+                
+                  $ java -jar query.jar query "SHOW FIELDS ObjectAllocationSample"
+                
+                  $ java -jar query.jar query "SELECT * FROM ObjectAllocationSample"
+                                verbose=true maxsize=10M
+                
+                  $ java -jar query.jar query "SELECT pid, path FROM SystemProcess"
+                                width=100
+                
+                  $ java -jar query.jar query "SELECT stackTrace.topFrame AS T, SUM(weight)
+                                FROM ObjectAllocationSample GROUP BY T"
+                                maxage=100s
+                
+                  $ java -jar query.jar query "CAPTION 'Method', 'Percentage'
+                                FORMAT default, normalized;width:10
+                                SELECT stackTrace.topFrame AS T, COUNT(*) AS C
+                                GROUP BY T
+                                FROM ExecutionSample ORDER BY C DESC"
+                
+                  $ java -jar query.jar query "CAPTION 'Start', 'GC ID', 'Heap Before GC',
+                                'Heap After GC', 'Longest Pause'
+                                SELECT G.startTime, G.gcId, B.heapUsed,
+                                       A.heapUsed, longestPause
+                                FROM GarbageCollection AS G,
+                                     GCHeapSummary AS B,
+                                     GCHeapSummary AS A
+                                WHERE B.when = 'Before GC' AND A.when = 'After GC'
+                                GROUP BY gcId
+                                ORDER BY G.startTime"
+                
+                """ + QueryPrinter.getGrammarText();
     }
 
     @Override

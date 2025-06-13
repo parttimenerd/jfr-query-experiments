@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JFR Query Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+        .controls-container {
+            display: flex;
+            margin-bottom: 10px;
+            gap: 10px;
+        }
+        .query-area {
+            flex-grow: 1;
+        }
+        #queryInput {
+            width: 100%;
+            font-family: monospace;
+            padding: 8px;
+            box-sizing: border-box;
+            height: 100px;
+        }
+        #previousQueries {
+            width: 100%;
+            margin-bottom: 5px;
+            padding: 5px;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 5px;
+        }
+        #executeButton {
+            padding: 8px 15px;
+        }
+        .auto-query {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #result {
+            font-family: monospace;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            height: calc(100vh - 250px);
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+<h1>JFR Query Tool <small>(experimental, <a
+        href="https://github.com/parttimenerd/jfr-query-experiments">GitHub</a>)</small></h1>
+
+<div class="controls-container">
+    <div class="query-area">
+        <select id="previousQueries" onchange="selectPreviousQuery()">
+            <option value="">-- Select a previous or sample query --</option>
+        </select>
+        <textarea id="queryInput" placeholder="Enter your JFR query here..."></textarea>
+    </div>
+    <div class="buttons">
+        <div class="auto-query">
+            <input type="checkbox" id="autoQuery">
+            <label for="autoQuery">Auto query</label>
+        </div>
+        <button id="executeButton" onclick="executeQuery()" title="Launch query, CTRL+Enter">Query</button>
+    </div>
+</div>
+
+<div id="result">Results will appear here</div>
+
+<script>
+    let previousQueries = new Set();
+    let autoQueryInterval = null;
+    let lastExecutedQuery = "";
+
+    // Add sample queries to the dropdown initially
+    const sampleQueries = [
+        "grammar",
+        "views",
+        "SHOW EVENTS",
+        "SHOW FIELDS jdk.GarbageCollection",
+        "SELECT * FROM jdk.GarbageCollection",
+        "SELECT startTime, duration FROM jdk.GarbageCollection",
+        "SELECT pid, path FROM SystemProcess",
+        "SELECT stackTrace.topFrame AS T, SUM(weight) FROM ObjectAllocationSample GROUP BY T",
+        "CAPTION 'Method', 'Percentage' FORMAT default, normalized;width:10 SELECT stackTrace.topFrame AS T, COUNT(*) AS C GROUP BY T FROM ExecutionSample ORDER BY C DESC",
+        "CAPTION 'Start', 'GC ID', 'Heap Before GC', 'Heap After GC', 'Longest Pause' SELECT G.startTime, G.gcId, B.heapUsed, A.heapUsed, longestPause FROM GarbageCollection AS G, GCHeapSummary AS B, GCHeapSummary AS A WHERE B.when = 'Before GC' AND A.when = 'After GC' GROUP BY gcId ORDER BY G.startTime"
+    ];
+
+    sampleQueries.forEach(query => previousQueries.add(query));
+
+    function updatePreviousQueriesDropdown() {
+        const select = document.getElementById('previousQueries');
+
+        // Remove all options except the first placeholder option
+        while (select.options.length > 1) {
+            select.remove(1);
+        }
+
+        // Add the special options
+        const specialOptions = ["grammar", "views"];
+        specialOptions.forEach(query => {
+            if (!previousQueries.has(query)) {
+                const option = document.createElement('option');
+                option.value = query;
+                option.text = query;
+                select.add(option);
+            }
+        });
+
+        // Add user's previous queries
+        Array.from(previousQueries).sort().forEach(query => {
+            const option = document.createElement('option');
+            option.value = query;
+            option.text = query.length > 50 ? query.substring(0, 50) + '...' : query;
+            select.add(option);
+        });
+    }
+
+    updatePreviousQueriesDropdown();
+
+    // Update the keydown handler to ensure Ctrl+Enter works properly
+    document.getElementById('queryInput').addEventListener('keydown', function(e) {
+        if ((e.key === 'Enter' || e.keyCode === 13) && (e.ctrlKey || e.metaKey)) {
+            console.log('Ctrl+Enter pressed, executing query...');
+            executeQuery(true);
+            e.preventDefault();
+            return false;
+        }
+    });
+
+    // Modify executeQuery to accept a parameter that controls adding to history
+    function executeQuery(addToHistory = false) {
+        const query = document.getElementById('queryInput').value;
+        if (!query) return;
+
+        // Skip if this exact query was just executed
+        if (query === lastExecutedQuery) return;
+
+        lastExecutedQuery = query;
+
+        // Only add to history if explicitly requested (via button click)
+        if (addToHistory && !previousQueries.has(query)) {
+            previousQueries.add(query);
+            updatePreviousQueriesDropdown();
+        }
+
+        document.getElementById('result').textContent = 'Executing query...';
+
+        fetch(`/query?q=${encodeURIComponent(query)}`)
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('result').textContent = data;
+            })
+            .catch(error => {
+                document.getElementById('result').textContent = 'Error: ' + error;
+            });
+    }
+
+    function checkAndExecuteQuery() {
+        const query = document.getElementById('queryInput').value;
+        if (query && query !== lastExecutedQuery) {
+            // Don't add to history during auto-query
+            executeQuery(false);
+        }
+    }
+
+    // Update the button onclick attribute to pass true for addToHistory
+    document.getElementById('executeButton').onclick = function() {
+        executeQuery(true);
+    };
+
+    // Update the keydown handler to match button behavior
+    document.getElementById('queryInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && e.ctrlKey) {
+            executeQuery(true);
+            e.preventDefault();
+        }
+    });
+
+    // Update selectPreviousQuery function to match the new parameter
+    function selectPreviousQuery() {
+        const select = document.getElementById('previousQueries');
+        const query = select.value;
+        if (query) {
+            document.getElementById('queryInput').value = query;
+            select.selectedIndex = 0;
+
+            if (document.getElementById('autoQuery').checked) {
+                executeQuery(false);
+            }
+        }
+    }
+</script>
+</body>
+</html>

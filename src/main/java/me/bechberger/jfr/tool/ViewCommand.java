@@ -88,17 +88,17 @@ public final class ViewCommand implements Callable<Integer>, Footerable {
                 or 'all-events' to display all events.
                 Examples:
                   $ jfr view gc recording.jfr
-
+                
                   $ jfr view --width 160 hot-methods recording.jfr
-
+                
                   $ jfr view --verbose allocation-by-class recording.jfr
-
+                
                   $ jfr view contention-by-site recording.jfr
-
+                
                   $ jfr view jdk.GarbageCollection recording.jfr
-
+                
                   $ jfr view --cell-height 10 ThreadStart recording.jfr
-
+                
                   $ jfr view --truncate beginning SystemProcess recording.jfr
                 """.formatted(ViewPrinter.getAvailableViews());
     }
