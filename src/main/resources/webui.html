@@ -55,6 +55,57 @@
             padding: 10px;
             background-color: #f5f5f5;
         }
+        
+        /* Syntax highlighting styles */
+        .syntax-highlighter-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100px;
+        }
+        
+        #highlightDiv {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            font-family: monospace;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            background-color: white;
+            white-space: pre-wrap;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 1;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        
+        #queryInput.highlighted {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            font-family: monospace;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            background-color: transparent;
+            color: transparent;
+            caret-color: black;
+            resize: none;
+            z-index: 2;
+        }
+        
+        .sql-keyword { color: #0066cc; font-weight: bold; }
+        .sql-function { color: #cc6600; font-weight: bold; }
+        .sql-string { color: #009900; }
+        .sql-field { color: #660066; }
+        .sql-operator { color: #cc0000; }
+        .sql-number { color: #ff6600; }
+        .sql-comment { color: #999999; font-style: italic; }
     </style>
 </head>
 <body>
@@ -83,6 +134,7 @@
     let previousQueries = new Set();
     let autoQueryInterval = null;
     let lastExecutedQuery = "";
+    let queryInput, highlightDiv;
 
     // Add sample queries to the dropdown initially
     const sampleQueries = [
@@ -99,6 +151,85 @@
     ];
 
     sampleQueries.forEach(query => previousQueries.add(query));
+
+    // Syntax highlighting functions
+    function createSyntaxHighlighter() {
+        const originalQueryInput = document.getElementById('queryInput');
+        const container = originalQueryInput.parentNode;
+        
+        // Create wrapper for the highlighter
+        const wrapper = document.createElement('div');
+        wrapper.className = 'syntax-highlighter-wrapper';
+        
+        // Create highlighted background div
+        const highlightDiv = document.createElement('div');
+        highlightDiv.id = 'highlightDiv';
+        
+        // Update textarea classes
+        originalQueryInput.className = 'highlighted';
+        
+        // Replace textarea with wrapper
+        container.replaceChild(wrapper, originalQueryInput);
+        wrapper.appendChild(highlightDiv);
+        wrapper.appendChild(originalQueryInput);
+        
+        return { queryInput: originalQueryInput, highlightDiv };
+    }
+
+    function highlightSyntax(text) {
+        // Define keywords and patterns
+        const keywords = [
+            'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT',
+            'COLUMN', 'CAPTION', 'FORMAT', 'AS', 'AND', 'ASC', 'DESC',
+            'SHOW EVENTS', 'SHOW FIELDS'
+        ];
+        
+        const functions = [
+            'AVG', 'COUNT', 'DIFF', 'FIRST', 'LAST', 'LAST_BATCH',
+            'LIST', 'MAX', 'MEDIAN', 'MIN', 'P90', 'P95', 'P99', 'P999',
+            'STDEV', 'SUM', 'UNIQUE'
+        ];
+        
+        // Escape HTML first
+        text = text.replace(/[<>&]/g, function(match) {
+            return {'<': '&lt;', '>': '&gt;', '&': '&amp;'}[match];
+        });
+        
+        // Highlight strings (single quotes) - do this early to protect quoted content
+        text = text.replace(/'([^']*)'/g, '<span class="sql-string">\'$1\'</span>');
+        
+        // Highlight numbers
+        text = text.replace(/\b\d+\b/g, '<span class="sql-number">$&</span>');
+        
+        // Highlight keywords (case insensitive)
+        keywords.forEach(keyword => {
+            const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+            text = text.replace(regex, '<span class="sql-keyword">$&</span>');
+        });
+        
+        // Highlight functions (only when followed by opening parenthesis)
+        functions.forEach(func => {
+            const regex = new RegExp(`\\b${func}\\b(?=\\s*\\()`, 'gi');
+            text = text.replace(regex, '<span class="sql-function">$&</span>');
+        });
+        
+        // Highlight operators - be more specific to avoid breaking HTML attributes
+        // Only match operators that are not part of HTML tags
+        text = text.replace(/(?<!<[^>]*)\b=\b(?![^<]*>)/g, '<span class="sql-operator">=</span>');
+        text = text.replace(/(?<!<[^>]*),(?![^<]*>)/g, '<span class="sql-operator">,</span>');
+        text = text.replace(/(?<!<[^>]*)\((?![^<]*>)/g, '<span class="sql-operator">(</span>');
+        text = text.replace(/(?<!<[^>]*)\)(?![^<]*>)/g, '<span class="sql-operator">)</span>');
+        text = text.replace(/(?<!<[^>]*)\*(?![^<]*>)/g, '<span class="sql-operator">*</span>');
+        text = text.replace(/(?<!<[^>]*);(?![^<]*>)/g, '<span class="sql-operator">;</span>');
+        
+        return text;
+    }
+
+    function updateHighlighting() {
+        const text = queryInput.value;
+        const highlighted = highlightSyntax(text);
+        highlightDiv.innerHTML = highlighted;
+    }
 
     function updatePreviousQueriesDropdown() {
         const select = document.getElementById('previousQueries');
@@ -130,8 +261,23 @@
 
     updatePreviousQueriesDropdown();
 
+    // Initialize syntax highlighter
+    const highlighterElements = createSyntaxHighlighter();
+    queryInput = highlighterElements.queryInput;
+    highlightDiv = highlighterElements.highlightDiv;
+
+    // Add event listeners for real-time highlighting
+    queryInput.addEventListener('input', updateHighlighting);
+    queryInput.addEventListener('scroll', function() {
+        highlightDiv.scrollTop = queryInput.scrollTop;
+        highlightDiv.scrollLeft = queryInput.scrollLeft;
+    });
+
+    // Initial highlighting
+    updateHighlighting();
+
     // Update the keydown handler to ensure Ctrl+Enter works properly
-    document.getElementById('queryInput').addEventListener('keydown', function(e) {
+    queryInput.addEventListener('keydown', function(e) {
         if ((e.key === 'Enter' || e.keyCode === 13) && (e.ctrlKey || e.metaKey)) {
             console.log('Ctrl+Enter pressed, executing query...');
             executeQuery(true);
@@ -142,7 +288,7 @@
 
     // Modify executeQuery to accept a parameter that controls adding to history
     function executeQuery(addToHistory = false) {
-        const query = document.getElementById('queryInput').value;
+        const query = queryInput.value;
         if (!query) return;
 
         // Skip if this exact query was just executed
@@ -169,7 +315,7 @@
     }
 
     function checkAndExecuteQuery() {
-        const query = document.getElementById('queryInput').value;
+        const query = queryInput.value;
         if (query && query !== lastExecutedQuery) {
             // Don't add to history during auto-query
             executeQuery(false);
@@ -182,7 +328,7 @@
     };
 
     // Update the keydown handler to match button behavior
-    document.getElementById('queryInput').addEventListener('keydown', function(e) {
+    queryInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && e.ctrlKey) {
             executeQuery(true);
             e.preventDefault();
@@ -194,8 +340,9 @@
         const select = document.getElementById('previousQueries');
         const query = select.value;
         if (query) {
-            document.getElementById('queryInput').value = query;
+            queryInput.value = query;
             select.selectedIndex = 0;
+            updateHighlighting(); // Trigger highlighting update
 
             if (document.getElementById('autoQuery').checked) {
                 executeQuery(false);
