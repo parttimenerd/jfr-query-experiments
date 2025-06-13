@@ -1,0 +1,196 @@
+package me.bechberger.jfr.tool;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import jdk.jfr.consumer.EventStream;
+import me.bechberger.jfr.query.Configuration;
+import me.bechberger.jfr.query.QueryPrinter;
+import me.bechberger.jfr.util.Output.BufferedPrinter;
+
+import picocli.CommandLine;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.io.StringWriter;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.Callable;
+
+@CommandLine.Command(
+        name = "web",
+        mixinStandardHelpOptions = true,
+        description = "Start a web server to query JFR files"
+)
+public class WebCommand implements Callable<Integer>, Footerable {
+
+    @CommandLine.Mixin
+    private ConfigOptions configOptions;
+
+    @CommandLine.Option(names = "--port", description = "Port to run the web server on (default: 8080)")
+    private int port = 8080;
+
+    @CommandLine.Option(names = "--host", description = "Host to bind the web server to (default: localhost)")
+    private String host = "localhost";
+
+    @CommandLine.Parameters(index = "0", description = "The JFR file to serve")
+    private Path file;
+
+    @Override
+    public Integer call() {
+        try {
+
+            // Validate file exists
+            if (!file.toFile().exists()) {
+                System.err.println("Error: File not found: " + file);
+                return 1;
+            }
+
+            // Start HTTP server
+            HttpServer server = HttpServer.create(new InetSocketAddress(host, port), 0);
+
+            // Add query endpoint
+            server.createContext("/query", exchange -> handleQueryRequest(exchange, file));
+
+            // Add root endpoint with simple UI
+            server.createContext("/", exchange -> {
+                String response = getSimpleUI();
+                exchange.getResponseHeaders().set("Content-Type", "text/html");
+                exchange.sendResponseHeaders(200, response.length());
+                try (var os = exchange.getResponseBody()) {
+                    os.write(response.getBytes());
+                }
+            });
+
+            server.start();
+            System.out.printf("Web server started at http://%s:%d%n", host, port);
+            System.out.println("Press Ctrl+C to stop");
+
+            // Keep the application running
+            Thread.currentThread().join();
+
+            return 0;
+        } catch (Exception e) {
+            System.err.println("Error starting server: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    private void handleQueryRequest(HttpExchange exchange, Path file) throws IOException {
+        try {
+            // Parse query parameters
+            Map<String, String> params = parseQueryParameters(exchange.getRequestURI());
+            String query = params.get("q");
+
+            if (query == null || query.isBlank()) {
+                sendResponse(exchange, 400, "Missing query parameter 'q'");
+                return;
+            }
+
+            // Execute query
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+            BufferedPrinter printer = new BufferedPrinter(new PrintStream(buffer));
+            // Initialize configuration
+            Configuration configuration = new Configuration();
+            configOptions.init(configuration);
+            configuration.output = printer;
+
+            try (EventStream stream = EventStream.openFile(file)) {
+                QueryPrinter queryPrinter = new QueryPrinter(configuration, stream);
+                queryPrinter.execute(query);
+                printer.flush();
+                exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                sendResponse(exchange, 200, buffer.toString());
+            } catch (Exception e) {
+                sendResponse(exchange, 400, "Query error: " + e.getMessage());
+            }
+        } catch (Exception e) {
+            sendResponse(exchange, 500, "Server error: " + e.getMessage());
+        }
+    }
+
+    private Map<String, String> parseQueryParameters(URI uri) {
+        Map<String, String> params = new HashMap<>();
+        String query = uri.getQuery();
+
+        if (query != null && !query.isEmpty()) {
+            String[] pairs = query.split("&");
+            for (String pair : pairs) {
+                int idx = pair.indexOf("=");
+                if (idx > 0) {
+                    String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8);
+                    String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8);
+                    params.put(key, value);
+                }
+            }
+        }
+
+        return params;
+    }
+
+    private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
+        exchange.sendResponseHeaders(statusCode, response.length());
+        try (var os = exchange.getResponseBody()) {
+            os.write(response.getBytes());
+        }
+    }
+
+    private String getSimpleUI() {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>JFR Query Tool</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 20px; }
+                        textarea { width: 100%; height: 100px; }
+                        button { padding: 10px; margin-top: 10px; }
+                        pre { background-color: #f5f5f5; padding: 10px; white-space: pre-wrap; }
+                    </style>
+                </head>
+                <body>
+                    <h1>JFR Query Tool</h1>
+                    <p>File: %s</p>
+                    <textarea id="queryInput" placeholder="Enter your JFR query here..."></textarea>
+                    <button onclick="executeQuery()">Execute Query</button>
+                    <h2>Result:</h2>
+                    <pre id="result"></pre>
+                    
+                    <script>
+                        function executeQuery() {
+                            const query = document.getElementById('queryInput').value;
+                            if (!query) return;
+                            
+                            document.getElementById('result').textContent = 'Executing query...';
+                            
+                            fetch(`/query?q=${encodeURIComponent(query)}`)
+                                .then(response => response.text())
+                                .then(data => {
+                                    document.getElementById('result').textContent = data;
+                                })
+                                .catch(error => {
+                                    document.getElementById('result').textContent = 'Error: ' + error;
+                                });
+                        }
+                    </script>
+                </body>
+                </html>
+                """.formatted(file.getFileName());
+    }
+
+    @Override
+    public String footer() {
+        return """
+                Examples:
+                  $ jfr web recording.jfr
+                  $ jfr web --port 9090 recording.jfr
+                  $ jfr web --host 0.0.0.0 --port 8000 recording.jfr
+                """;
+    }
+}
