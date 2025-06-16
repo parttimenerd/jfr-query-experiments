@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <title>JFR Query Tool</title>
+    <!-- Add Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -377,6 +381,71 @@
             color: #1976d2;
             font-weight: bold;
         }
+
+        /* Add graph container styles */
+        .graph-container {
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            display: none; /* Hidden by default */
+        }
+
+        .graph-controls {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+            background-color: white;
+            border-radius: 4px 4px 0 0;
+        }
+
+        .graph-controls label {
+            margin-right: 15px;
+            font-weight: bold;
+        }
+
+        .column-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .column-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            background-color: #f0f0f0;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .column-checkbox input[type="checkbox"] {
+            margin: 0;
+        }
+
+        .graph-canvas-container {
+            padding: 10px;
+            height: 400px;
+            position: relative;
+        }
+
+        #graphCanvas {
+            max-height: 380px;
+        }
+
+        .graph-status {
+            padding: 10px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .auto-query {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
     </style>
 </head>
 <body>
@@ -407,6 +476,19 @@
 </div>
 
 <div id="result">Results will appear here</div>
+
+<div class="graph-container" id="graphContainer">
+    <div class="graph-controls">
+        <label>Graph Controls:</label>
+        <button onclick="resetGraphZoom()" style="margin-right: 10px;">Reset Zoom</button>
+        <span style="margin-right: 10px;">Columns:</span>
+        <div class="column-selector"></div>
+    </div>
+    <div class="graph-canvas-container">
+        <canvas id="graphCanvas"></canvas>
+        <div class="graph-status">No data to display</div>
+    </div>
+</div>
 
 <script>
     let previousQueries = new Set();
@@ -466,6 +548,7 @@
             "SHOW FIELDS jdk.GarbageCollection",
 
             // Simple query strings
+            "SELECT * FROM CPULoad",
             "SELECT * FROM GarbageCollection",
             "SELECT * FROM ExecutionSample",
             "SELECT * FROM ObjectAllocationSample",
@@ -784,6 +867,245 @@
         return html;
     }
 
+    function parseValueWithUnit(value) {
+        if (!value || value === '-' || value === '') return NaN;
+
+        // Remove any whitespace
+        value = value.trim();
+
+        // Handle pure numbers
+        const pureNumber = parseFloat(value);
+        if (!isNaN(pureNumber) && value.match(/^-?\d+([.,]\d+)?$/)) {
+            return pureNumber;
+        }
+
+        // Handle time units (ns, μs, ms, s, m, h, d)
+        const timeMatch = value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
+        if (timeMatch) {
+            const num = parseFloat(timeMatch[1]);
+            const unit = timeMatch[2].toLowerCase();
+
+            // Convert to consistent unit (milliseconds)
+            switch (unit) {
+                case 'ns': return num / 1000000;
+                case 'μs': return num / 1000;
+                case 'ms': return num;
+                case 's': return num * 1000;
+                case 'm': return num * 60000;
+                case 'h': return num * 3600000;
+                case 'd': return num * 86400000;
+                default: return num;
+            }
+        }
+
+        // Handle memory units (B, KB, MB, GB, TB, KiB, MiB, GiB, TiB)
+        const memoryMatch = value.match(/^(\d+(?:[.,]\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i);
+        if (memoryMatch) {
+            const num = parseFloat(memoryMatch[1]);
+            const unit = memoryMatch[2].toLowerCase();
+
+            // Convert to bytes
+            const multipliers = {
+                'b': 1,
+                'kb': 1000, 'kib': 1024,
+                'mb': 1000000, 'mib': 1048576,
+                'gb': 1000000000, 'gib': 1073741824,
+                'tb': 1000000000000, 'tib': 1099511627776
+            };
+
+            return num * (multipliers[unit] || 1);
+        }
+
+        // Handle percentages
+        const percentMatch = value.match(/^(\d+(?:[.,]\d+)?)\s*%$/);
+        if (percentMatch) {
+            return parseFloat(percentMatch[1].replace(",", "."));
+        }
+
+        // Handle comma-separated numbers (like 1,234,567)
+        const commaNumber = value.replace(/,/g, '');
+        const commaNumberParsed = parseFloat(commaNumber);
+        if (!isNaN(commaNumberParsed)) {
+            return commaNumberParsed;
+        }
+
+        return NaN;
+    }
+
+    function parseTabularData(data) {
+        const lines = data.split('\n');
+        let headerLine = '';
+        let separatorLine = '';
+        let dataLines = [];
+        let separatorIndex = -1;
+
+        // Find the separator line
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.match(/^-+(\s+-+)+$/)) {
+                separatorIndex = i;
+                separatorLine = line;
+                if (i > 0) {
+                    headerLine = lines[i - 1];
+                }
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (lines[j].trim()) {
+                        dataLines.push(lines[j]);
+                    }
+                }
+                break;
+            }
+        }
+
+        if (separatorIndex === -1 || !headerLine) {
+            return data; // Not a valid table format, return original
+        }
+
+        // Parse column positions
+        const columnPositions = [];
+        let currentStart = -1;
+        let inColumn = false;
+
+        for (let i = 0; i < separatorLine.length; i++) {
+            const char = separatorLine[i];
+            if (char === '-') {
+                if (!inColumn) {
+                    inColumn = true;
+                    currentStart = i;
+                }
+            } else if (char === ' ') {
+                if (inColumn) {
+                    columnPositions.push({
+                        start: currentStart,
+                        end: i - 1,
+                        width: i - currentStart
+                    });
+                    inColumn = false;
+                }
+            }
+        }
+
+        if (inColumn) {
+            columnPositions.push({
+                start: currentStart,
+                end: separatorLine.length - 1,
+                width: separatorLine.length - currentStart
+            });
+        }
+
+        // Parse headers
+        const headers = [];
+        for (const col of columnPositions) {
+            const headerText = headerLine.substring(col.start, col.end + 1);
+            headers.push(headerText.trim());
+        }
+
+        // Generate HTML table
+        let html = '<table class="jfr-table sortable-table">';
+
+        // Table header
+        html += '<thead><tr>';
+        for (const header of headers) {
+            const sortType = detectSortType(dataLines, columnPositions[headers.indexOf(header)]);
+            html += `<th data-sort="${sortType}">${escapeHtml(header)} <span class="sort-indicator"></span></th>`;
+        }
+        html += '</tr></thead>';
+
+        // Table body
+        html += '<tbody>';
+        for (const line of dataLines) {
+            html += '<tr>';
+            for (const col of columnPositions) {
+                const cellText = line.substring(col.start, Math.min(col.end + 1, line.length));
+                const trimmedCell = cellText.trim();
+                const numericValue = parseValueWithUnit(trimmedCell);
+                const dataValue = !isNaN(numericValue) ? numericValue : trimmedCell;
+
+                html += `<td data-value="${escapeHtml(dataValue.toString())}">${escapeHtml(trimmedCell)}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        return html;
+    }
+
+    function detectSortType(dataLines, columnPosition) {
+        // Sample a few values to determine the sort type
+        const sampleSize = Math.min(5, dataLines.length);
+        let numericCount = 0;
+
+        for (let i = 0; i < sampleSize; i++) {
+            const line = dataLines[i];
+            const cellText = line.substring(columnPosition.start, Math.min(columnPosition.end + 1, line.length));
+            const trimmedCell = cellText.trim();
+
+            if (trimmedCell && trimmedCell !== '-') {
+                const numericValue = parseValueWithUnit(trimmedCell);
+                if (!isNaN(numericValue)) {
+                    numericCount++;
+                }
+            }
+        }
+
+        // If more than half the sampled values are numeric, treat as number
+        return numericCount > sampleSize / 2 ? 'number' : 'string';
+    }
+
+    function makeSortable(table) {
+        const headers = table.querySelectorAll('th[data-sort]');
+
+        headers.forEach((header, index) => {
+            header.addEventListener('click', () => {
+                const sortType = header.getAttribute('data-sort');
+                const tbody = table.querySelector('tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+
+                // Determine sort direction
+                const isCurrentlyAsc = header.classList.contains('sort-asc');
+                const sortAsc = !isCurrentlyAsc;
+
+                // Clear all sort classes
+                headers.forEach(h => {
+                    h.classList.remove('sort-asc', 'sort-desc');
+                    const indicator = h.querySelector('.sort-indicator');
+                    if (indicator) indicator.textContent = '';
+                });
+
+                // Set current sort class and indicator
+                header.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+                const indicator = header.querySelector('.sort-indicator');
+                if (indicator) {
+                    indicator.textContent = sortAsc ? '↑' : '↓';
+                }
+
+                // Sort rows
+                rows.sort((a, b) => {
+                    const aCell = a.children[index];
+                    const bCell = b.children[index];
+
+                    let aValue = aCell.getAttribute('data-value') || aCell.textContent.trim();
+                    let bValue = bCell.getAttribute('data-value') || bCell.textContent.trim();
+
+                    if (sortType === 'number') {
+                        aValue = parseFloat(aValue) || 0;
+                        bValue = parseFloat(bValue) || 0;
+                        return sortAsc ? aValue - bValue : bValue - aValue;
+                    } else {
+                        aValue = aValue.toLowerCase();
+                        bValue = bValue.toLowerCase();
+                        if (aValue < bValue) return sortAsc ? -1 : 1;
+                        if (aValue > bValue) return sortAsc ? 1 : -1;
+                        return 0;
+                    }
+                });
+
+                // Re-append sorted rows
+                rows.forEach(row => tbody.appendChild(row));
+            });
+        });
+    }
+
     // Enhanced executeQuery to handle SHOW FIELDS formatting
     function executeQuery(addToHistory = false) {
         const query = queryInput.value;
@@ -810,6 +1132,10 @@
             .then(data => {
                 const resultDiv = document.getElementById('result');
                 const formatOutputEnabled = document.getElementById('formatTables').checked;
+                const showGraphEnabled = document.getElementById('showGraph') ? document.getElementById('showGraph').checked : false;
+
+                // Store raw data for potential graph use
+                let rawTableData = null;
 
                 // Apply different formatting based on query type and format setting
                 if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
@@ -819,9 +1145,34 @@
                 } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
                     resultDiv.innerHTML = parseShowFieldsData(data);
                 } else if (formatOutputEnabled && isTabularData(data)) {
+                    rawTableData = data; // Store for graph
                     resultDiv.innerHTML = parseTabularData(data);
                 } else {
+                    if (isTabularData(data)) {
+                        rawTableData = data; // Store for graph even if formatting is off
+                    }
                     resultDiv.textContent = data;
+                }
+
+
+                graphData = parseDataForGraph(data);
+                console.log('Graph data:', graphData);
+
+
+                // Handle graph display
+                if (showGraphEnabled && rawTableData && isTabularData(rawTableData)) {
+                    if (graphContainer) {
+                        graphContainer.style.display = 'block';
+                        createGraph(graphData);
+                    }
+                } else {
+                    if (graphContainer) {
+                        graphContainer.style.display = 'none';
+                    }
+                    if (graphChart) {
+                        graphChart.destroy();
+                        graphChart = null;
+                    }
                 }
 
                 // Make tables sortable after rendering
@@ -840,117 +1191,38 @@
             })
             .catch(error => {
                 document.getElementById('result').textContent = 'Error: ' + error;
+                // Hide graph on error
+                if (graphContainer) {
+                    graphContainer.style.display = 'none';
+                }
+                if (graphChart) {
+                    graphChart.destroy();
+                    graphChart = null;
+                }
             });
     }
 
-    // Function to parse values with units for proper sorting
-    function parseValueWithUnit(value) {
-        if (!value || value === '-') return 0;
+    let graphChart = null;
+    let graphContainer = null;
+    let graphCanvas = null;
+    let graphData = null;
+    let graphParseCache = new Map();
+    const MAX_GRAPH_CACHE_SIZE = 20;
 
-        const str = value.toString().trim();
-
-        // Time units (convert to milliseconds for comparison)
-        const timeMatch = str.match(/^(\d+(?:\.\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
-        if (timeMatch) {
-            const num = parseFloat(timeMatch[1]);
-            const unit = timeMatch[2].toLowerCase();
-
-            switch (unit) {
-                case 'ns': return num / 1000000; // nanoseconds to milliseconds
-                case 'μs': return num / 1000;    // microseconds to milliseconds
-                case 'ms': return num;           // milliseconds
-                case 's': return num * 1000;     // seconds to milliseconds
-                case 'm': return num * 60000;    // minutes to milliseconds
-                case 'h': return num * 3600000;  // hours to milliseconds
-                case 'd': return num * 86400000; // days to milliseconds
-                default: return num;
-            }
+    function parseDataForGraph(data) {
+        // Check cache first
+        const cacheKey = data.substring(0, 1000); // Use first 1000 chars as cache key
+        if (graphParseCache.has(cacheKey)) {
+            return graphParseCache.get(cacheKey);
         }
 
-        // Memory units (convert to bytes for comparison)
-        const memoryMatch = str.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i);
-        if (memoryMatch) {
-            const num = parseFloat(memoryMatch[1]);
-            const unit = memoryMatch[2].toLowerCase();
-
-            switch (unit) {
-                case 'b': return num;                    // bytes
-                case 'kb': return num * 1000;           // kilobytes (decimal)
-                case 'mb': return num * 1000000;        // megabytes (decimal)
-                case 'gb': return num * 1000000000;     // gigabytes (decimal)
-                case 'tb': return num * 1000000000000;  // terabytes (decimal)
-                case 'kib': return num * 1024;          // kibibytes (binary)
-                case 'mib': return num * 1048576;       // mebibytes (binary)
-                case 'gib': return num * 1073741824;    // gibibytes (binary)
-                case 'tib': return num * 1099511627776; // tebibytes (binary)
-                default: return num;
-            }
-        }
-
-        // Percentage values
-        const percentMatch = str.match(/^(\d+(?:\.\d+)?)\s*%$/);
-        if (percentMatch) {
-            return parseFloat(percentMatch[1]);
-        }
-
-        // Regular numbers (including decimals)
-        const numberMatch = str.match(/^(\d+(?:\.\d+)?)$/);
-        if (numberMatch) {
-            return parseFloat(numberMatch[1]);
-        }
-
-        // If no pattern matches, return 0 for consistent sorting
-        return 0;
-    }
-
-    // Enhanced function to detect data types including units
-    function detectDataType(values) {
-        let hasNumbers = 0;
-        let hasUnits = 0;
-        let hasText = 0;
-
-        for (const value of values) {
-            if (!value || value === '-') continue;
-
-            const str = value.toString().trim();
-
-            // Check for time/memory units or percentages
-            if (str.match(/^(\d+(?:\.\d+)?)\s*(ns|μs|ms|s|m|h|d|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB|%)$/i)) {
-                hasUnits++;
-            }
-            // Check for plain numbers
-            else if (str.match(/^\d+(?:\.\d+)?$/)) {
-                hasNumbers++;
-            }
-            // Everything else is text
-            else {
-                hasText++;
-            }
-        }
-
-        // If most values have units, treat as numeric with units
-        if (hasUnits > hasText && hasUnits > hasNumbers / 2) {
-            return 'number';
-        }
-        // If most values are plain numbers, treat as numeric
-        else if (hasNumbers > hasText) {
-            return 'number';
-        }
-        // Otherwise treat as string
-        else {
-            return 'string';
-        }
-    }
-
-    // Enhanced parseTabularData function with better data type detection
-    function parseTabularData(data) {
         const lines = data.split('\n');
         let headerLine = '';
         let separatorLine = '';
         let dataLines = [];
         let separatorIndex = -1;
 
-        // Find the separator line (line with dashes)
+        // Find the separator line (reuse existing logic)
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line.match(/^-+(\s+-+)+$/)) {
@@ -959,7 +1231,6 @@
                 if (i > 0) {
                     headerLine = lines[i - 1];
                 }
-                // Collect data lines after separator
                 for (let j = i + 1; j < lines.length; j++) {
                     if (lines[j].trim()) {
                         dataLines.push(lines[j]);
@@ -970,10 +1241,10 @@
         }
 
         if (separatorIndex === -1 || !headerLine) {
-            return data; // Not a valid table format
+            return null; // Not a valid table format
         }
 
-        // Parse column positions from separator line
+        // Parse column positions (reuse existing logic)
         const columnPositions = [];
         let currentStart = -1;
         let inColumn = false;
@@ -997,7 +1268,6 @@
             }
         }
 
-        // Add the last column if we ended in a column
         if (inColumn) {
             columnPositions.push({
                 start: currentStart,
@@ -1006,225 +1276,379 @@
             });
         }
 
-        // Parse headers and determine alignment
+        // Parse headers
         const headers = [];
-        const alignments = [];
-
         for (const col of columnPositions) {
             const headerText = headerLine.substring(col.start, col.end + 1);
-            const trimmedHeader = headerText.trim();
-            headers.push(trimmedHeader);
-
-            // Determine alignment based on header position within column
-            const leadingSpaces = headerText.length - headerText.trimStart().length;
-            const trailingSpaces = headerText.length - headerText.trimEnd().length;
-
-            let alignment = 'left'; // default
-            if (leadingSpaces > trailingSpaces) {
-                alignment = 'right';
-            } else if (leadingSpaces > 0 && trailingSpaces > 0 && Math.abs(leadingSpaces - trailingSpaces) <= 1) {
-                alignment = 'center';
-            }
-
-            alignments.push(alignment);
+            headers.push(headerText.trim());
         }
 
-        // Parse data rows and collect column values for type detection
-        const rows = [];
-        const columnValues = headers.map(() => []); // Array of arrays to collect values per column
+        // Parse data and identify time and numeric columns
+        const parsedData = [];
+        let timeColumnIndex = -1;
+        const numericColumns = [];
 
+        // Find time column (startTime is most common)
+        for (let i = 0; i < headers.length; i++) {
+            const header = headers[i].toLowerCase();
+            if (header.includes('time') || header.includes('timestamp')) {
+                timeColumnIndex = i;
+                break;
+            }
+        }
+
+        // Parse all data rows
         for (const line of dataLines) {
-            const row = [];
+            const row = {};
+            const rawValues = [];
+
             for (let i = 0; i < columnPositions.length; i++) {
                 const col = columnPositions[i];
                 const cellText = line.substring(col.start, Math.min(col.end + 1, line.length));
                 const trimmedCell = cellText.trim();
-                row.push(trimmedCell);
+                rawValues.push(trimmedCell);
+                row[headers[i]] = trimmedCell;
+            }
 
-                // Collect values for type detection
-                if (trimmedCell) {
-                    columnValues[i].push(trimmedCell);
-                }
+            row._rawValues = rawValues;
+            parsedData.push(row);
+        }
 
-                // Refine alignment based on data content
-                if (trimmedCell && alignments[i] === 'left') {
-                    const leadingSpaces = cellText.length - cellText.trimStart().length;
-                    const trailingSpaces = cellText.length - cellText.trimEnd().length;
+        // Identify numeric columns by analyzing data
+        for (let i = 0; i < headers.length; i++) {
+            if (i === timeColumnIndex) continue; // Skip time column
 
-                    // If most cells in this column are right-aligned, change alignment
-                    if (leadingSpaces > trailingSpaces && leadingSpaces > 2) {
-                        alignments[i] = 'right';
+            let numericCount = 0;
+            let totalCount = 0;
+
+            for (const row of parsedData) {
+                const value = row._rawValues[i];
+                if (value && value !== '-') {
+                    totalCount++;
+                    const numericValue = parseValueWithUnit(value);
+                    if (!isNaN(numericValue) && numericValue !== 0) {
+                        numericCount++;
                     }
                 }
             }
-            rows.push(row);
-        }
 
-        // Detect data types for each column based on collected values
-        const dataTypes = columnValues.map(values => detectDataType(values));
-
-        // Generate HTML table with proper alignment and sorting
-        let html = '<table class="jfr-table sortable-table">';
-
-        // Table header
-        html += '<thead><tr>';
-        for (let i = 0; i < headers.length; i++) {
-            const header = headers[i];
-            const alignment = alignments[i];
-            const dataType = dataTypes[i];
-            html += `<th style="text-align: ${alignment}" data-sort="${dataType}">${escapeHtml(header)} <span class="sort-indicator"></span></th>`;
-        }
-        html += '</tr></thead>';
-
-        // Table body
-        html += '<tbody>';
-        for (const row of rows) {
-            html += '<tr>';
-            for (let i = 0; i < row.length; i++) {
-                const cell = row[i];
-                const alignment = alignments[i];
-
-                // Calculate sort value using the enhanced parser
-                let sortValue = cell;
-                if (dataTypes[i] === 'number') {
-                    sortValue = parseValueWithUnit(cell);
-                }
-
-                html += `<td style="text-align: ${alignment}" data-value="${sortValue}">${escapeHtml(cell)}</td>`;
+            // Consider column numeric if >50% of values are numeric
+            if (totalCount > 0 && numericCount / totalCount > 0.5) {
+                numericColumns.push({
+                    index: i,
+                    header: headers[i],
+                    type: detectColumnType(parsedData.map(row => row._rawValues[i]))
+                });
             }
-            html += '</tr>';
         }
-        html += '</tbody></table>';
 
-        return html;
+        const result = {
+            headers,
+            data: parsedData,
+            timeColumnIndex,
+            numericColumns,
+            columnPositions
+        };
+
+        // Add to cache with size limit
+        if (graphParseCache.size >= MAX_GRAPH_CACHE_SIZE) {
+            const firstKey = graphParseCache.keys().next().value;
+            graphParseCache.delete(firstKey);
+        }
+        graphParseCache.set(cacheKey, result);
+
+        return result;
     }
 
-    // Enhanced sort function to handle units properly
-    function sortTable(table, columnIndex, dataType) {
-        const tbody = table.querySelector('tbody');
-        const rows = Array.from(tbody.querySelectorAll('tr'));
-        const header = table.querySelectorAll('th')[columnIndex];
-        const sortIndicator = header.querySelector('.sort-indicator');
+    function detectColumnType(values) {
+        const sample = values.filter(v => v && v !== '-').slice(0, 10);
 
-        // Determine sort direction
-        let ascending = true;
-        if (header.classList.contains('sort-asc')) {
-            ascending = false;
-            header.classList.remove('sort-asc');
-            header.classList.add('sort-desc');
-            sortIndicator.textContent = ' ▼';
+        for (const value of sample) {
+            if (value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i)) {
+                return 'time';
+            }
+            if (value.match(/^(\d+(?:[.,]\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i)) {
+                return 'memory';
+            }
+            if (value.match(/^(\d+(?:[.,]\d+)?)\s*%$/)) {
+                return 'percentage';
+            }
+        }
+        return 'number';
+    }
+
+    function parseTimeValue(timeStr) {
+        // Parse time strings and convert to milliseconds since epoch
+        if (!timeStr || timeStr === '-') return null;
+
+        // Handle various time formats
+        // ISO format: 2023-10-15T14:30:25.123Z
+        if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
+            return new Date(timeStr).getTime();
+        }
+
+        // JFR timestamp format (nanoseconds since JVM start or epoch)
+        // These are usually large numbers like 123456789012345
+        const num = parseFloat(timeStr);
+        if (!isNaN(num)) {
+            // If it's a very large number (likely nanoseconds), convert appropriately
+            if (num > 1e12) {
+                // Likely nanoseconds since epoch or JVM start
+                // Convert nanoseconds to milliseconds
+                return num / 1000000;
+            } else if (num > 1e9) {
+                // Likely milliseconds since epoch or JVM start
+                return num;
+            } else if (num > 0) {
+                // Smaller numbers - likely seconds since JVM start
+                // Create relative timestamps from a base time
+                const baseTime = Date.now() - 300000; // 5 minutes ago as base
+                return baseTime + (num * 1000);
+            }
+        }
+
+        // Relative time format: 12.345s, 1.2ms, etc.
+        const relativeMatch = timeStr.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
+        if (relativeMatch) {
+            const num = parseFloat(relativeMatch[1]);
+            const unit = relativeMatch[2].toLowerCase();
+
+            let milliseconds = 0;
+            switch (unit) {
+                case 'ns': milliseconds = num / 1000000; break;
+                case 'μs': milliseconds = num / 1000; break;
+                case 'ms': milliseconds = num; break;
+                case 's': milliseconds = num * 1000; break;
+                case 'm': milliseconds = num * 60000; break;
+                case 'h': milliseconds = num * 3600000; break;
+                case 'd': milliseconds = num * 86400000; break;
+            }
+
+            // For relative times, create timestamps relative to a base time
+            const baseTime = Date.now() - 300000; // 5 minutes ago as base
+            return baseTime + milliseconds;
+        }
+
+        return null;
+    }
+
+    function createGraph(parsedData) {
+        if (!parsedData || !parsedData.numericColumns.length) {
+            showGraphStatus('No numeric columns found for plotting');
+            return;
+        }
+
+        if (parsedData.timeColumnIndex === -1) {
+            showGraphStatus('No time column found for plotting');
+            return;
+        }
+
+        // Parse and sort data by time to ensure proper ordering
+        const timeData = [];
+        for (const row of parsedData.data) {
+            const timeValue = parseTimeValue(row._rawValues[parsedData.timeColumnIndex]);
+            if (timeValue !== null) {
+                const dataPoint = { time: timeValue, row: row };
+                timeData.push(dataPoint);
+            }
+        }
+
+        // Sort by time
+        timeData.sort((a, b) => a.time - b.time);
+
+        if (timeData.length === 0) {
+            showGraphStatus('No valid time data found for plotting');
+            return;
+        }
+
+        // Check if we have relative times (all clustered together)
+        const timeRange = timeData[timeData.length - 1].time - timeData[0].time;
+        const isRelativeTime = timeRange < 1000 * 60 * 60; // Less than 1 hour range
+
+        // If we have relative times, spread them out more naturally
+        if (isRelativeTime && timeData.length > 1) {
+            const startTime = Date.now() - (timeData.length * 1000); // 1 second per data point
+            timeData.forEach((item, index) => {
+                item.time = startTime + (index * 1000);
+            });
+        }
+
+        // Prepare data for Chart.js
+        const datasets = [];
+        const colors = [
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+            '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
+        ];
+
+        parsedData.numericColumns.forEach((column, index) => {
+            const color = colors[index % colors.length];
+            const data = [];
+
+            for (const item of timeData) {
+                const numValue = parseValueWithUnit(item.row._rawValues[column.index]);
+
+                if (!isNaN(numValue)) {
+                    data.push({
+                        x: item.time,
+                        y: numValue
+                    });
+                }
+            }
+
+            if (data.length > 0) {
+                datasets.push({
+                    label: column.header,
+                    data: data,
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: data.length > 100 ? 1 : 2, // Smaller points for large datasets
+                    pointHoverRadius: 4
+                });
+            }
+        });
+
+        if (datasets.length === 0) {
+            showGraphStatus('No valid data points found for plotting');
+            return;
+        }
+
+        // Create or update chart
+        const ctx = graphCanvas.getContext('2d');
+
+        if (graphChart) {
+            graphChart.destroy();
+        }
+
+        // Determine appropriate time display format
+        const timeDisplayFormat = isRelativeTime ? {
+            millisecond: 'mm:ss.SSS',
+            second: 'mm:ss',
+            minute: 'HH:mm',
+            hour: 'HH:mm'
+        } : {
+            millisecond: 'HH:mm:ss.SSS',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm',
+            hour: 'MMM dd HH:mm',
+            day: 'MMM dd'
+        };
+
+        graphChart = new Chart(ctx, {
+            type: 'line',
+            data: { datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                },
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: timeDisplayFormat
+                        },
+                        title: {
+                            display: true,
+                            text: parsedData.headers[parsedData.timeColumnIndex]
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Value'
+                        }
+                    }
+                },
+                plugins: {
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x'
+                        },
+                        zoom: {
+                            wheel: {
+                                enabled: true
+                            },
+                            pinch: {
+                                enabled: true
+                            },
+                            mode: 'x'
+                        }
+                    },
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        mode: 'nearest',
+                        intersect: false,
+                        callbacks: {
+                            title: function(context) {
+                                const date = new Date(context[0].parsed.x);
+                                return isRelativeTime ?
+                                    date.toLocaleTimeString() :
+                                    date.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        updateColumnSelector(parsedData.numericColumns);
+        showGraphStatus('');
+
+        console.log(`Created graph with ${datasets.length} datasets and ${timeData.length} time points`);
+        console.log('Time range:', new Date(timeData[0].time).toLocaleString(), 'to', new Date(timeData[timeData.length - 1].time).toLocaleString());
+    }
+
+    function updateColumnSelector(numericColumns) {
+        const selector = document.querySelector('.column-selector');
+        selector.innerHTML = '';
+
+        numericColumns.forEach((column, index) => {
+            const checkbox = document.createElement('div');
+            checkbox.className = 'column-checkbox';
+            checkbox.innerHTML = `
+                <input type="checkbox" id="col_${index}" checked onchange="toggleGraphColumn(${index})">
+                <label for="col_${index}">${column.header}</label>
+            `;
+            selector.appendChild(checkbox);
+        });
+    }
+
+    function toggleGraphColumn(columnIndex) {
+        if (!graphChart) return;
+
+        const dataset = graphChart.data.datasets[columnIndex];
+        if (dataset) {
+            const meta = graphChart.getDatasetMeta(columnIndex);
+            meta.hidden = !meta.hidden;
+            graphChart.update();
+        }
+    }
+
+    function showGraphStatus(message) {
+        const statusDiv = document.querySelector('.graph-status');
+        if (message) {
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            graphCanvas.style.display = 'none';
         } else {
-            ascending = true;
-            header.classList.remove('sort-desc');
-            header.classList.add('sort-asc');
-            sortIndicator.textContent = ' ▲';
+            statusDiv.style.display = 'none';
+            graphCanvas.style.display = 'block';
         }
-
-        // Clear other headers' sort indicators
-        table.querySelectorAll('th').forEach((th, i) => {
-            if (i !== columnIndex) {
-                th.classList.remove('sort-asc', 'sort-desc');
-                const indicator = th.querySelector('.sort-indicator');
-                if (indicator) indicator.textContent = '';
-            }
-        });
-
-        // Sort rows
-        rows.sort((a, b) => {
-            const aCell = a.children[columnIndex];
-            const bCell = b.children[columnIndex];
-
-            let aValue = aCell.getAttribute('data-value');
-            let bValue = bCell.getAttribute('data-value');
-
-            if (dataType === 'number') {
-                // For numbers, use the pre-calculated sort values
-                aValue = parseFloat(aValue) || 0;
-                bValue = parseFloat(bValue) || 0;
-                return ascending ? aValue - bValue : bValue - aValue;
-            } else {
-                // For strings, do case-insensitive comparison
-                aValue = (aValue || aCell.textContent.trim()).toString().toLowerCase();
-                bValue = (bValue || bCell.textContent.trim()).toString().toLowerCase();
-                if (aValue < bValue) return ascending ? -1 : 1;
-                if (aValue > bValue) return ascending ? 1 : -1;
-                return 0;
-            }
-        });
-
-        // Re-append sorted rows
-        rows.forEach(row => tbody.appendChild(row));
     }
 
-    // Function to make tables sortable
-    function makeSortable(table) {
-        const headers = table.querySelectorAll('th[data-sort]');
-
-        headers.forEach((header, index) => {
-            header.style.cursor = 'pointer';
-            header.addEventListener('click', () => {
-                sortTable(table, index, header.getAttribute('data-sort'));
-            });
-        });
-    }
-
-    // Enhanced executeQuery to initialize sortable tables
-    function executeQuery(addToHistory = false) {
-        const query = queryInput.value;
-        if (!query) return;
-
-        // Hide autocompletion when executing query
-        hideAutoCompleteSuggestions();
-
-        // Skip if this exact query was just executed
-        if (query === lastExecutedQuery) return;
-
-        lastExecutedQuery = query;
-
-        // Only add to history if explicitly requested (via button click)
-        if (addToHistory && !previousQueries.has(query)) {
-            previousQueries.add(query);
-            updatePreviousQueriesDropdown();
+    function resetGraphZoom() {
+        if (graphChart) {
+            graphChart.resetZoom();
         }
-
-        document.getElementById('result').textContent = 'Executing query...';
-
-        fetch(`/query?q=${encodeURIComponent(query)}`)
-            .then(response => response.text())
-            .then(data => {
-                const resultDiv = document.getElementById('result');
-                const formatOutputEnabled = document.getElementById('formatTables').checked;
-
-                // Apply different formatting based on query type and format setting
-                if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
-                    resultDiv.innerHTML = highlightViewsOutput(data);
-                } else if (formatOutputEnabled && query.trim().toUpperCase() === 'SHOW EVENTS' && isShowEventsData(data)) {
-                    resultDiv.innerHTML = parseShowEventsData(data);
-                } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
-                    resultDiv.innerHTML = parseShowFieldsData(data);
-                } else if (formatOutputEnabled && isTabularData(data)) {
-                    resultDiv.innerHTML = parseTabularData(data);
-                } else {
-                    resultDiv.textContent = data;
-                }
-
-                // Make tables sortable after rendering
-                if (formatOutputEnabled) {
-                    const tables = resultDiv.querySelectorAll('.sortable-table');
-                    tables.forEach(table => makeSortable(table));
-                }
-
-                // Check if the error message contains a SHOW FIELDS suggestion
-                checkAndExecuteShowFields(data);
-
-                // If this was a SHOW EVENTS query, refresh our event types
-                if (query.trim().toUpperCase() === 'SHOW EVENTS') {
-                    setTimeout(loadAvailableEventTypes, 100);
-                }
-            })
-            .catch(error => {
-                document.getElementById('result').textContent = 'Error: ' + error;
-            });
     }
 
     // Enhanced function to load available event types dynamically
@@ -2175,6 +2599,53 @@
     window.addEventListener('load', function() {
         loadAvailableEventTypes();
         loadViewQueries();
+
+        // Insert graph container after controls
+        const controlsContainer = document.querySelector('.controls-container');
+        controlsContainer.insertAdjacentHTML('afterend', `
+            <div class="graph-container" id="graphContainer">
+                <div class="graph-controls">
+                    <label>Graph Controls:</label>
+                    <button onclick="resetGraphZoom()" style="margin-right: 10px;">Reset Zoom</button>
+                    <span style="margin-right: 10px;">Columns:</span>
+                    <div class="column-selector"></div>
+                </div>
+                <div class="graph-canvas-container">
+                    <canvas id="graphCanvas"></canvas>
+                    <div class="graph-status">No data to display</div>
+                </div>
+            </div>
+        `);
+
+        // Initialize graph elements
+        graphContainer = document.getElementById('graphContainer');
+        graphCanvas = document.getElementById('graphCanvas');
+
+        // Add show graph checkbox to controls
+        const showGraphCheckbox = document.createElement('div');
+        showGraphCheckbox.className = 'auto-query';
+        showGraphCheckbox.innerHTML = `
+            <input type="checkbox" id="showGraph">
+            <label for="showGraph">Show graph</label>
+        `;
+
+        // Insert before the Query button
+        const buttonsDiv = document.querySelector('.buttons');
+        buttonsDiv.insertBefore(showGraphCheckbox, buttonsDiv.lastElementChild);
+
+        // Add event listener for show graph checkbox
+        document.getElementById('showGraph').addEventListener('change', function() {
+            if (this.checked && graphData) {
+                graphContainer.style.display = 'block';
+                createGraph(graphData);
+            } else {
+                graphContainer.style.display = 'none';
+                if (graphChart) {
+                    graphChart.destroy();
+                    graphChart = null;
+                }
+            }
+        });
     });
 
     // Initialize everything
@@ -2245,7 +2716,8 @@
         }
     });
 
-    // Initial highlighting    updateHighlighting();
+    // Initial highlighting
+    updateHighlighting();
 </script>
 </body>
 </html>
