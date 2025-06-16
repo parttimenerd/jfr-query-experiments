@@ -276,7 +276,6 @@
             color: #7b1fa2;
         }
 
-        /* JFR Table Styles - Fixed sticky header */
         .jfr-table {
             width: 100%;
             border-collapse: collapse;
@@ -285,6 +284,15 @@
             font-size: 13px;
             background-color: white;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+            border-top: none; /* Remove top border if present */
+        }
+
+        .jfr-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-color: white; /* Ensure thead has background */
         }
 
         .jfr-table th {
@@ -295,16 +303,23 @@
             font-weight: bold;
             color: #495057;
             position: sticky;
-            top: -1px; /* Fix for the gap - offset by border width */
-            z-index: 10;
-            box-shadow: 0 1px 0 0 #dee2e6; /* Add bottom border shadow to maintain separation */
+            top: 0;
+            z-index: 20;
+            /* Add better shadow and border treatment */
+            box-shadow: 0 2px 3px -1px rgba(0,0,0,0.1), inset 0 -1px 0 #dee2e6;
+            /* Ensure no gap at top */
+            margin-top: 0;
         }
 
-        .jfr-table td {
-            border: 1px solid #dee2e6;
-            padding: 6px 12px;
-            vertical-align: top;
+        /* Critical fix: Ensure proper container scroll behavior */
+        #result {
+            overflow: auto !important; /* Force proper overflow behavior */
+            padding-top: 0; /* Remove top padding which causes gaps */
         }
+
+        #result:has(.jfr-table) {
+            overflow: auto !important;
+}
 
         .jfr-table tr:nth-child(even) {
             background-color: #f8f9fa;
@@ -407,7 +422,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
-            margin-top: 10px;
+            align-items: center;
         }
 
         .column-checkbox {
@@ -446,6 +461,53 @@
             align-items: center;
             gap: 5px;
         }
+
+        /* Viewport info styling */
+        .viewport-info {
+            background-color: #e3f2fd;
+            border: 1px solid #1976d2;
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin: 10px 0;
+            font-size: 13px;
+        }
+
+        .viewport-summary {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .viewport-time-range {
+            color: #666;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .reset-filter-btn {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            margin-left: auto;
+        }
+
+        .reset-filter-btn:hover {
+            background-color: #1565c0;
+        }
+
+        /* Hide filtered rows smoothly */
+        .jfr-table tr {
+            transition: opacity 0.2s ease;
+        }
+
+        .jfr-table tr[style*="display: none"] {
+            opacity: 0;
+        }
     </style>
 </head>
 <body>
@@ -481,8 +543,13 @@
     <div class="graph-controls">
         <label>Graph Controls:</label>
         <button onclick="resetGraphZoom()" style="margin-right: 10px;">Reset Zoom</button>
-        <span style="margin-right: 10px;">Columns:</span>
-        <div class="column-selector"></div>
+        <div style="display: inline-flex; align-items: center;">
+            <label style="margin-right: 10px;"><input type="checkbox" id="zeroYAxisCheckbox" onchange="toggleZeroYAxis()"> Zero Y-Axis</label>
+        </div>
+        <div style="display: inline-flex; align-items: center; margin-left: 10px;">
+            <span style="margin-right: 5px;">Columns:</span>
+            <div class="column-selector" style="display: inline-flex; flex-wrap: wrap; margin: 0;"></div>
+        </div>
     </div>
     <div class="graph-canvas-container">
         <canvas id="graphCanvas"></canvas>
@@ -616,7 +683,6 @@
         text = text.replace(/(?<!<[^>]*),(?![^<]*>)/g, '<span class="sql-operator">,</span>');
         text = text.replace(/(?<!<[^>]*)\((?![^<]*>)/g, '<span class="sql-operator">(</span>');
         text = text.replace(/(?<!<[^>]*)\)(?![^<]*>)/g, '<span class="sql-operator">)</span>');
-        text = text.replace(/(?<!<[^>]*);(?![^<]*>)/g, '<span class="sql-operator">;</span>');
 
         return text;
     }
@@ -789,7 +855,6 @@
         return html;
     }
 
-    // Function to parse SHOW EVENTS output into HTML table (without Has Data column)
     function parseShowEventsData(data) {
         const lines = data.split('\n');
         const events = [];
@@ -833,6 +898,12 @@
             if (!a.hasData && b.hasData) return 1;
             return a.name.localeCompare(b.name);
         });
+
+        return events;
+    }
+
+    // Function to parse SHOW EVENTS output into HTML table (without Has Data column)
+    function showEventsData(events) {
 
         // Generate HTML table
         let html = '<div class="show-events-summary">';
@@ -1141,7 +1212,7 @@
                 if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
                     resultDiv.innerHTML = highlightViewsOutput(data);
                 } else if (formatOutputEnabled && query.trim().toUpperCase() === 'SHOW EVENTS' && isShowEventsData(data)) {
-                    resultDiv.innerHTML = parseShowEventsData(data);
+                    resultDiv.innerHTML = showEventsData(parseShowEventsData(data));
                 } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
                     resultDiv.innerHTML = parseShowFieldsData(data);
                 } else if (formatOutputEnabled && isTabularData(data)) {
@@ -1208,6 +1279,18 @@
     let graphData = null;
     let graphParseCache = new Map();
     const MAX_GRAPH_CACHE_SIZE = 20;
+    let zeroYAxis = false;
+
+    function toggleZeroYAxis() {
+        const checkbox = document.getElementById('zeroYAxisCheckbox');
+        zeroYAxis = checkbox.checked;
+        
+        // Update the chart if it exists
+        if (graphChart) {
+            graphChart.options.scales.y.min = zeroYAxis ? 0 : undefined;
+            graphChart.update();
+        }
+    }
 
     function parseDataForGraph(data) {
         // Check cache first
@@ -1437,12 +1520,12 @@
             showGraphStatus('No numeric columns found for plotting');
             return;
         }
-
+        
         if (parsedData.timeColumnIndex === -1) {
             showGraphStatus('No time column found for plotting');
             return;
         }
-
+        
         // Parse and sort data by time to ensure proper ordering
         const timeData = [];
         for (const row of parsedData.data) {
@@ -1452,10 +1535,10 @@
                 timeData.push(dataPoint);
             }
         }
-
+        
         // Sort by time
         timeData.sort((a, b) => a.time - b.time);
-
+        
         if (timeData.length === 0) {
             showGraphStatus('No valid time data found for plotting');
             return;
@@ -1464,7 +1547,7 @@
         // Check if we have relative times (all clustered together)
         const timeRange = timeData[timeData.length - 1].time - timeData[0].time;
         const isRelativeTime = timeRange < 1000 * 60 * 60; // Less than 1 hour range
-
+        
         // If we have relative times, spread them out more naturally
         if (isRelativeTime && timeData.length > 1) {
             const startTime = Date.now() - (timeData.length * 1000); // 1 second per data point
@@ -1472,29 +1555,30 @@
                 item.time = startTime + (index * 1000);
             });
         }
-
+        
         // Prepare data for Chart.js
         const datasets = [];
         const colors = [
-            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', 
             '#FF9F40', '#FF6384', '#C9CBCF', '#4BC0C0', '#FF6384'
         ];
-
+        
         parsedData.numericColumns.forEach((column, index) => {
             const color = colors[index % colors.length];
             const data = [];
-
+            
             for (const item of timeData) {
                 const numValue = parseValueWithUnit(item.row._rawValues[column.index]);
-
+                
                 if (!isNaN(numValue)) {
                     data.push({
                         x: item.time,
-                        y: numValue
+                        y: numValue,
+                        rowIndex: parsedData.data.indexOf(item.row) // Store original row index
                     });
                 }
             }
-
+            
             if (data.length > 0) {
                 datasets.push({
                     label: column.header,
@@ -1503,24 +1587,24 @@
                     backgroundColor: color + '20',
                     fill: false,
                     tension: 0.1,
-                    pointRadius: data.length > 100 ? 1 : 2, // Smaller points for large datasets
+                    pointRadius: data.length > 100 ? 1 : 2,
                     pointHoverRadius: 4
                 });
             }
         });
-
+        
         if (datasets.length === 0) {
             showGraphStatus('No valid data points found for plotting');
             return;
         }
-
+        
         // Create or update chart
         const ctx = graphCanvas.getContext('2d');
-
+        
         if (graphChart) {
             graphChart.destroy();
         }
-
+        
         // Determine appropriate time display format
         const timeDisplayFormat = isRelativeTime ? {
             millisecond: 'mm:ss.SSS',
@@ -1534,7 +1618,7 @@
             hour: 'MMM dd HH:mm',
             day: 'MMM dd'
         };
-
+        
         graphChart = new Chart(ctx, {
             type: 'line',
             data: { datasets },
@@ -1558,6 +1642,7 @@
                         }
                     },
                     y: {
+                        min: zeroYAxis ? 0 : undefined,
                         title: {
                             display: true,
                             text: 'Value'
@@ -1568,7 +1653,10 @@
                     zoom: {
                         pan: {
                             enabled: true,
-                            mode: 'x'
+                            mode: 'x',
+                            onPan: function({chart}) {
+                                updateTableForCurrentViewport(chart, parsedData, timeData);
+                            }
                         },
                         zoom: {
                             wheel: {
@@ -1577,7 +1665,10 @@
                             pinch: {
                                 enabled: true
                             },
-                            mode: 'x'
+                            mode: 'x',
+                            onZoom: function({chart}) {
+                                updateTableForCurrentViewport(chart, parsedData, timeData);
+                            }
                         }
                     },
                     legend: {
@@ -1590,8 +1681,8 @@
                         callbacks: {
                             title: function(context) {
                                 const date = new Date(context[0].parsed.x);
-                                return isRelativeTime ?
-                                    date.toLocaleTimeString() :
+                                return isRelativeTime ? 
+                                    date.toLocaleTimeString() : 
                                     date.toLocaleString();
                             }
                         }
@@ -1599,12 +1690,118 @@
                 }
             }
         });
-
+        
         updateColumnSelector(parsedData.numericColumns);
         showGraphStatus('');
-
+        
         console.log(`Created graph with ${datasets.length} datasets and ${timeData.length} time points`);
         console.log('Time range:', new Date(timeData[0].time).toLocaleString(), 'to', new Date(timeData[timeData.length - 1].time).toLocaleString());
+    }
+
+    function updateTableForCurrentViewport(chart, parsedData, timeData) {
+        // Get the current x-axis range from the chart
+        const xScale = chart.scales.x;
+        const minTime = xScale.min;
+        const maxTime = xScale.max;
+        
+        console.log('Viewport time range:', new Date(minTime).toLocaleString(), 'to', new Date(maxTime).toLocaleString());
+        
+        // Find all table rows in the result div
+        const resultDiv = document.getElementById('result');
+        const tables = resultDiv.querySelectorAll('.jfr-table');
+        
+        if (tables.length === 0) {
+            console.log('No tables found to filter');
+            return;
+        }
+        
+        // Process each table (there should typically be only one)
+        tables.forEach(table => {
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            let visibleCount = 0;
+            
+            // Show/hide rows based on their time values
+            rows.forEach((row, index) => {
+                if (index >= timeData.length) {
+                    // More table rows than data points, hide extra rows
+                    row.style.display = 'none';
+                    return;
+                }
+                
+                const timeValue = timeData[index].time;
+                
+                if (timeValue >= minTime && timeValue <= maxTime) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            
+            console.log(`Filtered table: showing ${visibleCount} of ${rows.length} rows`);
+            
+            // Add or update viewport info
+            updateViewportInfo(table, visibleCount, rows.length, minTime, maxTime);
+        });
+    }
+
+    function updateViewportInfo(table, visibleCount, totalCount, minTime, maxTime) {
+        // Remove existing viewport info if present
+        const existingInfo = table.parentNode.querySelector('.viewport-info');
+        if (existingInfo) {
+            existingInfo.remove();
+        }
+        
+        // Create new viewport info
+        const viewportInfo = document.createElement('div');
+        viewportInfo.className = 'viewport-info';
+        viewportInfo.innerHTML = `<div class="viewport-summary">
+                <strong>Current View:</strong> ${visibleCount} of ${totalCount} rows <span class="viewport-time-range">(${new Date(minTime).toLocaleTimeString()} - ${new Date(maxTime).toLocaleTimeString()})</span>
+                <button onclick="resetTableFilter()" class="reset-filter-btn">Show All Rows</button>
+            </div>`;
+        
+        // Insert before the table
+        table.parentNode.insertBefore(viewportInfo, table);
+    }
+
+    function resetTableFilter() {
+        // Show all table rows
+        const resultDiv = document.getElementById('result');
+        const tables = resultDiv.querySelectorAll('.jfr-table');
+        
+        tables.forEach(table => {
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            
+            const rows = tbody.querySelectorAll('tr');
+            rows.forEach(row => {
+                row.style.display = '';
+            });
+            
+            // Remove viewport info
+            const viewportInfo = table.parentNode.querySelector('.viewport-info');
+            if (viewportInfo) {
+                viewportInfo.remove();
+            }
+        });
+        
+        // Reset chart zoom
+        if (graphChart) {
+            graphChart.resetZoom();
+        }
+        
+        console.log('Reset table filter and chart zoom');
+    }
+
+    function resetGraphZoom() {
+        if (graphChart) {
+            graphChart.resetZoom();
+            // Also reset table filter when resetting zoom
+            resetTableFilter();
+        }
     }
 
     function updateColumnSelector(numericColumns) {
@@ -1656,29 +1853,20 @@
         try {
             const response = await fetch('/query?q=' + encodeURIComponent('SHOW EVENTS'));
             const data = await response.text();
+            const parsed = parseShowEventsData(data);
 
-            // Parse the SHOW EVENTS output to extract event types with counts
             const eventTypes = [];
-            const eventCounts = {}; // Store counts for display
-            const lines = data.split('\n');
-
-            for (const line of lines) {
-                // Match patterns like "ActiveRecording (1)" or "CPULoad (184)"
-                const match = line.match(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*\((\d+)\)/);
-                if (match) {
-                    const eventName = match[1];
-                    const count = parseInt(match[2]);
-
-                    // Only include events that have actual data (count > 0)
-                    if (count > 0) {
-                        eventTypes.push(eventName);
-                        eventCounts[eventName] = count;
-                    }
+            const eventCounts = {};
+            parsed.forEach(element => {
+                if (element.count == 0) {
+                    return;
                 }
-            }
+                eventCounts[element.name] = element.count;
+                eventTypes.push(element.name);
+            });
 
             // Update the vocabulary with actual available events and their counts
-            if (eventTypes.length > 0) {
+            if (parsed.length > 0) {
                 queryVocabulary.availableEventTypes = eventTypes;
                 queryVocabulary.eventCounts = eventCounts;
                 console.log(`Loaded ${eventTypes.length} event types with data:`, eventTypes);
@@ -2607,8 +2795,13 @@
                 <div class="graph-controls">
                     <label>Graph Controls:</label>
                     <button onclick="resetGraphZoom()" style="margin-right: 10px;">Reset Zoom</button>
-                    <span style="margin-right: 10px;">Columns:</span>
-                    <div class="column-selector"></div>
+                    <div style="display: inline-flex; align-items: center;">
+                        <label style="margin-right: 10px;"><input type="checkbox" id="zeroYAxisCheckbox" onchange="toggleZeroYAxis()"> Zero Y-Axis</label>
+                    </div>
+                    <div style="display: inline-flex; align-items: center; margin-left: 10px;">
+                        <span style="margin-right: 5px;">Columns:</span>
+                        <div class="column-selector" style="display: inline-flex; flex-wrap: wrap; margin: 0;"></div>
+                    </div>
                 </div>
                 <div class="graph-canvas-container">
                     <canvas id="graphCanvas"></canvas>
