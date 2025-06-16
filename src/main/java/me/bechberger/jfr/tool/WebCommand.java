@@ -60,12 +60,8 @@ public class WebCommand implements Callable<Integer>, Footerable {
 
             // Add root endpoint with simple UI
             server.createContext("/", exchange -> {
-                String response = getSimpleUI();
                 exchange.getResponseHeaders().set("Content-Type", "text/html");
-                exchange.sendResponseHeaders(200, response.length());
-                try (var os = exchange.getResponseBody()) {
-                    os.write(response.getBytes());
-                }
+                sendResponse(exchange, 200, getSimpleUI());
             });
 
             server.start();
@@ -157,9 +153,10 @@ public class WebCommand implements Callable<Integer>, Footerable {
     }
 
     private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
-        exchange.sendResponseHeaders(statusCode, response.length());
+        var bytes = response.getBytes();
+        exchange.sendResponseHeaders(statusCode, bytes.length);
         try (var os = exchange.getResponseBody()) {
-            os.write(response.getBytes());
+            os.write(bytes);
         }
     }
 

@@ -55,14 +55,14 @@
             padding: 10px;
             background-color: #f5f5f5;
         }
-        
+
         /* Syntax highlighting styles */
         .syntax-highlighter-wrapper {
             position: relative;
             width: 100%;
             height: 100px;
         }
-        
+
         #highlightDiv {
             position: absolute;
             top: 0;
@@ -81,7 +81,7 @@
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
-        
+
         #queryInput.highlighted {
             position: absolute;
             top: 0;
@@ -98,7 +98,7 @@
             resize: none;
             z-index: 2;
         }
-        
+
         .sql-keyword { color: #0066cc; font-weight: bold; }
         .sql-function { color: #cc6600; font-weight: bold; }
         .sql-string { color: #009900; }
@@ -113,7 +113,7 @@
             display: inline-block;
             width: 100%;
         }
-        
+
         .autocomplete-suggestions {
             position: absolute;
             top: 100%;
@@ -128,25 +128,25 @@
             display: none;
             font-size: 13px;
         }
-        
+
         .autocomplete-suggestion {
             padding: 8px 12px;
             cursor: pointer;
             border-bottom: 1px solid #eee;
         }
-        
+
         .autocomplete-suggestion:hover,
         .autocomplete-suggestion.selected {
             background-color: #e6f3ff;
         }
-        
+
         .suggestion-main {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
             gap: 8px;
         }
-        
+
         .suggestion-text {
             font-family: monospace;
             font-weight: 500;
@@ -154,7 +154,7 @@
             flex: 1;
             word-break: break-all;
         }
-        
+
         .suggestion-meta {
             display: flex;
             flex-direction: column;
@@ -162,7 +162,7 @@
             gap: 2px;
             flex-shrink: 0;
         }
-        
+
         .autocomplete-suggestion-type {
             font-size: 0.75em;
             color: #666;
@@ -172,7 +172,7 @@
             text-transform: uppercase;
             font-weight: bold;
         }
-        
+
         .suggestion-count {
             font-size: 0.7em;
             color: #007acc;
@@ -181,7 +181,7 @@
             padding: 1px 4px;
             border-radius: 2px;
         }
-        
+
         .suggestion-description {
             font-size: 0.7em;
             color: #888;
@@ -190,31 +190,47 @@
             max-width: 120px;
             word-wrap: break-word;
         }
-        
+
         /* Color coding for different suggestion types */
         .autocomplete-suggestion-type {
             background: #f0f0f0;
             color: #666;
         }
-        
+
         .suggestion-main:has(.autocomplete-suggestion-type:contains("sample")) .autocomplete-suggestion-type {
             background: #e8f5e8;
             color: #2d5016;
         }
-        
+
         .suggestion-main:has(.autocomplete-suggestion-type:contains("event")) .autocomplete-suggestion-type {
             background: #fff3cd;
             color: #856404;
         }
-        
+
         .suggestion-main:has(.autocomplete-suggestion-type:contains("keyword")) .autocomplete-suggestion-type {
             background: #d1ecf1;
             color: #0c5460;
         }
-        
+
         .suggestion-main:has(.autocomplete-suggestion-type:contains("function")) .autocomplete-suggestion-type {
             background: #f8d7da;
             color: #721c24;
+        }
+
+        /* View query type styling */
+        .suggestion-main:has(.autocomplete-suggestion-type:contains("view")) .autocomplete-suggestion-type {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .suggestion-main:has(.autocomplete-suggestion-type:contains("view-formatted")) .autocomplete-suggestion-type {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .suggestion-main:has(.autocomplete-suggestion-type:contains("view-caption")) .autocomplete-suggestion-type {
+            background: #f3e5f5;
+            color: #7b1fa2;
         }
     </style>
 </head>
@@ -262,18 +278,18 @@
             'COLUMN', 'CAPTION', 'FORMAT', 'AS', 'AND', 'ASC', 'DESC',
             'SHOW EVENTS', 'SHOW FIELDS'
         ],
-        
+
         functions: [
             'AVG', 'COUNT', 'DIFF', 'FIRST', 'LAST', 'LAST_BATCH',
             'LIST', 'MAX', 'MEDIAN', 'MIN', 'P90', 'P95', 'P99', 'P999',
             'STDEV', 'SUM', 'UNIQUE'
         ],
-        
+
         formatProperties: [
             'cell-height:', 'missing:whitespace', 'normalized',
             'truncate-beginning', 'truncate-end', 'missing:null-bootstrap'
         ],
-        
+
         // Will be populated dynamically from SHOW EVENTS, fallback to common ones
         availableEventTypes: [
             'GarbageCollection', 'ExecutionSample', 'ObjectAllocationSample',
@@ -284,44 +300,46 @@
             'jdk.JavaMonitorEnter', 'jdk.ThreadPark', 'jdk.ClassLoad',
             'SystemProcess', 'CPULoad', 'GCHeapSummary', 'ActiveRecording'
         ],
-        
+
         commonFields: [
             'startTime', 'duration', 'eventThread', 'stackTrace',
             'stackTrace.topFrame', 'stackTrace.topApplicationFrame',
             'eventType.label', 'gcId', 'objectClass', 'weight',
             'pid', 'path', 'bytesRead', 'bytesWritten', 'host'
         ],
-        
-        // Keep your existing sample queries and add more simple ones
+
+        // Mix of strings and objects for sample queries
         sampleQueries: [
+            // Simple command strings
             "grammar",
-            "views", 
+            "views",
             "SHOW EVENTS",
             "SHOW FIELDS jdk.GarbageCollection",
-            
-            // Simple queries
+
+            // Simple query strings
             "SELECT * FROM GarbageCollection",
             "SELECT * FROM ExecutionSample",
             "SELECT * FROM ObjectAllocationSample",
-            "SELECT * FROM CPULoad",
-            "SELECT * FROM ActiveRecording",
             "SELECT startTime FROM GarbageCollection",
             "SELECT COUNT(*) FROM GarbageCollection",
-            "SELECT SUM(duration) FROM GarbageCollection",
-            
-            // Your existing queries
-            "SELECT * FROM jdk.GarbageCollection",
-            "SELECT startTime, duration FROM jdk.GarbageCollection",
-            "SELECT pid, path FROM SystemProcess",
-            "SELECT stackTrace.topFrame AS T, SUM(weight) FROM ObjectAllocationSample GROUP BY T",
-            "CAPTION 'Method', 'Percentage' FORMAT default, normalized;width:10 SELECT stackTrace.topFrame AS T, COUNT(*) AS C GROUP BY T FROM ExecutionSample ORDER BY C DESC",
-            "CAPTION 'Start', 'GC ID', 'Heap Before GC', 'Heap After GC', 'Longest Pause' SELECT G.startTime, G.gcId, B.heapUsed, A.heapUsed, longestPause FROM GarbageCollection AS G, GCHeapSummary AS B, GCHeapSummary AS A WHERE B.when = 'Before GC' AND A.when = 'After GC' GROUP BY gcId ORDER BY G.startTime",
-            
-            // Additional simple analysis queries
-            "SELECT eventThread, COUNT(*) FROM ExecutionSample GROUP BY eventThread",
-            "SELECT objectClass, COUNT(*) FROM ObjectAllocationSample GROUP BY objectClass",
-            "SELECT gcId, duration FROM GarbageCollection ORDER BY duration DESC",
-            "SELECT stackTrace.topFrame, COUNT(*) FROM ExecutionSample GROUP BY stackTrace.topFrame ORDER BY COUNT(*) DESC LIMIT 10"
+
+            // Objects with descriptions
+            {
+                text: "SELECT stackTrace.topFrame AS T, SUM(weight) FROM ObjectAllocationSample GROUP BY T",
+                type: 'sample',
+                description: "Allocation pressure by method"
+            },
+            {
+                text: "SELECT eventThread, COUNT(*) FROM ExecutionSample GROUP BY eventThread",
+                type: 'sample',
+                description: "Execution samples by thread"
+            },
+            {
+                text: "SELECT gcId, duration FROM GarbageCollection ORDER BY duration DESC",
+                type: 'sample',
+                description: "GC events by duration"
+            }
+            // View queries will be added dynamically by loadViewQueries()
         ]
     };
 
@@ -329,19 +347,19 @@
     function createSyntaxHighlighter() {
         const originalQueryInput = document.getElementById('queryInput');
         const container = originalQueryInput.parentNode;
-        
+
         const wrapper = document.createElement('div');
         wrapper.className = 'syntax-highlighter-wrapper';
-        
+
         const highlightDiv = document.createElement('div');
         highlightDiv.id = 'highlightDiv';
-        
+
         originalQueryInput.className = 'highlighted';
-        
+
         container.replaceChild(wrapper, originalQueryInput);
         wrapper.appendChild(highlightDiv);
         wrapper.appendChild(originalQueryInput);
-        
+
         return { queryInput: originalQueryInput, highlightDiv };
     }
 
@@ -349,30 +367,30 @@
         // Use centralized vocabulary
         const keywords = queryVocabulary.keywords;
         const functions = queryVocabulary.functions;
-        
+
         text = text.replace(/[<>&]/g, function(match) {
             return {'<': '&lt;', '>': '&gt;', '&': '&amp;'}[match];
         });
-        
+
         text = text.replace(/'([^']*)'/g, '<span class="sql-string">\'$1\'</span>');
         text = text.replace(/\b\d+\b/g, '<span class="sql-number">$&</span>');
-        
+
         keywords.forEach(keyword => {
             const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
             text = text.replace(regex, '<span class="sql-keyword">$&</span>');
         });
-        
+
         functions.forEach(func => {
             const regex = new RegExp(`\\b${func}\\b(?=\\s*\\()`, 'gi');
             text = text.replace(regex, '<span class="sql-function">$&</span>');
         });
-        
+
         text = text.replace(/(?<!<[^>]*)\b=\b(?![^<]*>)/g, '<span class="sql-operator">=</span>');
         text = text.replace(/(?<!<[^>]*),(?![^<]*>)/g, '<span class="sql-operator">,</span>');
         text = text.replace(/(?<!<[^>]*)\((?![^<]*>)/g, '<span class="sql-operator">(</span>');
         text = text.replace(/(?<!<[^>]*)\)(?![^<]*>)/g, '<span class="sql-operator">)</span>');
         text = text.replace(/(?<!<[^>]*);(?![^<]*>)/g, '<span class="sql-operator">;</span>');
-        
+
         return text;
     }
 
@@ -389,19 +407,19 @@
         try {
             const response = await fetch('/query?q=' + encodeURIComponent('SHOW EVENTS'));
             const data = await response.text();
-            
+
             // Parse the SHOW EVENTS output to extract event types with counts
             const eventTypes = [];
             const eventCounts = {}; // Store counts for display
             const lines = data.split('\n');
-            
+
             for (const line of lines) {
                 // Match patterns like "ActiveRecording (1)" or "CPULoad (184)"
                 const match = line.match(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*\((\d+)\)/);
                 if (match) {
                     const eventName = match[1];
                     const count = parseInt(match[2]);
-                    
+
                     // Only include events that have actual data (count > 0)
                     if (count > 0) {
                         eventTypes.push(eventName);
@@ -409,17 +427,187 @@
                     }
                 }
             }
-            
+
             // Update the vocabulary with actual available events and their counts
             if (eventTypes.length > 0) {
                 queryVocabulary.availableEventTypes = eventTypes;
                 queryVocabulary.eventCounts = eventCounts;
                 console.log(`Loaded ${eventTypes.length} event types with data:`, eventTypes);
             }
-            
+
         } catch (error) {
             console.warn('Could not load event types, using fallback list:', error);
             // Keep the fallback list that's already in availableEventTypes
+        }
+    }
+
+    // Enhanced function to parse view.ini format and extract queries with descriptions
+    function parseViewQueries(viewsData) {
+        const viewQueries = [];
+        const lines = viewsData.split('\n');
+        let currentSection = null;
+        let currentLabel = null;
+        let inQuery = false;
+        let queryLines = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // Skip comments and empty lines
+            if (line.startsWith(';') || line === '') {
+                continue;
+            }
+
+            // Section header like [environment.active-recordings]
+            const sectionMatch = line.match(/^\[([^\]]+)\]$/);
+            if (sectionMatch) {
+                // Save previous query if exists
+                if (currentSection && currentLabel && queryLines.length > 0) {
+                    const fullQuery = queryLines.join(' ').trim();
+                    if (fullQuery) {
+                        const cleanQuery = extractCleanQuery(fullQuery);
+                        viewQueries.push({
+                            id: currentSection,
+                            label: currentLabel,
+                            fullQuery: fullQuery,
+                            cleanQuery: cleanQuery,
+                            category: currentSection.split('.')[0] // environment, application, jvm
+                        });
+                    }
+                }
+
+                currentSection = sectionMatch[1];
+                currentLabel = null;
+                queryLines = [];
+                inQuery = false;
+                continue;
+            }
+
+            // Label line
+            const labelMatch = line.match(/^label\s*=\s*"([^"]+)"$/);
+            if (labelMatch) {
+                currentLabel = labelMatch[1];
+                continue;
+            }
+
+            // Table or form query start
+            const queryStartMatch = line.match(/^(table|form)\s*=\s*"(.*)$/);
+            if (queryStartMatch) {
+                inQuery = true;
+                queryLines = [queryStartMatch[2]];
+                continue;
+            }
+
+            // Continue multi-line query
+            if (inQuery) {
+                if (line.endsWith('"')) {
+                    // End of query
+                    queryLines.push(line.slice(0, -1));
+                    inQuery = false;
+                } else {
+                    queryLines.push(line);
+                }
+            }
+        }
+
+        // Handle last query if file doesn't end with proper closure
+        if (currentSection && currentLabel && queryLines.length > 0) {
+            const fullQuery = queryLines.join(' ').trim();
+            if (fullQuery) {
+                const cleanQuery = extractCleanQuery(fullQuery);
+                viewQueries.push({
+                    id: currentSection,
+                    label: currentLabel,
+                    fullQuery: fullQuery,
+                    cleanQuery: cleanQuery,
+                    category: currentSection.split('.')[0]
+                });
+            }
+        }
+
+        return viewQueries;
+    }
+
+    // Function to extract clean query without COLUMN/FORMAT prefixes
+    function extractCleanQuery(fullQuery) {
+        // Remove COLUMN and FORMAT directives to get the core SQL
+        let cleanQuery = fullQuery;
+
+        // Remove COLUMN directive - handle multiline case
+        cleanQuery = cleanQuery.replace(/^COLUMN\s+[^S]*?(SELECT)/i, '$1');
+
+        // Remove FORMAT directive - handle multiline case
+        cleanQuery = cleanQuery.replace(/FORMAT\s+[^S]*?(SELECT)/i, '$1');
+
+        // Clean up extra whitespace
+        cleanQuery = cleanQuery.replace(/\s+/g, ' ').trim();
+
+        return cleanQuery;
+    }
+
+    // Function to create CAPTION version of a query
+    function createCaptionQuery(viewQuery) {
+        // Extract column names from COLUMN directive if present
+        const columnMatch = viewQuery.fullQuery.match(/COLUMN\s+(.*?)\s+(?:FORMAT|SELECT)/is);
+        if (columnMatch) {
+            const columnDef = columnMatch[1].trim();
+            // Create CAPTION version
+            return `CAPTION ${columnDef} ${viewQuery.cleanQuery}`;
+        }
+        return null;
+    }
+
+    // Function to load view queries dynamically
+    async function loadViewQueries() {
+        try {
+            const response = await fetch('/query?q=' + encodeURIComponent('views'));
+            const data = await response.text();
+
+            const viewQueries = parseViewQueries(data);
+
+            if (viewQueries.length > 0) {
+                console.log(`Loaded ${viewQueries.length} view queries`);
+
+                // Add view queries to sample queries in multiple formats
+                viewQueries.forEach(view => {
+                    // Add the clean query (without COLUMN/FORMAT)
+                    queryVocabulary.sampleQueries.push({
+                        text: view.cleanQuery,
+                        type: 'view',
+                        description: view.label,
+                        category: view.category,
+                        id: view.id
+                    });
+
+                    // Add the full query (with COLUMN/FORMAT if present)
+                    if (view.fullQuery !== view.cleanQuery) {
+                        queryVocabulary.sampleQueries.push({
+                            text: view.fullQuery,
+                            type: 'view-formatted',
+                            description: `${view.label} (formatted)`,
+                            category: view.category,
+                            id: view.id
+                        });
+                    }
+
+                    // Add CAPTION version if COLUMN directive exists
+                    const captionQuery = createCaptionQuery(view);
+                    if (captionQuery) {
+                        queryVocabulary.sampleQueries.push({
+                            text: captionQuery,
+                            type: 'view-caption',
+                            description: `${view.label} (caption)`,
+                            category: view.category,
+                            id: view.id
+                        });
+                    }
+                });
+
+                console.log(`Added ${queryVocabulary.sampleQueries.filter(s => s.type?.startsWith('view')).length} view-based sample queries`);
+            }
+
+        } catch (error) {
+            console.warn('Could not load view queries:', error);
         }
     }
 
@@ -427,30 +615,30 @@
     async function checkAndExecuteShowFields(errorMessage) {
         // Look for patterns like "SHOW FIELDS SomeEventName" in the error message
         const showFieldsMatch = errorMessage.match(/SHOW FIELDS\s+([A-Za-z][A-Za-z0-9_.]*)/);
-        
+
         if (showFieldsMatch) {
             const eventName = showFieldsMatch[1];
             const showFieldsQuery = `SHOW FIELDS ${eventName}`;
-            
+
             // Check cache first
             if (showFieldsCache.has(showFieldsQuery)) {
                 console.log(`Using cached fields for: ${eventName}`);
                 displayShowFieldsResult(showFieldsQuery, showFieldsCache.get(showFieldsQuery));
                 return;
             }
-            
+
             try {
                 console.log(`Auto-executing: ${showFieldsQuery}`);
                 const response = await fetch(`/query?q=${encodeURIComponent(showFieldsQuery)}`);
                 const fieldsData = await response.text();
-                
+
                 // Use the enhanced cache function
                 addToShowFieldsCache(showFieldsQuery, fieldsData);
                 console.log(`Cached fields for: ${eventName}`);
-                
+
                 // Display the fields information
                 displayShowFieldsResult(showFieldsQuery, fieldsData);
-                
+
             } catch (error) {
                 console.warn('Failed to auto-execute SHOW FIELDS:', error);
                 const resultDiv = document.getElementById('result');
@@ -464,13 +652,13 @@
     function displayShowFieldsResult(query, fieldsData) {
         const resultDiv = document.getElementById('result');
         const currentContent = resultDiv.textContent;
-        
+
         // Create a separator and add the fields information
         const separator = '\n\n' + '='.repeat(50) + '\n';
         const fieldsSection = `Auto-executed: ${query}\n${separator}${fieldsData}`;
-        
+
         resultDiv.textContent = currentContent + '\n\n' + fieldsSection;
-        
+
         // Scroll to show the new content
         resultDiv.scrollTop = resultDiv.scrollHeight;
     }
@@ -500,37 +688,51 @@
             showFieldsCache.delete(firstKey);
             console.log(`Cache limit reached, removed: ${firstKey}`);
         }
-        
+
         showFieldsCache.set(query, data);
     }
 
-    // Initialize sample queries - single call using centralized definition
-    queryVocabulary.sampleQueries.forEach(query => previousQueries.add(query));
+    // Initialize sample queries - only add strings to previousQueries Set
+    queryVocabulary.sampleQueries.forEach(query => {
+        // Only add string queries to the dropdown, skip objects
+        if (typeof query === 'string') {
+            previousQueries.add(query);
+        } else {
+            // For object queries, add just the text part
+            previousQueries.add(query.text);
+        }
+    });
 
     // Enhanced function to add sample query suggestions
     function addSampleQuerySuggestions(suggestions, currentWord) {
         queryVocabulary.sampleQueries.forEach(query => {
-            // Show all sample queries if no input, or if query starts with current input
-            if (currentWord.length === 0 || 
-                query.toLowerCase().startsWith(currentWord.toLowerCase())) {
-                
-                // Create a short description for the query
-                let description = '';
-                if (query.includes('SHOW')) {
-                    description = 'Show information';
-                } else if (query.includes('CAPTION')) {
-                    description = 'Formatted report';
-                } else if (query.includes('SELECT') && query.includes('GROUP BY')) {
-                    description = 'Aggregation query';
-                } else if (query.includes('SELECT')) {
-                    description = 'Basic query';
-                } else if (query === 'grammar' || query === 'views') {
-                    description = 'Help command';
+            // Handle both string and object formats
+            const queryText = typeof query === 'string' ? query : query.text;
+            const queryType = typeof query === 'string' ? 'sample' : (query.type || 'sample');
+            const queryDescription = typeof query === 'string' ? '' : (query.description || '');
+
+            if (currentWord.length === 0 ||
+                queryText.toLowerCase().includes(currentWord.toLowerCase())) {
+
+                let description = queryDescription;
+                if (!description && typeof query === 'string') {
+                    // Generate description for string queries
+                    if (queryText.includes('SHOW')) {
+                        description = 'Show information';
+                    } else if (queryText.includes('CAPTION')) {
+                        description = 'Formatted report';
+                    } else if (queryText.includes('SELECT') && queryText.includes('GROUP BY')) {
+                        description = 'Aggregation query';
+                    } else if (queryText.includes('SELECT')) {
+                        description = 'Basic query';
+                    } else if (queryText === 'grammar' || queryText === 'views') {
+                        description = 'Help command';
+                    }
                 }
-                
-                suggestions.push({ 
-                    text: query, 
-                    type: 'sample',
+
+                suggestions.push({
+                    text: queryText,
+                    type: queryType,
                     description: description
                 });
             }
@@ -542,48 +744,16 @@
         const beforeCursor = text.substring(0, cursorPos);
         const wordMatch = beforeCursor.match(/\b\w*$/);
         const currentWord = wordMatch ? wordMatch[0].toLowerCase() : '';
-        
+
         const suggestions = [];
         const context = getQueryContext(beforeCursor);
-        
-        // Always add sample queries as suggestions when typing starts with their beginning
-        // or when at the very start of input
+
+        // Add sample queries when at the start or for short inputs
         if (beforeCursor.trim().length < 10 || context === 'start') {
             addSampleQuerySuggestions(suggestions, currentWord);
         }
-        
-        // Also add sample queries if the current input matches the beginning of any sample query
-        if (currentWord.length > 0) {
-            const matchingSamples = queryVocabulary.sampleQueries.filter(query => 
-                query.toLowerCase().startsWith(beforeCursor.trim().toLowerCase())
-            );
-            
-            matchingSamples.forEach(query => {
-                // Avoid duplicates
-                if (!suggestions.some(s => s.text === query)) {
-                    let description = '';
-                    if (query.includes('SHOW')) {
-                        description = 'Show information';
-                    } else if (query.includes('CAPTION')) {
-                        description = 'Formatted report';
-                    } else if (query.includes('SELECT') && query.includes('GROUP BY')) {
-                        description = 'Aggregation query';
-                    } else if (query.includes('SELECT')) {
-                        description = 'Basic query';
-                    } else if (query === 'grammar' || query === 'views') {
-                        description = 'Help command';
-                    }
-                    
-                    suggestions.push({ 
-                        text: query, 
-                        type: 'sample',
-                        description: description
-                    });
-                }
-            });
-        }
-        
-        // Context-specific suggestions
+
+        // Add context-specific suggestions
         switch (context) {
             case 'start':
             case 'after_keyword':
@@ -594,7 +764,6 @@
                 addSuggestions(suggestions, queryVocabulary.commonFields, currentWord, 'field');
                 break;
             case 'after_from':
-                // Use dynamically loaded event types with counts
                 addEventSuggestions(suggestions, queryVocabulary.availableEventTypes, currentWord);
                 break;
             case 'after_format':
@@ -606,38 +775,36 @@
                 addSuggestions(suggestions, queryVocabulary.commonFields, currentWord, 'field');
                 addEventSuggestions(suggestions, queryVocabulary.availableEventTypes, currentWord);
         }
-        
-        // Sort suggestions to prioritize sample queries that match from the beginning
+
+        // Sort suggestions - DON'T prioritize view queries, keep them mixed in
         suggestions.sort((a, b) => {
-            const aIsSample = a.type === 'sample';
-            const bIsSample = b.type === 'sample';
             const trimmedInput = beforeCursor.trim().toLowerCase();
-            
-            // If one is a sample query and matches from the beginning, prioritize it
-            if (aIsSample && a.text.toLowerCase().startsWith(trimmedInput)) return -1;
-            if (bIsSample && b.text.toLowerCase().startsWith(trimmedInput)) return 1;
-            
-            // Otherwise, prioritize sample queries in general
-            if (aIsSample && !bIsSample) return -1;
-            if (!aIsSample && bIsSample) return 1;
-            
+
+            // Prioritize exact matches from the beginning
+            const aStartsWithInput = a.text.toLowerCase().startsWith(trimmedInput);
+            const bStartsWithInput = b.text.toLowerCase().startsWith(trimmedInput);
+
+            if (aStartsWithInput && !bStartsWithInput) return -1;
+            if (!aStartsWithInput && bStartsWithInput) return 1;
+
+            // Otherwise keep original order (mixed)
             return 0;
         });
-        
-        return suggestions.slice(0, 15);
+
+        return suggestions.slice(0, 20);
     }
 
     // New function to add event suggestions with counts
     function addEventSuggestions(suggestions, eventTypes, currentWord) {
         eventTypes.forEach(eventType => {
-            if (eventType.toLowerCase().includes(currentWord.toLowerCase()) || 
+            if (eventType.toLowerCase().includes(currentWord.toLowerCase()) ||
                 eventType.toLowerCase().startsWith(currentWord.toLowerCase())) {
-                const count = queryVocabulary.eventCounts && queryVocabulary.eventCounts[eventType] 
-                    ? queryVocabulary.eventCounts[eventType] 
+                const count = queryVocabulary.eventCounts && queryVocabulary.eventCounts[eventType]
+                    ? queryVocabulary.eventCounts[eventType]
                     : '';
-                
-                suggestions.push({ 
-                    text: eventType, 
+
+                suggestions.push({
+                    text: eventType,
                     type: 'event',
                     count: count,
                     description: count ? `${count} events` : ''
@@ -652,26 +819,26 @@
             hideAutoCompleteSuggestions();
             return;
         }
-        
+
         currentSuggestions = suggestions;
         selectedSuggestionIndex = -1; // Don't preselect any suggestion
-        
+
         const html = suggestions.map((suggestion, index) => {
             let displayText = suggestion.text;
             let metaInfo = '';
-            
+
             // Format based on suggestion type
             if (suggestion.type === 'event' && suggestion.count) {
                 metaInfo = `<span class="suggestion-count">${suggestion.count} events</span>`;
             } else if (suggestion.description) {
                 metaInfo = `<span class="suggestion-description">${suggestion.description}</span>`;
             }
-            
-            // Truncate very long sample queries for display
-            if (suggestion.type === 'sample' && displayText.length > 60) {
-                displayText = displayText.substring(0, 60) + '...';
+
+            // Truncate very long queries for display
+            if ((suggestion.type?.startsWith('view') || suggestion.type === 'sample') && displayText.length > 80) {
+                displayText = displayText.substring(0, 80) + '...';
             }
-            
+
             return `<div class="autocomplete-suggestion" data-index="${index}">
                 <div class="suggestion-main">
                     <div class="suggestion-text">${displayText}</div>
@@ -682,12 +849,10 @@
                 </div>
             </div>`;
         }).join('');
-        
+
         autocompleteSuggestions.innerHTML = html;
         autocompleteSuggestions.style.display = 'block';
-        
-        // Don't auto-select the first suggestion - user must press Tab
-        
+
         // Add click handlers
         autocompleteSuggestions.querySelectorAll('.autocomplete-suggestion').forEach(elem => {
             elem.addEventListener('click', () => {
@@ -702,9 +867,9 @@
         const text = queryInput.value;
         const beforeCursor = text.substring(0, cursorPos);
         const afterCursor = text.substring(cursorPos);
-        
+
         let newText, newPos;
-        
+
         // For sample queries, replace the entire query if we're at the start
         if (suggestion.type === 'sample' && beforeCursor.trim().length < 10) {
             newText = suggestion.text;
@@ -713,15 +878,15 @@
             // For other suggestions, find the current partial word
             const wordMatch = beforeCursor.match(/\b\w*$/);
             const wordStart = wordMatch ? cursorPos - wordMatch[0].length : cursorPos;
-            
+
             // Replace the partial word with the suggestion
             newText = text.substring(0, wordStart) + suggestion.text + afterCursor;
             newPos = wordStart + suggestion.text.length;
         }
-        
+
         queryInput.value = newText;
         queryInput.setSelectionRange(newPos, newPos);
-        
+
         hideAutoCompleteSuggestions();
         updateHighlighting();
         queryInput.focus();
@@ -729,7 +894,7 @@
 
     function getQueryContext(beforeCursor) {
         const trimmed = beforeCursor.trim().toLowerCase();
-        
+
         if (trimmed === '' || /^\s*$/.test(trimmed)) return 'start';
         if (/\bselect\s*$/i.test(trimmed)) return 'after_select';
         if (/\bfrom\s*$/i.test(trimmed)) return 'after_from';
@@ -737,10 +902,10 @@
         if (/\bwhere\s*$/i.test(trimmed)) return 'after_where';
         if (/\bgroup\s+by\s*$/i.test(trimmed)) return 'after_group_by';
         if (/\border\s+by\s*$/i.test(trimmed)) return 'after_order_by';
-        
+
         return 'general';
     }
-    
+
     function addSuggestions(suggestions, items, currentWord, type) {
         items.forEach(item => {
             if (item.toLowerCase().startsWith(currentWord)) {
@@ -748,7 +913,7 @@
             }
         });
     }
-    
+
     function hideAutoCompleteSuggestions() {
         autocompleteSuggestions.style.display = 'none';
         currentSuggestions = [];
@@ -758,7 +923,7 @@
     // Update navigateSuggestions to handle the case where no suggestion is initially selected
     function navigateSuggestions(direction) {
         if (currentSuggestions.length === 0) return;
-        
+
         // Remove previous selection
         if (selectedSuggestionIndex >= 0) {
             const prevSelected = autocompleteSuggestions.children[selectedSuggestionIndex];
@@ -766,7 +931,7 @@
                 prevSelected.classList.remove('selected');
             }
         }
-        
+
         // Update selection
         if (selectedSuggestionIndex === -1) {
             // If no selection, start from first (down) or last (up)
@@ -779,7 +944,7 @@
                 selectedSuggestionIndex = 0;
             }
         }
-        
+
         // Add new selection
         const newSelected = autocompleteSuggestions.children[selectedSuggestionIndex];
         if (newSelected) {
@@ -805,10 +970,27 @@
             }
         });
 
-        Array.from(previousQueries).sort().forEach(query => {
+        Array.from(previousQueries).sort((a, b) => {
+            // Handle both string and object queries for sorting
+            const aText = typeof a === 'string' ? a : a.text;
+            const bText = typeof b === 'string' ? b : b.text;
+            return aText.localeCompare(bText);
+        }).forEach(query => {
             const option = document.createElement('option');
-            option.value = query;
-            option.text = query.length > 50 ? query.substring(0, 50) + '...' : query;
+
+            // Handle both string and object queries
+            const queryText = typeof query === 'string' ? query : query.text;
+            const queryDescription = typeof query === 'string' ? '' : query.description;
+
+            option.value = queryText;
+
+            // Create display text with description if available
+            let displayText = queryText.length > 50 ? queryText.substring(0, 50) + '...' : queryText;
+            if (queryDescription) {
+                displayText += ` (${queryDescription})`;
+            }
+
+            option.text = displayText;
             select.add(option);
         });
     }
@@ -838,10 +1020,10 @@
             .then(response => response.text())
             .then(data => {
                 document.getElementById('result').textContent = data;
-                
+
                 // Check if the error message contains a SHOW FIELDS suggestion
                 checkAndExecuteShowFields(data);
-                
+
                 // If this was a SHOW EVENTS query, refresh our event types
                 if (query.trim().toUpperCase() === 'SHOW EVENTS') {
                     setTimeout(loadAvailableEventTypes, 100);
@@ -895,9 +1077,10 @@
         }
     });
 
-    // Load event types when the page loads
+    // Load event types and view queries when the page loads
     window.addEventListener('load', function() {
         loadAvailableEventTypes();
+        loadViewQueries();
     });
 
     // Initialize everything
@@ -912,7 +1095,7 @@
     // Event listeners
     queryInput.addEventListener('input', function(e) {
         updateHighlighting();
-        
+
         const suggestions = getAutoCompleteSuggestions(queryInput.value, queryInput.selectionStart);
         showAutoCompleteSuggestions(suggestions);
     });
@@ -957,7 +1140,7 @@
                 return;
             }
         }
-        
+
         if ((e.key === 'Enter' || e.keyCode === 13) && (e.ctrlKey || e.metaKey)) {
             console.log('Ctrl+Enter pressed, executing query...');
             // Hide autocompletion before executing
