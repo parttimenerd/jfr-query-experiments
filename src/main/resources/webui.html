@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>JFR Query Tool</title>
     <style>
         body {
@@ -54,6 +55,8 @@
             border: 1px solid #ccc;
             padding: 10px;
             background-color: #f5f5f5;
+            line-height: 1.4;
+            position: relative; /* Ensure proper stacking context for sticky headers */
         }
 
         /* Syntax highlighting styles */
@@ -114,22 +117,22 @@
             padding: 2px 4px;
             border-left: 3px solid #0066cc;
         }
-        
+
         .view-label {
             color: #006600;
             font-weight: bold;
         }
-        
+
         .view-comment {
             color: #999999;
             font-style: italic;
         }
-        
+
         .view-query-type {
             color: #666666;
             font-weight: bold;
         }
-        
+
         /* Enhanced result div to support HTML content */
         #result {
             font-family: monospace;
@@ -140,6 +143,7 @@
             padding: 10px;
             background-color: #f5f5f5;
             line-height: 1.4;
+            position: relative; /* Ensure proper stacking context for sticky headers */
         }
 
         /* Auto-completion styles */
@@ -267,6 +271,112 @@
             background: #f3e5f5;
             color: #7b1fa2;
         }
+
+        /* JFR Table Styles - Fixed sticky header */
+        .jfr-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 13px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .jfr-table th {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 8px 12px;
+            text-align: left;
+            font-weight: bold;
+            color: #495057;
+            position: sticky;
+            top: -1px; /* Fix for the gap - offset by border width */
+            z-index: 10;
+            box-shadow: 0 1px 0 0 #dee2e6; /* Add bottom border shadow to maintain separation */
+        }
+
+        .jfr-table td {
+            border: 1px solid #dee2e6;
+            padding: 6px 12px;
+            vertical-align: top;
+        }
+
+        .jfr-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .jfr-table tr:hover {
+            background-color: #e9ecef;
+        }
+
+        /* Handle long content in cells */
+        .jfr-table td {
+            max-width: 200px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        /* Make the result container scrollable for tables */
+        #result:has(.jfr-table) {
+            overflow: auto;
+        }
+
+        /* SHOW EVENTS specific styling */
+        .show-events-summary {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            border-left: 4px solid #007acc;
+        }
+
+        .show-events-table .has-data {
+            background-color: #d4edda;
+        }
+
+        .show-events-table .no-data {
+            background-color: #f8d7da;
+            opacity: 0.7;
+        }
+
+        .show-events-table .has-data:hover {
+            background-color: #c3e6cb;
+        }
+
+        .show-events-table .no-data:hover {
+            background-color: #f1b5ba;
+        }
+
+        /* Enhanced sortable table styles */
+        .sortable-table th[data-sort] {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+            transition: background-color 0.2s ease;
+        }
+
+        .sortable-table th[data-sort]:hover {
+            background-color: #e9ecef;
+        }
+
+        .sort-indicator {
+            font-size: 0.8em;
+            color: #666;
+            margin-left: 5px;
+            font-weight: normal;
+        }
+
+        .sortable-table th.sort-asc,
+        .sortable-table th.sort-desc {
+            background-color: #e3f2fd;
+        }
+
+        .sortable-table th.sort-asc .sort-indicator,
+        .sortable-table th.sort-desc .sort-indicator {
+            color: #1976d2;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -287,6 +397,10 @@
         <div class="auto-query">
             <input type="checkbox" id="autoQuery">
             <label for="autoQuery">Auto query</label>
+        </div>
+        <div class="auto-query">
+            <input type="checkbox" id="formatTables" checked>
+            <label for="formatTables">Format output</label>
         </div>
         <button id="executeButton" onclick="executeQuery(true)" title="Launch query, CTRL+Enter">Query</button>
     </div>
@@ -365,11 +479,6 @@
                 description: "Allocation pressure by method"
             },
             {
-                text: "SELECT eventThread, COUNT(*) FROM ExecutionSample GROUP BY eventThread",
-                type: 'sample',
-                description: "Execution samples by thread"
-            },
-            {
                 text: "SELECT gcId, duration FROM GarbageCollection ORDER BY duration DESC",
                 type: 'sample',
                 description: "GC events by duration"
@@ -437,7 +546,688 @@
         }
     }
 
-    // Function to load available event types dynamically
+    // Function to detect if output is tabular data
+    function isTabularData(data) {
+        const lines = data.split('\n');
+        if (lines.length < 3) return false;
+
+        // Look for a header separator line with dashes
+        for (let i = 1; i < Math.min(3, lines.length); i++) {
+            const line = lines[i].trim();
+            if (line.match(/^-+(\s+-+)+$/)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Function to detect if output is SHOW EVENTS format
+    function isShowEventsData(data) {
+        return data.includes('Event Types (number of events):') ||
+               (data.includes('ActiveRecording') && data.includes('CPULoad') && data.includes('GarbageCollection'));
+    }
+
+    // Function to detect if output is SHOW FIELDS format
+    function isShowFieldsData(data) {
+        // Look for field definitions with type and name patterns
+        return data.match(/^\s*(long|int|String|Thread|boolean|float|double|byte|short|char)\s+\w+/m) ||
+               data.includes('Event types with a') ||
+               data.includes(':') && data.match(/^\s*\w+\s+\w+$/m);
+    }
+
+    // Function to parse SHOW FIELDS output into formatted HTML
+    function parseShowFieldsData(data) {
+        const lines = data.split('\n');
+        let html = '';
+        let inEventSection = false;
+        let currentEventName = '';
+        let fields = [];
+        let relatedEvents = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            if (!line) continue;
+
+            // Check if this is an event name (ends with colon)
+            if (line.endsWith(':')) {
+                // Process previous event if exists
+                if (currentEventName && fields.length > 0) {
+                    html += formatEventFields(currentEventName, fields);
+                    fields = [];
+                }
+
+                currentEventName = line.slice(0, -1); // Remove colon
+                inEventSection = false;
+                continue;
+            }
+
+            // Check if this is a section header for related events
+            if (line.includes('Event types with a') && line.includes('relation:')) {
+                if (currentEventName && fields.length > 0) {
+                    html += formatEventFields(currentEventName, fields);
+                    fields = [];
+                }
+                html += `<div class="show-fields-section">
+                    <h3>${escapeHtml(line)}</h3>
+                </div>`;
+                inEventSection = true;
+                continue;
+            }
+
+            // If we're in the related events section
+            if (inEventSection) {
+                // Parse multiple event names from the line
+                const eventNames = line.split(/\s+/).filter(name => name.trim() && !name.match(/^\s*$/));
+                relatedEvents.push(...eventNames);
+                continue;
+            }
+
+            // Parse field definition (type fieldName)
+            const fieldMatch = line.match(/^\s*(long|int|String|Thread|boolean|float|double|byte|short|char|[\w.]+)\s+(\w+)/);
+            if (fieldMatch) {
+                fields.push({
+                    type: fieldMatch[1],
+                    name: fieldMatch[2]
+                });
+            }
+        }
+
+        // Process the last event
+        if (currentEventName && fields.length > 0) {
+            html += formatEventFields(currentEventName, fields);
+        }
+
+        // Add related events section if we have any
+        if (relatedEvents.length > 0) {
+            html += formatRelatedEvents(relatedEvents);
+        }
+
+        return html;
+    }
+
+    // Function to format event fields as a table
+    function formatEventFields(eventName, fields) {
+        let html = `<div class="show-fields-event">
+            <h2>${escapeHtml(eventName)}</h2>
+            <table class="jfr-table sortable-table show-fields-table">
+                <thead>
+                    <tr>
+                        <th style="text-align: left" data-sort="string">Field Name <span class="sort-indicator"></span></th>
+                        <th style="text-align: left" data-sort="string">Type <span class="sort-indicator"></span></th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        for (const field of fields) {
+            html += `<tr>
+                <td style="text-align: left" data-value="${escapeHtml(field.name)}">${escapeHtml(field.name)}</td>
+                <td style="text-align: left" data-value="${escapeHtml(field.type)}"><span class="field-type">${escapeHtml(field.type)}</span></td>
+            </tr>`;
+        }
+
+        html += `    </tbody>
+            </table>
+        </div>`;
+
+        return html;
+    }
+
+    // Function to format related events section
+    function formatRelatedEvents(relatedEvents) {
+        // Group events by prefix for better organization
+        const grouped = {};
+        relatedEvents.forEach(event => {
+            const prefix = event.includes('.') ? event.split('.')[0] : 'other';
+            if (!grouped[prefix]) grouped[prefix] = [];
+            grouped[prefix].push(event);
+        });
+
+        let html = `<div class="show-fields-related">
+            <table class="jfr-table sortable-table show-fields-related-table">
+                <thead>
+                    <tr>
+                        <th style="text-align: left" data-sort="string">Related Event Types <span class="sort-indicator"></span></th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+        // Sort events alphabetically
+        relatedEvents.sort().forEach(event => {
+            html += `<tr>
+                <td style="text-align: left" data-value="${escapeHtml(event)}">${escapeHtml(event)}</td>
+            </tr>`;
+        });
+
+        html += `    </tbody>
+            </table>
+        </div>`;
+
+        return html;
+    }
+
+    // Function to parse SHOW EVENTS output into HTML table (without Has Data column)
+    function parseShowEventsData(data) {
+        const lines = data.split('\n');
+        const events = [];
+
+        // Skip the header line and process the rest
+        let startProcessing = false;
+
+        for (const line of lines) {
+            if (line.includes('Event Types (number of events):')) {
+                startProcessing = true;
+                continue;
+            }
+
+            if (!startProcessing || line.trim() === '') {
+                continue;
+            }
+
+            // Parse each line - events can be in format "EventName (count)" or just "EventName"
+            const eventMatches = line.match(/\b([A-Za-z][A-Za-z0-9_]*)\s*(\((\d+)\))?\s*/g);
+
+            if (eventMatches) {
+                for (const match of eventMatches) {
+                    const eventMatch = match.trim().match(/^([A-Za-z][A-Za-z0-9_]*)\s*(\((\d+)\))?/);
+                    if (eventMatch) {
+                        const eventName = eventMatch[1];
+                        const count = eventMatch[3] ? parseInt(eventMatch[3]) : 0;
+
+                        events.push({
+                            name: eventName,
+                            count: count,
+                            hasData: count > 0
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort events: first by whether they have data (count > 0), then alphabetically
+        events.sort((a, b) => {
+            if (a.hasData && !b.hasData) return -1;
+            if (!a.hasData && b.hasData) return 1;
+            return a.name.localeCompare(b.name);
+        });
+
+        // Generate HTML table
+        let html = '<div class="show-events-summary">';
+
+        const eventsWithData = events.filter(e => e.hasData);
+        const eventsWithoutData = events.filter(e => !e.hasData);
+
+        html += `<p><strong>Total Event Types:</strong> ${events.length} (${eventsWithData.length} with data, ${eventsWithoutData.length} without data)</p>`;
+        html += '</div>';
+
+        html += '<table class="jfr-table sortable-table show-events-table">';
+
+        // Table header (removed Has Data column)
+        html += '<thead><tr>';
+        html += '<th style="text-align: left" data-sort="string">Event Type <span class="sort-indicator"></span></th>';
+        html += '<th style="text-align: right" data-sort="number">Count <span class="sort-indicator"></span></th>';
+        html += '</tr></thead>';
+
+        // Table body
+        html += '<tbody>';
+        for (const event of events) {
+            const rowClass = event.hasData ? 'has-data' : 'no-data';
+            const countDisplay = event.count > 0 ? event.count.toLocaleString() : '-';
+
+            html += `<tr class="${rowClass}">`;
+            html += `<td style="text-align: left" data-value="${escapeHtml(event.name)}">${escapeHtml(event.name)}</td>`;
+            html += `<td style="text-align: right" data-value="${event.count}">${countDisplay}</td>`;
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        return html;
+    }
+
+    // Enhanced executeQuery to handle SHOW FIELDS formatting
+    function executeQuery(addToHistory = false) {
+        const query = queryInput.value;
+        if (!query) return;
+
+        // Hide autocompletion when executing query
+        hideAutoCompleteSuggestions();
+
+        // Skip if this exact query was just executed
+        if (query === lastExecutedQuery) return;
+
+        lastExecutedQuery = query;
+
+        // Only add to history if explicitly requested (via button click)
+        if (addToHistory && !previousQueries.has(query)) {
+            previousQueries.add(query);
+            updatePreviousQueriesDropdown();
+        }
+
+        document.getElementById('result').textContent = 'Executing query...';
+
+        fetch(`/query?q=${encodeURIComponent(query)}`)
+            .then(response => response.text())
+            .then(data => {
+                const resultDiv = document.getElementById('result');
+                const formatOutputEnabled = document.getElementById('formatTables').checked;
+
+                // Apply different formatting based on query type and format setting
+                if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
+                    resultDiv.innerHTML = highlightViewsOutput(data);
+                } else if (formatOutputEnabled && query.trim().toUpperCase() === 'SHOW EVENTS' && isShowEventsData(data)) {
+                    resultDiv.innerHTML = parseShowEventsData(data);
+                } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
+                    resultDiv.innerHTML = parseShowFieldsData(data);
+                } else if (formatOutputEnabled && isTabularData(data)) {
+                    resultDiv.innerHTML = parseTabularData(data);
+                } else {
+                    resultDiv.textContent = data;
+                }
+
+                // Make tables sortable after rendering
+                if (formatOutputEnabled) {
+                    const tables = resultDiv.querySelectorAll('.sortable-table');
+                    tables.forEach(table => makeSortable(table));
+                }
+
+                // Check if the error message contains a SHOW FIELDS suggestion
+                checkAndExecuteShowFields(data);
+
+                // If this was a SHOW EVENTS query, refresh our event types
+                if (query.trim().toUpperCase() === 'SHOW EVENTS') {
+                    setTimeout(loadAvailableEventTypes, 100);
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').textContent = 'Error: ' + error;
+            });
+    }
+
+    // Function to parse values with units for proper sorting
+    function parseValueWithUnit(value) {
+        if (!value || value === '-') return 0;
+
+        const str = value.toString().trim();
+
+        // Time units (convert to milliseconds for comparison)
+        const timeMatch = str.match(/^(\d+(?:\.\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
+        if (timeMatch) {
+            const num = parseFloat(timeMatch[1]);
+            const unit = timeMatch[2].toLowerCase();
+
+            switch (unit) {
+                case 'ns': return num / 1000000; // nanoseconds to milliseconds
+                case 'μs': return num / 1000;    // microseconds to milliseconds
+                case 'ms': return num;           // milliseconds
+                case 's': return num * 1000;     // seconds to milliseconds
+                case 'm': return num * 60000;    // minutes to milliseconds
+                case 'h': return num * 3600000;  // hours to milliseconds
+                case 'd': return num * 86400000; // days to milliseconds
+                default: return num;
+            }
+        }
+
+        // Memory units (convert to bytes for comparison)
+        const memoryMatch = str.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i);
+        if (memoryMatch) {
+            const num = parseFloat(memoryMatch[1]);
+            const unit = memoryMatch[2].toLowerCase();
+
+            switch (unit) {
+                case 'b': return num;                    // bytes
+                case 'kb': return num * 1000;           // kilobytes (decimal)
+                case 'mb': return num * 1000000;        // megabytes (decimal)
+                case 'gb': return num * 1000000000;     // gigabytes (decimal)
+                case 'tb': return num * 1000000000000;  // terabytes (decimal)
+                case 'kib': return num * 1024;          // kibibytes (binary)
+                case 'mib': return num * 1048576;       // mebibytes (binary)
+                case 'gib': return num * 1073741824;    // gibibytes (binary)
+                case 'tib': return num * 1099511627776; // tebibytes (binary)
+                default: return num;
+            }
+        }
+
+        // Percentage values
+        const percentMatch = str.match(/^(\d+(?:\.\d+)?)\s*%$/);
+        if (percentMatch) {
+            return parseFloat(percentMatch[1]);
+        }
+
+        // Regular numbers (including decimals)
+        const numberMatch = str.match(/^(\d+(?:\.\d+)?)$/);
+        if (numberMatch) {
+            return parseFloat(numberMatch[1]);
+        }
+
+        // If no pattern matches, return 0 for consistent sorting
+        return 0;
+    }
+
+    // Enhanced function to detect data types including units
+    function detectDataType(values) {
+        let hasNumbers = 0;
+        let hasUnits = 0;
+        let hasText = 0;
+
+        for (const value of values) {
+            if (!value || value === '-') continue;
+
+            const str = value.toString().trim();
+
+            // Check for time/memory units or percentages
+            if (str.match(/^(\d+(?:\.\d+)?)\s*(ns|μs|ms|s|m|h|d|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB|%)$/i)) {
+                hasUnits++;
+            }
+            // Check for plain numbers
+            else if (str.match(/^\d+(?:\.\d+)?$/)) {
+                hasNumbers++;
+            }
+            // Everything else is text
+            else {
+                hasText++;
+            }
+        }
+
+        // If most values have units, treat as numeric with units
+        if (hasUnits > hasText && hasUnits > hasNumbers / 2) {
+            return 'number';
+        }
+        // If most values are plain numbers, treat as numeric
+        else if (hasNumbers > hasText) {
+            return 'number';
+        }
+        // Otherwise treat as string
+        else {
+            return 'string';
+        }
+    }
+
+    // Enhanced parseTabularData function with better data type detection
+    function parseTabularData(data) {
+        const lines = data.split('\n');
+        let headerLine = '';
+        let separatorLine = '';
+        let dataLines = [];
+        let separatorIndex = -1;
+
+        // Find the separator line (line with dashes)
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.match(/^-+(\s+-+)+$/)) {
+                separatorIndex = i;
+                separatorLine = line;
+                if (i > 0) {
+                    headerLine = lines[i - 1];
+                }
+                // Collect data lines after separator
+                for (let j = i + 1; j < lines.length; j++) {
+                    if (lines[j].trim()) {
+                        dataLines.push(lines[j]);
+                    }
+                }
+                break;
+            }
+        }
+
+        if (separatorIndex === -1 || !headerLine) {
+            return data; // Not a valid table format
+        }
+
+        // Parse column positions from separator line
+        const columnPositions = [];
+        let currentStart = -1;
+        let inColumn = false;
+
+        for (let i = 0; i < separatorLine.length; i++) {
+            const char = separatorLine[i];
+            if (char === '-') {
+                if (!inColumn) {
+                    inColumn = true;
+                    currentStart = i;
+                }
+            } else if (char === ' ') {
+                if (inColumn) {
+                    columnPositions.push({
+                        start: currentStart,
+                        end: i - 1,
+                        width: i - currentStart
+                    });
+                    inColumn = false;
+                }
+            }
+        }
+
+        // Add the last column if we ended in a column
+        if (inColumn) {
+            columnPositions.push({
+                start: currentStart,
+                end: separatorLine.length - 1,
+                width: separatorLine.length - currentStart
+            });
+        }
+
+        // Parse headers and determine alignment
+        const headers = [];
+        const alignments = [];
+
+        for (const col of columnPositions) {
+            const headerText = headerLine.substring(col.start, col.end + 1);
+            const trimmedHeader = headerText.trim();
+            headers.push(trimmedHeader);
+
+            // Determine alignment based on header position within column
+            const leadingSpaces = headerText.length - headerText.trimStart().length;
+            const trailingSpaces = headerText.length - headerText.trimEnd().length;
+
+            let alignment = 'left'; // default
+            if (leadingSpaces > trailingSpaces) {
+                alignment = 'right';
+            } else if (leadingSpaces > 0 && trailingSpaces > 0 && Math.abs(leadingSpaces - trailingSpaces) <= 1) {
+                alignment = 'center';
+            }
+
+            alignments.push(alignment);
+        }
+
+        // Parse data rows and collect column values for type detection
+        const rows = [];
+        const columnValues = headers.map(() => []); // Array of arrays to collect values per column
+
+        for (const line of dataLines) {
+            const row = [];
+            for (let i = 0; i < columnPositions.length; i++) {
+                const col = columnPositions[i];
+                const cellText = line.substring(col.start, Math.min(col.end + 1, line.length));
+                const trimmedCell = cellText.trim();
+                row.push(trimmedCell);
+
+                // Collect values for type detection
+                if (trimmedCell) {
+                    columnValues[i].push(trimmedCell);
+                }
+
+                // Refine alignment based on data content
+                if (trimmedCell && alignments[i] === 'left') {
+                    const leadingSpaces = cellText.length - cellText.trimStart().length;
+                    const trailingSpaces = cellText.length - cellText.trimEnd().length;
+
+                    // If most cells in this column are right-aligned, change alignment
+                    if (leadingSpaces > trailingSpaces && leadingSpaces > 2) {
+                        alignments[i] = 'right';
+                    }
+                }
+            }
+            rows.push(row);
+        }
+
+        // Detect data types for each column based on collected values
+        const dataTypes = columnValues.map(values => detectDataType(values));
+
+        // Generate HTML table with proper alignment and sorting
+        let html = '<table class="jfr-table sortable-table">';
+
+        // Table header
+        html += '<thead><tr>';
+        for (let i = 0; i < headers.length; i++) {
+            const header = headers[i];
+            const alignment = alignments[i];
+            const dataType = dataTypes[i];
+            html += `<th style="text-align: ${alignment}" data-sort="${dataType}">${escapeHtml(header)} <span class="sort-indicator"></span></th>`;
+        }
+        html += '</tr></thead>';
+
+        // Table body
+        html += '<tbody>';
+        for (const row of rows) {
+            html += '<tr>';
+            for (let i = 0; i < row.length; i++) {
+                const cell = row[i];
+                const alignment = alignments[i];
+
+                // Calculate sort value using the enhanced parser
+                let sortValue = cell;
+                if (dataTypes[i] === 'number') {
+                    sortValue = parseValueWithUnit(cell);
+                }
+
+                html += `<td style="text-align: ${alignment}" data-value="${sortValue}">${escapeHtml(cell)}</td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        return html;
+    }
+
+    // Enhanced sort function to handle units properly
+    function sortTable(table, columnIndex, dataType) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const header = table.querySelectorAll('th')[columnIndex];
+        const sortIndicator = header.querySelector('.sort-indicator');
+
+        // Determine sort direction
+        let ascending = true;
+        if (header.classList.contains('sort-asc')) {
+            ascending = false;
+            header.classList.remove('sort-asc');
+            header.classList.add('sort-desc');
+            sortIndicator.textContent = ' ▼';
+        } else {
+            ascending = true;
+            header.classList.remove('sort-desc');
+            header.classList.add('sort-asc');
+            sortIndicator.textContent = ' ▲';
+        }
+
+        // Clear other headers' sort indicators
+        table.querySelectorAll('th').forEach((th, i) => {
+            if (i !== columnIndex) {
+                th.classList.remove('sort-asc', 'sort-desc');
+                const indicator = th.querySelector('.sort-indicator');
+                if (indicator) indicator.textContent = '';
+            }
+        });
+
+        // Sort rows
+        rows.sort((a, b) => {
+            const aCell = a.children[columnIndex];
+            const bCell = b.children[columnIndex];
+
+            let aValue = aCell.getAttribute('data-value');
+            let bValue = bCell.getAttribute('data-value');
+
+            if (dataType === 'number') {
+                // For numbers, use the pre-calculated sort values
+                aValue = parseFloat(aValue) || 0;
+                bValue = parseFloat(bValue) || 0;
+                return ascending ? aValue - bValue : bValue - aValue;
+            } else {
+                // For strings, do case-insensitive comparison
+                aValue = (aValue || aCell.textContent.trim()).toString().toLowerCase();
+                bValue = (bValue || bCell.textContent.trim()).toString().toLowerCase();
+                if (aValue < bValue) return ascending ? -1 : 1;
+                if (aValue > bValue) return ascending ? 1 : -1;
+                return 0;
+            }
+        });
+
+        // Re-append sorted rows
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    // Function to make tables sortable
+    function makeSortable(table) {
+        const headers = table.querySelectorAll('th[data-sort]');
+
+        headers.forEach((header, index) => {
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', () => {
+                sortTable(table, index, header.getAttribute('data-sort'));
+            });
+        });
+    }
+
+    // Enhanced executeQuery to initialize sortable tables
+    function executeQuery(addToHistory = false) {
+        const query = queryInput.value;
+        if (!query) return;
+
+        // Hide autocompletion when executing query
+        hideAutoCompleteSuggestions();
+
+        // Skip if this exact query was just executed
+        if (query === lastExecutedQuery) return;
+
+        lastExecutedQuery = query;
+
+        // Only add to history if explicitly requested (via button click)
+        if (addToHistory && !previousQueries.has(query)) {
+            previousQueries.add(query);
+            updatePreviousQueriesDropdown();
+        }
+
+        document.getElementById('result').textContent = 'Executing query...';
+
+        fetch(`/query?q=${encodeURIComponent(query)}`)
+            .then(response => response.text())
+            .then(data => {
+                const resultDiv = document.getElementById('result');
+                const formatOutputEnabled = document.getElementById('formatTables').checked;
+
+                // Apply different formatting based on query type and format setting
+                if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
+                    resultDiv.innerHTML = highlightViewsOutput(data);
+                } else if (formatOutputEnabled && query.trim().toUpperCase() === 'SHOW EVENTS' && isShowEventsData(data)) {
+                    resultDiv.innerHTML = parseShowEventsData(data);
+                } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
+                    resultDiv.innerHTML = parseShowFieldsData(data);
+                } else if (formatOutputEnabled && isTabularData(data)) {
+                    resultDiv.innerHTML = parseTabularData(data);
+                } else {
+                    resultDiv.textContent = data;
+                }
+
+                // Make tables sortable after rendering
+                if (formatOutputEnabled) {
+                    const tables = resultDiv.querySelectorAll('.sortable-table');
+                    tables.forEach(table => makeSortable(table));
+                }
+
+                // Check if the error message contains a SHOW FIELDS suggestion
+                checkAndExecuteShowFields(data);
+
+                // If this was a SHOW EVENTS query, refresh our event types
+                if (query.trim().toUpperCase() === 'SHOW EVENTS') {
+                    setTimeout(loadAvailableEventTypes, 100);
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').textContent = 'Error: ' + error;
+            });
+    }
+
+    // Enhanced function to load available event types dynamically
     async function loadAvailableEventTypes() {
         try {
             const response = await fetch('/query?q=' + encodeURIComponent('SHOW EVENTS'));
@@ -468,12 +1258,191 @@
                 queryVocabulary.availableEventTypes = eventTypes;
                 queryVocabulary.eventCounts = eventCounts;
                 console.log(`Loaded ${eventTypes.length} event types with data:`, eventTypes);
+
+                // Filter sample queries after loading events
+                filterSampleQueriesByAvailableEvents();
             }
 
         } catch (error) {
             console.warn('Could not load event types, using fallback list:', error);
             // Keep the fallback list that's already in availableEventTypes
         }
+    }
+
+    // Enhanced filterSampleQueriesByAvailableEvents to also update dropdown
+    function filterSampleQueriesByAvailableEvents() {
+        const originalCount = queryVocabulary.sampleQueries.length;
+
+        // Filter the sample queries to only include those with available events
+        queryVocabulary.sampleQueries = queryVocabulary.sampleQueries.filter(query => {
+            const queryText = typeof query === 'string' ? query : query.text;
+            return isQueryValidForDataset(queryText);
+        });
+
+        const filteredCount = queryVocabulary.sampleQueries.length;
+        console.log(`Filtered sample queries: ${originalCount} -> ${filteredCount} (removed ${originalCount - filteredCount} queries with unavailable events)`);
+
+        // Also filter the previousQueries Set to remove invalid queries
+        const previousQueriesList = Array.from(previousQueries);
+        previousQueries.clear();
+
+        previousQueriesList.forEach(query => {
+            const queryText = typeof query === 'string' ? query : query.text;
+            if (isQueryValidForDataset(queryText)) {
+                previousQueries.add(query);
+            }
+        });
+
+        // Update the dropdown with filtered queries
+        updatePreviousQueriesDropdown();
+    }
+
+    // New function to check if a query references only available events
+    function isQueryValidForDataset(queryText) {
+        // Always allow non-event queries (SHOW commands, grammar, views, etc.)
+        if (!queryText.includes('FROM') ||
+            queryText.toLowerCase().includes('show ') ||
+            queryText === 'grammar' ||
+            queryText === 'views') {
+            return true;
+        }
+
+        // Extract event names from FROM clauses
+        const fromMatches = queryText.match(/FROM\s+([A-Za-z][A-Za-z0-9_.]*)/gi);
+        if (!fromMatches) {
+            return true; // No FROM clause found, allow it
+        }
+
+        // Check if all referenced events are in our available event types
+        for (const fromMatch of fromMatches) {
+            const eventName = fromMatch.replace(/FROM\s+/i, '').trim();
+
+            // Check if this event is in our available events list
+            if (!queryVocabulary.availableEventTypes.includes(eventName)) {
+                return false; // Event not available in dataset
+            }
+        }
+
+        return true; // All events are available
+    }
+
+    // Enhanced updatePreviousQueriesDropdown to filter by available events
+    function updatePreviousQueriesDropdown() {
+        const select = document.getElementById('previousQueries');
+
+        // Clear existing options except the first one
+        while (select.options.length > 1) {
+            select.remove(1);
+        }
+
+        const specialOptions = ["grammar", "views"];
+        specialOptions.forEach(query => {
+            if (!previousQueries.has(query)) {
+                const option = document.createElement('option');
+                option.value = query;
+                option.text = query;
+                select.add(option);
+            }
+        });
+
+        // Filter and sort queries from previousQueries Set
+        Array.from(previousQueries).filter(query => {
+            // Handle both string and object queries
+            const queryText = typeof query === 'string' ? query : query.text;
+            // Apply the same filtering logic as suggestions
+            return isQueryValidForDataset(queryText);
+        }).sort((a, b) => {
+            // Handle both string and object queries for sorting
+            const aText = typeof a === 'string' ? a : a.text;
+            const bText = typeof b === 'string' ? b : b.text;
+            return aText.localeCompare(bText);
+        }).forEach(query => {
+            const option = document.createElement('option');
+
+            // Handle both string and object queries
+            const queryText = typeof query === 'string' ? query : query.text;
+            const queryDescription = typeof query === 'string' ? '' : query.description;
+
+            option.value = queryText;
+
+            // Create display text with description if available
+            let displayText = queryText.length > 50 ? queryText.substring(0, 50) + '...' : queryText;
+            if (queryDescription) {
+                displayText += ` (${queryDescription})`;
+            }
+
+            option.text = displayText;
+            select.add(option);
+        });
+
+        // Also add sample queries that are valid for the dataset
+        queryVocabulary.sampleQueries.forEach(query => {
+            const queryText = typeof query === 'string' ? query : query.text;
+            const queryDescription = typeof query === 'string' ? '' : query.description;
+
+            // Filter out queries that reference events not in the dataset
+            if (!isQueryValidForDataset(queryText)) {
+                return; // Skip this query
+            }
+
+            // Skip if already in previousQueries
+            if (previousQueries.has(queryText) || previousQueries.has(query)) {
+                return;
+            }
+
+            const option = document.createElement('option');
+            option.value = queryText;
+
+            // Create display text with description if available
+            let displayText = queryText.length > 50 ? queryText.substring(0, 50) + '...' : queryText;
+            if (queryDescription) {
+                displayText += ` (${queryDescription})`;
+            }
+
+            option.text = displayText;
+            select.add(option);
+        });
+    }
+
+    // Enhanced function to add sample query suggestions - filter by available events
+    function addSampleQuerySuggestions(suggestions, currentWord) {
+        queryVocabulary.sampleQueries.forEach(query => {
+            // Handle both string and object formats
+            const queryText = typeof query === 'string' ? query : query.text;
+            const queryType = typeof query === 'string' ? 'sample' : (query.type || 'sample');
+            const queryDescription = typeof query === 'string' ? '' : (query.description || '');
+
+            // Filter out queries that reference events not in the dataset
+            if (!isQueryValidForDataset(queryText)) {
+                return; // Skip this query
+            }
+
+            if (currentWord.length === 0 ||
+                queryText.toLowerCase().includes(currentWord.toLowerCase())) {
+
+                let description = queryDescription;
+                if (!description && typeof query === 'string') {
+                    // Generate description for string queries
+                    if (queryText.includes('SHOW')) {
+                        description = 'Show information';
+                    } else if (queryText.includes('CAPTION')) {
+                        description = 'Formatted report';
+                    } else if (queryText.includes('SELECT') && queryText.includes('GROUP BY')) {
+                        description = 'Aggregation query';
+                    } else if (queryText.includes('SELECT')) {
+                        description = 'Basic query';
+                    } else if (queryText === 'grammar' || queryText === 'views') {
+                        description = 'Help command';
+                    }
+                }
+
+                suggestions.push({
+                    text: queryText,
+                    type: queryType,
+                    description: description
+                });
+            }
+        });
     }
 
     // Enhanced function to parse view.ini format and extract queries with descriptions
@@ -988,93 +1957,44 @@
         }
     }
 
-    function updatePreviousQueriesDropdown() {
-        const select = document.getElementById('previousQueries');
+    // Update the format output checkbox handler
+    document.getElementById('formatTables').addEventListener('change', function() {
+        // If there's a current query result, re-process it
+        const resultDiv = document.getElementById('result');
+        const currentContent = resultDiv.textContent || resultDiv.innerHTML;
 
-        while (select.options.length > 1) {
-            select.remove(1);
+        // Only re-execute if we have a last executed query and it's not empty
+        if (lastExecutedQuery &&
+            currentContent !== 'Executing query...' &&
+            currentContent !== 'Results will appear here' &&
+            currentContent !== 'Re-formatting...') {
+
+            // Re-execute the last query to apply/remove output formatting
+            const query = lastExecutedQuery;
+            document.getElementById('result').textContent = 'Re-formatting...';
+
+            fetch(`/query?q=${encodeURIComponent(query)}`)
+                .then(response => response.text())
+                .then(data => {
+                    const formatOutputEnabled = this.checked;
+
+                    if (formatOutputEnabled && query.trim().toLowerCase() === 'views') {
+                        resultDiv.innerHTML = highlightViewsOutput(data);
+                    } else if (formatOutputEnabled && query.trim().toUpperCase() === 'SHOW EVENTS' && isShowEventsData(data)) {
+                        resultDiv.innerHTML = parseShowEventsData(data);
+                    } else if (formatOutputEnabled && query.trim().toUpperCase().startsWith('SHOW FIELDS') && isShowFieldsData(data)) {
+                        resultDiv.innerHTML = parseShowFieldsData(data);
+                    } else if (formatOutputEnabled && isTabularData(data)) {
+                        resultDiv.innerHTML = parseTabularData(data);
+                    } else {
+                        resultDiv.textContent = data;
+                    }
+                })
+                .catch(error => {
+                    resultDiv.textContent = 'Error: ' + error;
+                });
         }
-
-        const specialOptions = ["grammar", "views"];
-        specialOptions.forEach(query => {
-            if (!previousQueries.has(query)) {
-                const option = document.createElement('option');
-                option.value = query;
-                option.text = query;
-                select.add(option);
-            }
-        });
-
-        Array.from(previousQueries).sort((a, b) => {
-            // Handle both string and object queries for sorting
-            const aText = typeof a === 'string' ? a : a.text;
-            const bText = typeof b === 'string' ? b : b.text;
-            return aText.localeCompare(bText);
-        }).forEach(query => {
-            const option = document.createElement('option');
-
-            // Handle both string and object queries
-            const queryText = typeof query === 'string' ? query : query.text;
-            const queryDescription = typeof query === 'string' ? '' : query.description;
-
-            option.value = queryText;
-
-            // Create display text with description if available
-            let displayText = queryText.length > 50 ? queryText.substring(0, 50) + '...' : queryText;
-            if (queryDescription) {
-                displayText += ` (${queryDescription})`;
-            }
-
-            option.text = displayText;
-            select.add(option);
-        });
-    }
-
-    // Enhanced executeQuery function with SHOW FIELDS auto-execution and syntax highlighting
-    function executeQuery(addToHistory = false) {
-        const query = queryInput.value;
-        if (!query) return;
-
-        // Hide autocompletion when executing query
-        hideAutoCompleteSuggestions();
-
-        // Skip if this exact query was just executed
-        if (query === lastExecutedQuery) return;
-
-        lastExecutedQuery = query;
-
-        // Only add to history if explicitly requested (via button click)
-        if (addToHistory && !previousQueries.has(query)) {
-            previousQueries.add(query);
-            updatePreviousQueriesDropdown();
-        }
-
-        document.getElementById('result').textContent = 'Executing query...';
-
-        fetch(`/query?q=${encodeURIComponent(query)}`)
-            .then(response => response.text())
-            .then(data => {
-                const resultDiv = document.getElementById('result');
-                
-                // Apply syntax highlighting if this is a views query
-                if (query.trim().toLowerCase() === 'views') {
-                    resultDiv.innerHTML = highlightViewsOutput(data);
-                } else {
-                    resultDiv.textContent = data;
-                }
-
-                // Check if the error message contains a SHOW FIELDS suggestion
-                checkAndExecuteShowFields(data);
-
-                // If this was a SHOW EVENTS query, refresh our event types
-                if (query.trim().toUpperCase() === 'SHOW EVENTS') {
-                    setTimeout(loadAvailableEventTypes, 100);
-                }
-            })
-            .catch(error => {
-                document.getElementById('result').textContent = 'Error: ' + error;
-            });
-    }
+    });
 
     // Function to highlight the views output with syntax highlighting
     function highlightViewsOutput(viewsData) {
@@ -1082,10 +2002,10 @@
         const highlightedLines = [];
         let inQuery = false;
         let queryLines = [];
-        
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            
+
             // Check if this is a section header
             if (line.match(/^\[([^\]]+)\]$/)) {
                 // If we were in a query, highlight it first
@@ -1096,29 +2016,29 @@
                     queryLines = [];
                     inQuery = false;
                 }
-                
+
                 // Add the section header with special styling
                 highlightedLines.push(`<span class="view-section">${escapeHtml(line)}</span>`);
                 continue;
             }
-            
+
             // Check if this is a label line
             if (line.match(/^label\s*=\s*"([^"]+)"$/)) {
                 highlightedLines.push(`<span class="view-label">${escapeHtml(line)}</span>`);
                 continue;
             }
-            
+
             // Check if this starts a query
             if (line.match(/^(table|form)\s*=\s*"/)) {
                 inQuery = true;
                 queryLines = [line];
                 continue;
             }
-            
+
             // If we're in a query, collect lines
             if (inQuery) {
                 queryLines.push(line);
-                
+
                 // Check if this ends the query
                 if (line.trim().endsWith('"')) {
                     // Highlight the complete query
@@ -1130,7 +2050,7 @@
                 }
                 continue;
             }
-            
+
             // For other lines (comments, etc.), just escape and add
             if (line.trim().startsWith(';')) {
                 highlightedLines.push(`<span class="view-comment">${escapeHtml(line)}</span>`);
@@ -1140,14 +2060,14 @@
                 highlightedLines.push(escapeHtml(line));
             }
         }
-        
+
         // Handle any remaining query at the end
         if (inQuery && queryLines.length > 0) {
             const queryText = queryLines.join('\n');
             const highlighted = highlightViewsQuery(queryText);
             highlightedLines.push(highlighted);
         }
-        
+
         return highlightedLines.join('\n');
     }
 
@@ -1155,11 +2075,11 @@
     function highlightViewsQuery(queryText) {
         // Extract the SQL part from the query definition
         let sqlPart = queryText;
-        
+
         // Split into lines to handle the structure
         const lines = queryText.split('\n');
         const highlightedLines = [];
-        
+
         for (const line of lines) {
             if (line.match(/^(table|form)\s*=\s*"/)) {
                 // This is the start line
@@ -1191,7 +2111,7 @@
                 }
             }
         }
-        
+
         return highlightedLines.join('\n');
     }
 
@@ -1325,8 +2245,7 @@
         }
     });
 
-    // Initial highlighting
-    updateHighlighting();
+    // Initial highlighting    updateHighlighting();
 </script>
 </body>
 </html>

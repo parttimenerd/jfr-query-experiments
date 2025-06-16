@@ -117,6 +117,7 @@ public class WebCommand implements Callable<Integer>, Footerable {
             // Initialize configuration
             Configuration configuration = new Configuration();
             configOptions.init(configuration);
+            configuration.width = configOptions.width != null ? configOptions.width : 200;
             configuration.output = printer;
 
             try (EventStream stream = EventStream.openFile(file)) {
