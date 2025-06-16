@@ -107,6 +107,41 @@
         .sql-number { color: #ff6600; }
         .sql-comment { color: #999999; font-style: italic; }
 
+        .view-section {
+            color: #0066cc;
+            font-weight: bold;
+            background-color: #f0f8ff;
+            padding: 2px 4px;
+            border-left: 3px solid #0066cc;
+        }
+        
+        .view-label {
+            color: #006600;
+            font-weight: bold;
+        }
+        
+        .view-comment {
+            color: #999999;
+            font-style: italic;
+        }
+        
+        .view-query-type {
+            color: #666666;
+            font-weight: bold;
+        }
+        
+        /* Enhanced result div to support HTML content */
+        #result {
+            font-family: monospace;
+            white-space: pre-wrap;
+            overflow-y: auto;
+            height: calc(100vh - 250px);
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f5f5f5;
+            line-height: 1.4;
+        }
+
         /* Auto-completion styles */
         .autocomplete-container {
             position: relative;
@@ -995,7 +1030,7 @@
         });
     }
 
-    // Enhanced executeQuery function with SHOW FIELDS auto-execution
+    // Enhanced executeQuery function with SHOW FIELDS auto-execution and syntax highlighting
     function executeQuery(addToHistory = false) {
         const query = queryInput.value;
         if (!query) return;
@@ -1019,7 +1054,14 @@
         fetch(`/query?q=${encodeURIComponent(query)}`)
             .then(response => response.text())
             .then(data => {
-                document.getElementById('result').textContent = data;
+                const resultDiv = document.getElementById('result');
+                
+                // Apply syntax highlighting if this is a views query
+                if (query.trim().toLowerCase() === 'views') {
+                    resultDiv.innerHTML = highlightViewsOutput(data);
+                } else {
+                    resultDiv.textContent = data;
+                }
 
                 // Check if the error message contains a SHOW FIELDS suggestion
                 checkAndExecuteShowFields(data);
@@ -1032,6 +1074,138 @@
             .catch(error => {
                 document.getElementById('result').textContent = 'Error: ' + error;
             });
+    }
+
+    // Function to highlight the views output with syntax highlighting
+    function highlightViewsOutput(viewsData) {
+        const lines = viewsData.split('\n');
+        const highlightedLines = [];
+        let inQuery = false;
+        let queryLines = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Check if this is a section header
+            if (line.match(/^\[([^\]]+)\]$/)) {
+                // If we were in a query, highlight it first
+                if (inQuery && queryLines.length > 0) {
+                    const queryText = queryLines.join('\n');
+                    const highlighted = highlightSyntax(queryText);
+                    highlightedLines.push(highlighted);
+                    queryLines = [];
+                    inQuery = false;
+                }
+                
+                // Add the section header with special styling
+                highlightedLines.push(`<span class="view-section">${escapeHtml(line)}</span>`);
+                continue;
+            }
+            
+            // Check if this is a label line
+            if (line.match(/^label\s*=\s*"([^"]+)"$/)) {
+                highlightedLines.push(`<span class="view-label">${escapeHtml(line)}</span>`);
+                continue;
+            }
+            
+            // Check if this starts a query
+            if (line.match(/^(table|form)\s*=\s*"/)) {
+                inQuery = true;
+                queryLines = [line];
+                continue;
+            }
+            
+            // If we're in a query, collect lines
+            if (inQuery) {
+                queryLines.push(line);
+                
+                // Check if this ends the query
+                if (line.trim().endsWith('"')) {
+                    // Highlight the complete query
+                    const queryText = queryLines.join('\n');
+                    const highlighted = highlightViewsQuery(queryText);
+                    highlightedLines.push(highlighted);
+                    queryLines = [];
+                    inQuery = false;
+                }
+                continue;
+            }
+            
+            // For other lines (comments, etc.), just escape and add
+            if (line.trim().startsWith(';')) {
+                highlightedLines.push(`<span class="view-comment">${escapeHtml(line)}</span>`);
+            } else if (line.trim() === '') {
+                highlightedLines.push('');
+            } else {
+                highlightedLines.push(escapeHtml(line));
+            }
+        }
+        
+        // Handle any remaining query at the end
+        if (inQuery && queryLines.length > 0) {
+            const queryText = queryLines.join('\n');
+            const highlighted = highlightViewsQuery(queryText);
+            highlightedLines.push(highlighted);
+        }
+        
+        return highlightedLines.join('\n');
+    }
+
+    // Function to highlight a query within the views output
+    function highlightViewsQuery(queryText) {
+        // Extract the SQL part from the query definition
+        let sqlPart = queryText;
+        
+        // Split into lines to handle the structure
+        const lines = queryText.split('\n');
+        const highlightedLines = [];
+        
+        for (const line of lines) {
+            if (line.match(/^(table|form)\s*=\s*"/)) {
+                // This is the start line
+                const match = line.match(/^((table|form)\s*=\s*")(.*)/);
+                if (match) {
+                    const prefix = match[1];
+                    const sqlStart = match[3];
+                    highlightedLines.push(
+                        `<span class="view-query-type">${escapeHtml(prefix)}</span>` +
+                        (sqlStart ? highlightSyntax(sqlStart) : '')
+                    );
+                } else {
+                    highlightedLines.push(escapeHtml(line));
+                }
+            } else if (line.trim().endsWith('"')) {
+                // This is the end line
+                const sqlEnd = line.substring(0, line.lastIndexOf('"'));
+                const quote = '"';
+                highlightedLines.push(
+                    (sqlEnd ? highlightSyntax(sqlEnd) : '') +
+                    `<span class="view-query-type">${escapeHtml(quote)}</span>`
+                );
+            } else {
+                // This is a middle line with SQL content
+                if (line.trim()) {
+                    highlightedLines.push(highlightSyntax(line));
+                } else {
+                    highlightedLines.push(line);
+                }
+            }
+        }
+        
+        return highlightedLines.join('\n');
+    }
+
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+        return text.replace(/[<>&"']/g, function(match) {
+            return {
+                '<': '&lt;',
+                '>': '&gt;',
+                '&': '&amp;',
+                '"': '&quot;',
+                "'": '&#39;'
+            }[match];
+        });
     }
 
     // Function for selecting previous queries from dropdown
