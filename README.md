@@ -9,7 +9,7 @@ based, currently, on the [JDK 21](https://github.com/openjdk/jdk21u) code.
 And it has a (highly experimental) web mode to easily test JFR queries:
 
 ```shell
-java -jar target/query.jar web
+java -jar target/query.jar web recording.jfr
 -> starts a web server on port 8080
 -> open http://localhost:8080
 ```
