@@ -1044,6 +1044,12 @@ let graphParseCache = new Map();
 const MAX_GRAPH_CACHE_SIZE = 20;
 let zeroYAxis = false;
 
+// Add these variables near the other graph-related variables around line 1010
+let isSelecting = false;
+let selectionStart = null;
+let selectionEnd = null;
+let selectionOverlay = null;
+
 function toggleZeroYAxis() {
     const checkbox = document.getElementById('zeroYAxisCheckbox');
     zeroYAxis = checkbox.checked;
@@ -1233,6 +1239,21 @@ function parseTimeValue(timeStr) {
         return new Date(timeStr).getTime();
     }
 
+    if (timeStr.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+        // Handle local datetime format: 2023-10-15 14:30:25
+        return new Date(timeStr.replace(' ', 'T') + 'Z').getTime();
+    }
+
+    if (timeStr.match(/^\d{2}:\d{2}:\d{2}/)) {
+        // Handle time format: 14:30:25
+        const parts = timeStr.split(':');
+        const now = new Date();
+        now.setHours(parseInt(parts[0], 10));
+        now.setMinutes(parseInt(parts[1], 10));
+        now.setSeconds(parseInt(parts[2], 10));
+        return now.getTime();
+    }
+
     // JFR timestamp format (nanoseconds since JVM start or epoch)
     // These are usually large numbers like 123456789012345
     const num = parseFloat(timeStr);
@@ -1278,6 +1299,31 @@ function parseTimeValue(timeStr) {
     return null;
 }
 
+function debounce(func, wait) {
+    let timeout;
+    return function() {
+        const context = this;
+        const args = arguments;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+}
+
+function throttle(func, limit) {
+    let inThrottle;
+    return function() {
+        const args = arguments;
+        const context = this;
+        if (!inThrottle) {
+            func.apply(context, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    };
+}
+
+// ...existing code...
+// Enhance the createGraph function to add slice selection capability
 function createGraph(parsedData) {
     if (!parsedData || !parsedData.numericColumns.length) {
         showGraphStatus('No numeric columns found for plotting');
@@ -1307,15 +1353,32 @@ function createGraph(parsedData) {
         return;
     }
 
-    // Check if we have relative times (all clustered together)
+    // **FIX: Better detection of time format consistency**
     const timeRange = timeData[timeData.length - 1].time - timeData[0].time;
-    const isRelativeTime = timeRange < 1000 * 60 * 60; // Less than 1 hour range
+    const firstTime = timeData[0].time;
+    const lastTime = timeData[timeData.length - 1].time;
     
-    // If we have relative times, spread them out more naturally
-    if (isRelativeTime && timeData.length > 1) {
-        const startTime = Date.now() - (timeData.length * 1000); // 1 second per data point
+    // Detect if times are in the same day (likely HH:mm:ss format)
+    const firstDate = new Date(firstTime);
+    const lastDate = new Date(lastTime);
+    const isSameDay = firstDate.toDateString() === lastDate.toDateString();
+    
+    // If we have relative times or same-day times, ensure proper spacing
+    if ((timeRange < 1000 * 60 * 60 && timeData.length > 1) || 
+        (isSameDay && timeRange < 1000 * 60 * 60 * 24)) {
+        
+        // For same-day data or relative times, ensure even spacing
+        const startTime = isSameDay ? firstTime : (Date.now() - (timeData.length * 1000));
+        const interval = timeRange / (timeData.length - 1) || 1000; // 1 second default
+        
         timeData.forEach((item, index) => {
-            item.time = startTime + (index * 1000);
+            if (isSameDay) {
+                // Keep original times for same-day data
+                return;
+            } else {
+                // Space out relative times evenly
+                item.time = startTime + (index * interval);
+            }
         });
     }
     
@@ -1368,19 +1431,74 @@ function createGraph(parsedData) {
         graphChart.destroy();
     }
     
-    // Determine appropriate time display format
-    const timeDisplayFormat = isRelativeTime ? {
-        millisecond: 'mm:ss.SSS',
-        second: 'mm:ss',
-        minute: 'HH:mm',
-        hour: 'HH:mm'
-    } : {
-        millisecond: 'HH:mm:ss.SSS',
-        second: 'HH:mm:ss',
-        minute: 'HH:mm',
-        hour: 'MMM dd HH:mm',
-        day: 'MMM dd'
-    };
+    // **FIX: Improved time display format detection**
+    const actualTimeRange = timeData[timeData.length - 1].time - timeData[0].time;
+    const actualFirstDate = new Date(timeData[0].time);
+    const actualLastDate = new Date(timeData[timeData.length - 1].time);
+    const isActuallySameDay = actualFirstDate.toDateString() === actualLastDate.toDateString();
+    
+    // Determine appropriate time display format based on actual data characteristics
+    let timeDisplayFormat;
+    let tooltipFormat;
+    
+    if (actualTimeRange < 60000) { // Less than 1 minute
+        timeDisplayFormat = {
+            millisecond: 'HH:mm:ss.SSS',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm:ss',
+            hour: 'HH:mm:ss',
+            day: 'HH:mm:ss',
+            week: 'HH:mm:ss',
+            month: 'HH:mm:ss',
+            quarter: 'HH:mm:ss',
+            year: 'HH:mm:ss'
+        };
+        tooltipFormat = 'HH:mm:ss.SSS';
+    } else if (actualTimeRange < 3600000 || isActuallySameDay) { // Less than 1 hour or same day
+        timeDisplayFormat = {
+            millisecond: 'HH:mm:ss',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm:ss',
+            hour: 'HH:mm',
+            day: 'HH:mm',
+            week: 'HH:mm',
+            month: 'HH:mm',
+            quarter: 'HH:mm',
+            year: 'HH:mm'
+        };
+        tooltipFormat = 'HH:mm:ss';
+    } else if (actualTimeRange < 86400000) { // Less than 1 day
+        timeDisplayFormat = {
+            millisecond: 'HH:mm:ss',
+            second: 'HH:mm:ss',
+            minute: 'HH:mm',
+            hour: 'HH:mm',
+            day: 'MM/dd HH:mm',
+            week: 'MM/dd HH:mm',
+            month: 'MM/dd HH:mm',
+            quarter: 'MM/dd HH:mm',
+            year: 'MM/dd HH:mm'
+        };
+        tooltipFormat = 'MM/dd/yyyy HH:mm:ss';
+    } else {
+        timeDisplayFormat = {
+            millisecond: 'MM/dd HH:mm:ss',
+            second: 'MM/dd HH:mm:ss',
+            minute: 'MM/dd HH:mm',
+            hour: 'MM/dd HH:mm',
+            day: 'MM/dd',
+            week: 'MM/dd',
+            month: 'MMM yyyy',
+            quarter: 'MMM yyyy',
+            year: 'yyyy'
+        };
+        tooltipFormat = 'MM/dd/yyyy HH:mm:ss';
+    }
+
+    // Throttled update function for pan/zoom
+    const throttlePanZoomUpdate = throttle(function({chart}) {
+        updateTableForCurrentViewport(chart, graphData, timeData);
+    }, 100); // 100ms throttle limit
     
     graphChart = new Chart(ctx, {
         type: 'line',
@@ -1397,11 +1515,53 @@ function createGraph(parsedData) {
                 x: {
                     type: 'time',
                     time: {
-                        displayFormats: timeDisplayFormat
+                        displayFormats: timeDisplayFormat,
+                        tooltipFormat: tooltipFormat
                     },
                     title: {
                         display: true,
                         text: parsedData.headers[parsedData.timeColumnIndex]
+                    },
+                    ticks: {
+                        source: 'auto',
+                        autoSkip: true,
+                        maxTicksLimit: 10,
+                        callback: function(value, index, ticks) {
+                            // **FIX: Consistent formatting for tick labels**
+                            const date = new Date(value);
+                            
+                            if (actualTimeRange < 60000) {
+                                // Less than 1 minute - show seconds
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                            } else if (actualTimeRange < 3600000 || isActuallySameDay) {
+                                // Less than 1 hour or same day - show minutes
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            } else if (actualTimeRange < 86400000) {
+                                // Less than 1 day - show hours and minutes
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            } else {
+                                // More than 1 day - show date and time
+                                return date.toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+                            }
+                        }
                     }
                 },
                 y: {
@@ -1417,9 +1577,8 @@ function createGraph(parsedData) {
                     pan: {
                         enabled: true,
                         mode: 'x',
-                        onPan: function({chart}) {
-                            updateTableForCurrentViewport(chart, parsedData, timeData);
-                        }
+                        modifierKey: 'shift',
+                        onPan: throttlePanZoomUpdate
                     },
                     zoom: {
                         wheel: {
@@ -1429,9 +1588,7 @@ function createGraph(parsedData) {
                             enabled: true
                         },
                         mode: 'x',
-                        onZoom: function({chart}) {
-                            updateTableForCurrentViewport(chart, parsedData, timeData);
-                        }
+                        onZoom: throttlePanZoomUpdate
                     }
                 },
                 legend: {
@@ -1444,21 +1601,66 @@ function createGraph(parsedData) {
                     callbacks: {
                         title: function(context) {
                             const date = new Date(context[0].parsed.x);
-                            return isRelativeTime ? 
-                                date.toLocaleTimeString() : 
-                                date.toLocaleString();
+                            
+                            // **FIX: Use same formatting logic as ticks**
+                            if (actualTimeRange < 60000) {
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit',
+                                    fractionalSecondDigits: 3
+                                });
+                            } else if (actualTimeRange < 3600000 || isActuallySameDay) {
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                            } else if (actualTimeRange < 86400000) {
+                                return date.toLocaleTimeString('en-US', {
+                                    hour12: false,
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                });
+                            } else {
+                                return date.toLocaleString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit',
+                                    hour12: false
+                                });
+                            }
+                        },
+                        label: function(context) {
+                            return `${context.dataset.label}: ${context.parsed.y}`;
                         }
                     }
                 }
             }
         }
     });
-    
+        
     updateColumnSelector(parsedData.numericColumns);
     showGraphStatus('');
     
     console.log(`Created graph with ${datasets.length} datasets and ${timeData.length} time points`);
     console.log('Time range:', new Date(timeData[0].time).toLocaleString(), 'to', new Date(timeData[timeData.length - 1].time).toLocaleString());
+    console.log('Same day data:', isActuallySameDay, 'Time range (ms):', actualTimeRange);
+}
+
+// Update the resetGraphZoom function to also clear selection
+function resetGraphZoom() {
+    if (graphChart) {
+        graphChart.resetZoom();
+        // Also reset table filter when resetting zoom
+        resetTableFilter();
+    }
 }
 
 function updateTableForCurrentViewport(chart, parsedData, timeData) {
@@ -1559,14 +1761,6 @@ function resetTableFilter() {
     console.log('Reset table filter and chart zoom');
 }
 
-function resetGraphZoom() {
-    if (graphChart) {
-        graphChart.resetZoom();
-        // Also reset table filter when resetting zoom
-        resetTableFilter();
-    }
-}
-
 function updateColumnSelector(numericColumns) {
     const selector = document.querySelector('.column-selector');
     selector.innerHTML = '';
@@ -1602,12 +1796,6 @@ function showGraphStatus(message) {
     } else {
         statusDiv.style.display = 'none';
         graphCanvas.style.display = 'block';
-    }
-}
-
-function resetGraphZoom() {
-    if (graphChart) {
-        graphChart.resetZoom();
     }
 }
 
