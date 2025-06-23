@@ -17,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -42,10 +43,13 @@ public class WebCommand implements Callable<Integer>, Footerable {
     @CommandLine.Parameters(index = "0", description = "The JFR file to serve")
     private Path file;
 
+    // Base path for filesystem resources
+    private final Path resourceBasePath = Paths.get("src/main/resources");
+    private final boolean useFileSystemResources = Files.exists(resourceBasePath);
+
     @Override
     public Integer call() {
         try {
-
             // Validate file exists
             if (!file.toFile().exists()) {
                 System.err.println("Error: File not found: " + file);
@@ -64,8 +68,26 @@ public class WebCommand implements Callable<Integer>, Footerable {
                 sendResponse(exchange, 200, getSimpleUI());
             });
 
+            // Set handler to respond with resource file
+            server.createContext("/resources", exchange -> {
+                String resourcePath = exchange.getRequestURI().getPath().replace("/resources/", "");
+                String content = loadResource(resourcePath);
+
+                if (content != null) {
+                    exchange.getResponseHeaders().set("Content-Type", getContentType(resourcePath));
+                    sendResponse(exchange, 200, content);
+                } else {
+                    sendResponse(exchange, 404, "Resource not found: " + resourcePath);
+                }
+            });
+
             server.start();
             System.out.printf("Web server started at http://%s:%d%n", host, port);
+            if (useFileSystemResources) {
+                System.out.println("Using filesystem resources from: " + resourceBasePath.toAbsolutePath());
+            } else {
+                System.out.println("Using internal resources");
+            }
             System.out.println("Press Ctrl+C to stop");
 
             // Keep the application running
@@ -94,20 +116,14 @@ public class WebCommand implements Callable<Integer>, Footerable {
                 return;
             }
             if (query.equals("views")) {
-                // read the views from views.ini in the resources folder
-                StringWriter writer = new StringWriter();
-                try (var stream = this.getClass().getResourceAsStream("/view.ini")) {
-                    if (stream == null) {
-                        sendResponse(exchange, 500, "Views file not found");
-                        return;
-                    }
-                    writer.write(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
-                } catch (IOException e) {
-                    sendResponse(exchange, 500, "Error reading views file: " + e.getMessage());
-                    return;
+                // Try to read views.ini from filesystem or fallback to resources
+                String viewsContent = loadResource("view.ini");
+                if (viewsContent != null) {
+                    exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                    sendResponse(exchange, 200, viewsContent);
+                } else {
+                    sendResponse(exchange, 500, "Views file not found");
                 }
-                exchange.getResponseHeaders().set("Content-Type", "text/plain");
-                sendResponse(exchange, 200, writer.toString());
                 return;
             }
 
@@ -162,16 +178,42 @@ public class WebCommand implements Callable<Integer>, Footerable {
     }
 
     private String getSimpleUI() {
-        // load from resources file webui.html
-        var resource = this.getClass().getResource("/webui.html");
-        if (resource == null) {
-            return "<html><body><h1>Error: Web UI not found</h1></body></html>";
+        return loadResource("webui.html") != null
+                ? loadResource("webui.html")
+                : "<html><body><h1>Error: Web UI not found</h1></body></html>";
+    }
+
+    private String loadResource(String resourcePath) {
+        // First try to load from filesystem if we're in the repo base folder
+        if (useFileSystemResources) {
+            Path fsPath = resourceBasePath.resolve(resourcePath);
+            try {
+                if (Files.exists(fsPath)) {
+                    return Files.readString(fsPath, StandardCharsets.UTF_8);
+                }
+            } catch (IOException e) {
+                // Fall back to internal resources
+            }
         }
+
+        // Fall back to internal resources
+        var resource = this.getClass().getResource("/" + resourcePath);
+        if (resource == null) {
+            return null;
+        }
+
         try (var stream = resource.openStream()) {
             return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            return null;
         }
+    }
+
+    private String getContentType(String path) {
+        if (path.endsWith(".html")) return "text/html";
+        if (path.endsWith(".css")) return "text/css";
+        if (path.endsWith(".js")) return "application/javascript";
+        return "text/plain";
     }
 
     @Override
