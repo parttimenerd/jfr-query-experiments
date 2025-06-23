@@ -508,6 +508,191 @@
         .jfr-table tr[style*="display: none"] {
             opacity: 0;
         }
+
+        /* Row selection styles */
+        .table-selection-controls {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border: 1px solid #dee2e6;
+            border-radius: 6px 6px 0 0;
+            padding: 10px 15px;
+            margin: 10px 0 0 0;
+            border-bottom: none;
+        }
+
+        .selection-buttons {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .select-mode-btn {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background-color 0.2s ease;
+        }
+
+        .select-mode-btn:hover {
+            background-color: #5a6268;
+        }
+
+        .select-mode-btn.active {
+            background-color: #007bff;
+        }
+
+        .select-action-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background-color 0.2s ease;
+        }
+
+        .select-action-btn:hover {
+            background-color: #218838;
+        }
+
+        .graph-selected-btn {
+            background-color: #ff6b35;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
+
+        .graph-selected-btn:hover {
+            background-color: #e55a2b;
+        }
+
+        .selection-count {
+            color: #495057;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 6px 10px;
+            background-color: rgba(255,255,255,0.7);
+            border-radius: 3px;
+        }
+
+        /* Enhanced table styles for selection with better visual feedback */
+        .selectable-table.selection-mode tbody tr {
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            user-select: none; /* Prevent text selection during shift-click */
+        }
+
+        .selectable-table.selection-mode tbody tr:hover {
+            background-color: #e3f2fd !important;
+        }
+
+        .selected-row {
+            background-color: #bbdefb !important;
+            border-left: 4px solid #2196f3 !important;
+        }
+
+        .selected-row:hover {
+            background-color: #90caf9 !important;
+        }
+
+        /* Add visual indication for the anchor row (last individually selected) */
+        .selected-row.anchor-row {
+            border-left: 4px solid #1565c0 !important;
+            box-shadow: inset 0 0 0 1px #1565c0;
+        }
+
+        .select-column {
+            width: 40px;
+            text-align: center;
+            padding: 4px !important;
+        }
+
+        .select-column input[type="checkbox"] {
+            cursor: pointer;
+            transform: scale(1.1);
+        }
+
+        /* Graph selection info */
+        .graph-selection-info {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: rgba(25, 118, 210, 0.1);
+            border-radius: 4px;
+            border-left: 3px solid #1976d2;
+        }
+
+        /* Row selection styles */
+        .selectable-table.selection-mode .select-column {
+            display: table-cell !important;
+        }
+
+        .selectable-table.selection-mode .selected-row {
+            background-color: #e3f2fd;
+        }
+
+        .table-selection-controls {
+            margin-bottom: 10px;
+        }
+
+        .selection-buttons {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .select-mode-btn {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .select-mode-btn.active {
+            background-color: #1565c0;
+        }
+
+        .select-action-btn {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ccc;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .select-action-btn:hover {
+            background-color: #e0e0e0;
+        }
+
+        .graph-selected-btn {
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .graph-selected-btn:hover {
+            background-color: #45a049;
+        }
+
+        .selection-count {
+            font-size: 14px;
+            color: #333;
+        }
     </style>
 </head>
 <body>
@@ -532,6 +717,10 @@
         <div class="auto-query">
             <input type="checkbox" id="formatTables" checked>
             <label for="formatTables">Format output</label>
+        </div>
+        <div class="auto-query">
+            <input type="checkbox" id="showGraph">
+            <label for="showGraph">Show graph</label>
         </div>
         <button id="executeButton" onclick="executeQuery(true)" title="Launch query, CTRL+Enter">Query</button>
     </div>
@@ -565,6 +754,11 @@
     let autocompleteSuggestions;
     let currentSuggestions = [];
     let selectedSuggestionIndex = -1;
+
+    // Add these variables at the top with other globals
+    let selectedRows = new Set();
+    let isSelectMode = false;
+    let lastSelectedRowIndex = -1; // Track the last selected row for range selection
 
     // Add a cache for SHOW FIELDS results
     const showFieldsCache = new Map();
@@ -692,6 +886,242 @@
             const text = queryInput.value;
             const highlighted = highlightSyntax(text);
             highlightDiv.innerHTML = highlighted;
+        }
+    }
+
+    // Row selection functions
+    function updateSelectionUI() {
+        const countEl = document.querySelector('.selection-count');
+        
+        if (countEl) {
+            if (selectedRows.size > 0) {
+                countEl.textContent = `${selectedRows.size} rows selected`;
+                countEl.style.color = '#1976d2';
+                countEl.style.fontWeight = 'bold';
+            } else {
+                countEl.textContent = '0 rows selected';
+                countEl.style.color = '#666';
+                countEl.style.fontWeight = 'normal';
+            }
+        }
+        
+        // Auto-update graph when selection changes
+        autoUpdateGraph();
+    }
+
+    // Add the missing autoUpdateGraph function
+    function autoUpdateGraph() {
+        if (!isSelectMode || !graphData) {
+            return;
+        }
+        
+        if (selectedRows.size === 0) {
+            // No rows selected - show full dataset
+            const showGraphCheckbox = document.getElementById('showGraph');
+            if (showGraphCheckbox && showGraphCheckbox.checked) {
+                // Show the full dataset graph
+                if (graphContainer) {
+                    graphContainer.style.display = 'block';
+                    createGraph(graphData);
+                }
+            } else {
+                // Hide graph container
+                if (graphContainer) {
+                    graphContainer.style.display = 'none';
+                }
+            }
+        } else {
+            // Rows are selected - show graph with filtered data
+            const filteredData = {
+                ...graphData,
+                data: graphData.data.filter((row, index) => selectedRows.has(index))
+            };
+            
+            if (graphContainer) {
+                graphContainer.style.display = 'block';
+                createGraphFromSelection(filteredData);
+                
+                // Also enable the show graph checkbox
+                const showGraphCheckbox = document.getElementById('showGraph');
+                if (showGraphCheckbox) {
+                    showGraphCheckbox.checked = true;
+                }
+            }
+            
+            console.log(`Auto-updated graph with ${selectedRows.size} selected rows`);
+        }
+    }
+
+    // Function to create graph from selection
+    function createGraphFromSelection(filteredData) {
+        if (!filteredData || !filteredData.numericColumns.length) {
+            showGraphStatus('No numeric columns found in selected rows');
+            return;
+        }
+        
+        if (filteredData.timeColumnIndex === -1) {
+            showGraphStatus('No time column found in selected rows');
+            return;
+        }
+        
+        // Use the same logic as createGraph but with filtered data
+        createGraph(filteredData);
+        
+        // Update the graph title or add a note about selection
+        if (graphChart) {
+            graphChart.options.plugins.title = {
+                display: true,
+                text: `Selected Data (${filteredData.data.length} rows)`
+            };
+            graphChart.update();
+        }
+    }
+
+    function toggleSelectMode() {
+        isSelectMode = !isSelectMode;
+        const btn = document.getElementById('selectModeBtn');
+        const actionBtns = document.querySelectorAll('.select-action-btn, .selection-count, .selection-hint');
+        const selectColumns = document.querySelectorAll('.select-column');
+        const table = document.querySelector('.selectable-table');
+        
+        if (isSelectMode) {
+            btn.textContent = 'Disable Row Selection';
+            btn.classList.add('active');
+            actionBtns.forEach(el => el.style.display = 'inline-block');
+            selectColumns.forEach(el => el.style.display = 'table-cell');
+            if (table) table.classList.add('selection-mode');
+            
+            // Show instruction about auto-graphing
+            const hint = document.querySelector('.selection-hint');
+            if (hint) {
+                hint.innerHTML = '💡 Hold Shift and click to select a range • Graph updates automatically';
+            }
+        } else {
+            btn.textContent = 'Enable Row Selection';
+            btn.classList.remove('active');
+            actionBtns.forEach(el => el.style.display = 'none');
+            selectColumns.forEach(el => el.style.display = 'none');
+            if (table) table.classList.remove('selection-mode');
+            clearSelection();
+            
+            // Hide graph when exiting selection mode
+            if (graphContainer && graphChart) {
+                // Don't completely hide the container, but clear the selection-based graph
+                if (selectedRows.size === 0) {
+                    const showGraphCheckbox = document.getElementById('showGraph');
+                    if (showGraphCheckbox && showGraphCheckbox.checked) {
+                        // Show the full dataset graph instead
+                        createGraph(graphData);
+                    } else {
+                        graphContainer.style.display = 'none';
+                    }
+                }
+            }
+        }
+    }
+
+    // Enhanced toggleRowSelection to support shift-click range selection
+    function toggleRowSelection(rowIndex, event) {
+        if (!isSelectMode) return;
+        
+        const row = document.querySelector(`tr[data-row-index="${rowIndex}"]`);
+        const checkbox = row.querySelector('input[type="checkbox"]');
+        
+        // Check if shift key is held down and we have a previous selection
+        if (event && event.shiftKey && lastSelectedRowIndex !== -1) {
+            // Range selection
+            const startIndex = Math.min(lastSelectedRowIndex, rowIndex);
+            const endIndex = Math.max(lastSelectedRowIndex, rowIndex);
+        
+            // Select all rows in the range
+            for (let i = startIndex; i <= endIndex; i++) {
+                const rangeRow = document.querySelector(`tr[data-row-index="${i}"]`);
+                const rangeCheckbox = rangeRow?.querySelector('input[type="checkbox"]');
+                
+                if (rangeRow && rangeCheckbox) {
+                    selectedRows.add(i);
+                    rangeRow.classList.add('selected-row');
+                    rangeCheckbox.checked = true;
+                }
+            }
+            
+            // Don't update lastSelectedRowIndex for range selection
+            // Keep it as the anchor point for potential future range selections
+        } else {
+            // Single row selection (original logic)
+            if (selectedRows.has(rowIndex)) {
+                selectedRows.delete(rowIndex);
+                row.classList.remove('selected-row');
+                checkbox.checked = false;
+                // If we're deselecting the last selected row, clear the anchor
+                if (lastSelectedRowIndex === rowIndex) {
+                    lastSelectedRowIndex = -1;
+                }
+            } else {
+                selectedRows.add(rowIndex);
+                row.classList.add('selected-row');
+                checkbox.checked = true;
+                // Update the anchor point for future range selections
+                lastSelectedRowIndex = rowIndex;
+            }
+        }
+        
+        updateSelectionUI(); // This now calls autoUpdateGraph()
+    }
+
+    // Enhanced clearSelection to reset the anchor point
+    function clearSelection() {
+        selectedRows.clear();
+        lastSelectedRowIndex = -1; // Reset anchor point
+        
+        document.querySelectorAll('.selected-row').forEach(row => {
+            row.classList.remove('selected-row');
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = false;
+        });
+        
+        updateSelectionUI(); // This now calls autoUpdateGraph()
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+    }
+
+    // Enhanced selectAllRows to set proper anchor point
+    function selectAllRows() {
+        const rows = document.querySelectorAll('tr[data-row-index]');
+        rows.forEach(row => {
+            const rowIndex = parseInt(row.dataset.rowIndex);
+            selectedRows.add(rowIndex);
+            row.classList.add('selected-row');
+            const checkbox = row.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = true;
+        });
+        
+        // Set anchor to the last row for potential future operations
+        if (rows.length > 0) {
+            lastSelectedRowIndex = parseInt(rows[rows.length - 1].dataset.rowIndex);
+        }
+        
+        updateSelectionUI(); // This now calls autoUpdateGraph()
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox) selectAllCheckbox.checked = true;
+    }
+
+    // Function to handle individual row checkbox changes
+    function handleRowCheckbox(rowIndex, event) {
+        // Stop event propagation to prevent triggering row click
+        event.stopPropagation();
+        
+        // Toggle the row selection
+        toggleRowSelection(rowIndex, event);
+    }
+
+    // Function to handle select all checkbox
+    function toggleSelectAll() {
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox.checked) {
+            selectAllRows();
+        } else {
+            clearSelection();
         }
     }
 
@@ -1003,6 +1433,7 @@
         return NaN;
     }
 
+    // Enhanced parseTabularData to conditionally show selection controls
     function parseTabularData(data) {
         const lines = data.split('\n');
         let headerLine = '';
@@ -1010,7 +1441,7 @@
         let dataLines = [];
         let separatorIndex = -1;
 
-        // Find the separator line
+        // Find the separator line (existing logic)
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line.match(/^-+(\s+-+)+$/)) {
@@ -1032,7 +1463,7 @@
             return data; // Not a valid table format, return original
         }
 
-        // Parse column positions
+        // Parse column positions (existing logic)
         const columnPositions = [];
         let currentStart = -1;
         let inColumn = false;
@@ -1071,21 +1502,49 @@
             headers.push(headerText.trim());
         }
 
-        // Generate HTML table
-        let html = '<table class="jfr-table sortable-table">';
+        // Check if show graph is enabled to determine whether to show selection controls
+        const showGraphEnabled = document.getElementById('showGraph') ? document.getElementById('showGraph').checked : false;
 
-        // Table header
+        // Generate HTML table with conditional selection controls
+        let html = '';
+        
+        // Only add selection controls if graph is enabled
+        if (showGraphEnabled) {
+            html += '<div class="table-selection-controls">';
+            html += '<div class="selection-buttons">';
+            html += '<button onclick="toggleSelectMode()" id="selectModeBtn" class="select-mode-btn">Enable Row Selection</button>';
+            html += '<button onclick="selectAllRows()" class="select-action-btn" style="display:none;">Select All</button>';
+            html += '<button onclick="clearSelection()" class="select-action-btn" style="display:none;">Clear Selection</button>';
+            html += '<span class="selection-count" style="display:none;">0 rows selected</span>';
+            html += '<span class="selection-hint" style="display:none; margin-left: 15px; font-size: 12px; color: #666;">💡 Hold Shift and click to select a range • Graph updates automatically</span>';
+            html += '</div>';
+            html += '</div>'; // Close table-selection-controls div
+        }
+
+        html += '<table class="jfr-table sortable-table selectable-table">';
+
+        // Table header with conditional select all checkbox
         html += '<thead><tr>';
+        if (showGraphEnabled) {
+            html += '<th class="select-column" style="display:none;"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"></th>';
+        }
         for (const header of headers) {
             const sortType = detectSortType(dataLines, columnPositions[headers.indexOf(header)]);
             html += `<th data-sort="${sortType}">${escapeHtml(header)} <span class="sort-indicator"></span></th>`;
         }
         html += '</tr></thead>';
 
-        // Table body
+        // Table body with conditional selectable rows
         html += '<tbody>';
-        for (const line of dataLines) {
-            html += '<tr>';
+        for (let rowIndex = 0; rowIndex < dataLines.length; rowIndex++) {
+            const line = dataLines[rowIndex];
+            const rowClickHandler = showGraphEnabled ? `onclick="toggleRowSelection(${rowIndex}, event)"` : '';
+            html += `<tr data-row-index="${rowIndex}" ${rowClickHandler}>`;
+            
+            if (showGraphEnabled) {
+                html += `<td class="select-column" style="display:none;"><input type="checkbox" onchange="handleRowCheckbox(${rowIndex}, event)" onclick="event.stopPropagation()"></td>`;
+            }
+            
             for (const col of columnPositions) {
                 const cellText = line.substring(col.start, Math.min(col.end + 1, line.length));
                 const trimmedCell = cellText.trim();
@@ -1166,7 +1625,7 @@
                         aValue = aValue.toLowerCase();
                         bValue = bValue.toLowerCase();
                         if (aValue < bValue) return sortAsc ? -1 : 1;
-                        if (aValue > bValue) return sortAsc ? 1 : -1;
+                        if (aValue > bValue) return sortAsc ? 1 : -1;           
                         return 0;
                     }
                 });
@@ -1177,7 +1636,7 @@
         });
     }
 
-    // Enhanced executeQuery to handle SHOW FIELDS formatting
+    // Enhanced executeQuery to handle show graph state changes
     function executeQuery(addToHistory = false) {
         const query = queryInput.value;
         if (!query) return;
@@ -1189,6 +1648,11 @@
         if (query === lastExecutedQuery) return;
 
         lastExecutedQuery = query;
+
+        // Clear selection state when executing a new query
+        selectedRows.clear();
+        isSelectMode = false;
+        lastSelectedRowIndex = -1;
 
         // Only add to history if explicitly requested (via button click)
         if (addToHistory && !previousQueries.has(query)) {
@@ -1225,10 +1689,8 @@
                     resultDiv.textContent = data;
                 }
 
-
                 graphData = parseDataForGraph(data);
                 console.log('Graph data:', graphData);
-
 
                 // Handle graph display
                 if (showGraphEnabled && rawTableData && isTabularData(rawTableData)) {
@@ -1272,6 +1734,55 @@
                 }
             });
     }
+
+    // Add event listener for show graph checkbox to refresh table display
+    document.getElementById('showGraph').addEventListener('change', function() {
+        if (this.checked && graphData) {
+            graphContainer.style.display = 'block';
+            createGraph(graphData);
+        } else {
+            graphContainer.style.display = 'none';
+            if (graphChart) {
+                graphChart.destroy();
+                graphChart = null;
+            }
+            
+            // Clear selection state when hiding graph
+            selectedRows.clear();
+            isSelectMode = false;
+            lastSelectedRowIndex = -1;
+        }
+        
+        // Re-render the table with/without selection controls
+        if (lastExecutedQuery) {
+            const formatOutputEnabled = document.getElementById('formatTables').checked;
+            const resultDiv = document.getElementById('result');
+            const currentContent = resultDiv.textContent || resultDiv.innerHTML;
+            
+            // Only re-render if we have tabular data
+            if (currentContent !== 'Executing query...' && 
+                currentContent !== 'Results will appear here' && 
+                formatOutputEnabled) {
+                
+                // Re-execute to refresh the table display
+                const query = lastExecutedQuery;
+                fetch(`/query?q=${encodeURIComponent(query)}`)
+                    .then(response => response.text())
+                    .then(data => {
+                        if (isTabularData(data)) {
+                            resultDiv.innerHTML = parseTabularData(data);
+                            
+                            // Make tables sortable after rendering
+                            const tables = resultDiv.querySelectorAll('.sortable-table');
+                            tables.forEach(table => makeSortable(table));
+                        }
+                    })
+                    .catch(error => {
+                        console.warn('Error refreshing table display:', error);
+                    });
+            }
+        }
+    });
 
     let graphChart = null;
     let graphContainer = null;
@@ -2813,32 +3324,6 @@
         // Initialize graph elements
         graphContainer = document.getElementById('graphContainer');
         graphCanvas = document.getElementById('graphCanvas');
-
-        // Add show graph checkbox to controls
-        const showGraphCheckbox = document.createElement('div');
-        showGraphCheckbox.className = 'auto-query';
-        showGraphCheckbox.innerHTML = `
-            <input type="checkbox" id="showGraph">
-            <label for="showGraph">Show graph</label>
-        `;
-
-        // Insert before the Query button
-        const buttonsDiv = document.querySelector('.buttons');
-        buttonsDiv.insertBefore(showGraphCheckbox, buttonsDiv.lastElementChild);
-
-        // Add event listener for show graph checkbox
-        document.getElementById('showGraph').addEventListener('change', function() {
-            if (this.checked && graphData) {
-                graphContainer.style.display = 'block';
-                createGraph(graphData);
-            } else {
-                graphContainer.style.display = 'none';
-                if (graphChart) {
-                    graphChart.destroy();
-                    graphChart = null;
-                }
-            }
-        });
     });
 
     // Initialize everything
