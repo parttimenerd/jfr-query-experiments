@@ -1648,6 +1648,12 @@ function createGraph(parsedData) {
         
     updateColumnSelector(parsedData.numericColumns);
     showGraphStatus('');
+
+    if (graphChart) {
+        // Set responsive to false and use resize() manually for better control
+        graphChart.options.responsive = false;
+        graphChart.resize();
+    }
     
     console.log(`Created graph with ${datasets.length} datasets and ${timeData.length} time points`);
     console.log('Time range:', new Date(timeData[0].time).toLocaleString(), 'to', new Date(timeData[timeData.length - 1].time).toLocaleString());
@@ -2734,7 +2740,6 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Load event types and view queries when the page loads
 window.addEventListener('load', function() {
     loadAvailableEventTypes();
     loadViewQueries();
@@ -2757,6 +2762,7 @@ window.addEventListener('load', function() {
             <div class="graph-canvas-container">
                 <canvas id="graphCanvas"></canvas>
                 <div class="graph-status">No data to display</div>
+                <div class="graph-resize-handle" id="graphResizeHandle"></div>
             </div>
         </div>
     `);
@@ -2764,7 +2770,81 @@ window.addEventListener('load', function() {
     // Initialize graph elements
     graphContainer = document.getElementById('graphContainer');
     graphCanvas = document.getElementById('graphCanvas');
+    
+    // Initialize resize functionality
+    initGraphResize();
 });
+
+// Add these variables at the top with other globals
+let isResizing = false;
+let initialHeight = 0;
+let initialY = 0;
+
+function initGraphResize() {
+    const resizeHandle = document.getElementById('graphResizeHandle');
+    const graphContainer = document.getElementById('graphContainer');
+    const canvasContainer = document.querySelector('.graph-canvas-container');
+    
+    if (!resizeHandle || !graphContainer || !canvasContainer) return;
+    
+    // Default height (can be stored in localStorage for persistence)
+    const defaultHeight = localStorage.getItem('graphHeight') || 400;
+    canvasContainer.style.height = `${defaultHeight}px`;
+    
+    resizeHandle.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        initialY = e.clientY;
+        initialHeight = canvasContainer.offsetHeight;
+        
+        // Prevent text selection during resize
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'ns-resize';
+        
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        
+        const deltaY = e.clientY - initialY;
+        const newHeight = Math.max(200, initialHeight + deltaY); // Minimum height: 200px
+        
+        canvasContainer.style.height = `${newHeight}px`;
+        
+        // Update the chart to fit the new container size
+        if (graphChart) {
+            graphChart.resize();
+        }
+        
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+            
+            // Save height preference
+            const currentHeight = canvasContainer.offsetHeight;
+            localStorage.setItem('graphHeight', currentHeight);
+            
+            // Final resize of the chart
+            if (graphChart) {
+                graphChart.resize();
+            }
+        }
+    });
+    
+    // Also handle cases where mouse leaves the window
+    document.addEventListener('mouseleave', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
+        }
+    });
+}
 
 // Initialize everything
 updatePreviousQueriesDropdown();

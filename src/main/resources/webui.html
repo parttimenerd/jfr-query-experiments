@@ -43,27 +43,6 @@
     </div>
     
     <div id="result">Results will appear here</div>
-    
-    <div class="graph-container" id="graphContainer">
-        <div class="graph-controls">
-            <label>Graph Controls:</label>
-            <button onclick="resetGraphZoom()" style="margin-right: 10px;">Reset Zoom</button>
-            <div style="display: inline-flex; align-items: center;">
-                <label style="margin-right: 10px;"><input type="checkbox" id="zeroYAxisCheckbox" onchange="toggleZeroYAxis()"> Zero Y-Axis</label>
-            </div>
-            <div style="display: inline-flex; align-items: center; margin-left: 10px;">
-                <span style="margin-right: 5px;">Columns:</span>
-                <div class="column-selector" style="display: inline-flex; flex-wrap: wrap; margin: 0;"></div>
-            </div>
-            <div style="margin-left: 15px; font-size: 0.9em; color: #666;">
-                <strong>Navigation:</strong> Mouse wheel to zoom • Drag to pan • Shift+drag to select time range • Esc to cancel selection
-            </div>
-        </div>
-        <div class="graph-canvas-container">
-            <canvas id="graphCanvas"></canvas>
-            <div class="graph-status">No data to display</div>
-        </div>
-    </div>
     <script src="/resources/js/main.js"></script>
 </body>
 </html>
