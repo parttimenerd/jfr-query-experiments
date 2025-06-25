@@ -1,0 +1,121 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
+  packages: read
+  issues: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for tags
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn clean package
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jfr-query-jar
+          path: "target/query.jar"
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout for tag operations
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for tags
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: jfr-query-jar
+
+      - name: Get version information
+        id: version
+        run: |
+          COMMIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          CURRENT_DATE=$(date +"%Y-%m-%d %H:%M")
+          echo "build_date=$CURRENT_DATE" >> $GITHUB_OUTPUT
+
+      # Delete existing release by tag
+      - name: Delete existing release by tag
+        id: delete_release
+        run: |
+          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/snapshot | \
+            jq -r '.id')
+          
+          if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
+            echo "Deleting existing release with ID: $RELEASE_ID"
+            curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID
+            echo "deleted=true" >> $GITHUB_OUTPUT
+          else
+            echo "No existing release found with tag 'snapshot'"
+            echo "deleted=false" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      # Delete the tag itself
+      - name: Delete existing tag
+        run: |
+          git push --delete origin snapshot || true
+        continue-on-error: true
+
+      # Create a fresh tag
+      - name: Create new tag
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git tag -f snapshot
+          git push -f origin snapshot
+
+      # Create the release with the new tag
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: query.jar
+          tag_name: snapshot
+          body: |
+            # 📦 Latest Snapshot Build
+            
+            **Commit:** [${{ steps.version.outputs.commit_sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            **Build Date:** ${{ steps.version.outputs.build_date }}
+            
+            This is an automated snapshot build from the latest commit on the main branch.
+            
+            ## Usage
+            ```
+            java -jar query.jar
+            -> shows the help
+            
+            java -jar query.jar web recording.jfr
+            -> starts a web server on port 8080
+            -> open http://localhost:8080
+            ```
+          name: JFR Query Tool - Latest Snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
