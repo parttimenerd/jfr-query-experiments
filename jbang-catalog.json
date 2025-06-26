@@ -1,0 +1,9 @@
+{
+  "catalogs": {},
+  "aliases": {
+    "jfr-query": {
+      "script-ref": "https://github.com/parttimenerd/jfr-query-experiments/releases/download/snapshot/query.jar"
+    }
+  },
+  "templates": {}
+}
