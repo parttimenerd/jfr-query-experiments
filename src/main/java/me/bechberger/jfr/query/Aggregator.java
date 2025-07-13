@@ -87,7 +87,7 @@ enum Aggregator {
     /**
      * Calculate the standard deviation of all finite numeric values.
      */
-    STANDARD_DEVIATION("STDEV"),
+    STANDARD_DEVIATION("STDDEV"),
     /**
      * Calculate the sum of all finite numeric values.
      */

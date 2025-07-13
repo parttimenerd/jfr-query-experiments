@@ -85,6 +85,43 @@
                 </configuration>
             </plugin>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.2</version>
+                <configuration>
+                    <argLine>
+                        --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.objectweb.asm.commons=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.objectweb.asm.util=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.event=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.vm.annotation=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.xml.sax=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.util.xml=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.util.xml.impl=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.org.xml.sax.helpers=ALL-UNNAMED
+                        --add-exports jdk.jfr/jdk.jfr.internal=ALL-UNNAMED
+                        --add-exports jdk.jfr/jdk.jfr.events=ALL-UNNAMED
+                        --add-exports java.base/jdk.internal.module=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.objectweb.asm.commons=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.objectweb.asm.util=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.event=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.vm.annotation=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.xml.sax=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.util.xml=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.util.xml.impl=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.org.xml.sax.helpers=ALL-UNNAMED
+                        --add-opens jdk.jfr/jdk.jfr.internal=ALL-UNNAMED
+                        --add-opens java.base/jdk.internal.module=ALL-UNNAMED
+                        --add-opens jdk.jfr/jdk.jfr.events=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+            <plugin>
                 <artifactId>maven-assembly-plugin</artifactId>
                 <configuration>
                     <descriptorRefs>
@@ -115,6 +152,18 @@
             <groupId>info.picocli</groupId>
             <artifactId>picocli</artifactId>
             <version>4.7.7</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.1</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.hamcrest</groupId>
+            <artifactId>hamcrest</artifactId>
+            <version>2.2</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

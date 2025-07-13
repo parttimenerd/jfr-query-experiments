@@ -26,7 +26,7 @@ const queryVocabulary = {
     functions: [
         'AVG', 'COUNT', 'DIFF', 'FIRST', 'LAST', 'LAST_BATCH',
         'LIST', 'MAX', 'MEDIAN', 'MIN', 'P90', 'P95', 'P99', 'P999',
-        'STDEV', 'SUM', 'UNIQUE'
+        'STDDEV', 'SUM', 'UNIQUE'
     ],
 
     formatProperties: [

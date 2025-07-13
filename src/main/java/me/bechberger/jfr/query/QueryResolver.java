@@ -85,6 +85,11 @@ final class QueryResolver {
     }
 
     public List<Field> resolve() throws QueryException {
+        // Validate that FROM clause is present for SELECT queries
+        if (!select.isEmpty() && from.isEmpty()) {
+            throw new QuerySyntaxException("Missing FROM clause - SELECT queries must specify a table");
+        }
+        
         resolveFrom();
         resolveSelect();
         resolveGroupBy();

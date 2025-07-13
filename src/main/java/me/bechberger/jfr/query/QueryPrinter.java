@@ -265,7 +265,7 @@ public final class QueryPrinter {
                     MEDIAN: The numeric median
                     MIN: The numeric minimum
                     P90, P95, P99, P999: The numeric percentile, 90%, 95%, 99% or 99.9%
-                    STDEV: The numeric standard deviation
+                    STDDEV: The numeric standard deviation
                     SUM: The numeric sum
                     UNIQUE: The unique number of occurrences of a value
                    Null values are included, but ignored for numeric functions. If no

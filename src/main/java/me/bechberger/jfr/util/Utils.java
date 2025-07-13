@@ -272,35 +272,97 @@ public final class Utils {
     }
 
     public static long parseTimespan(String s) {
+        // Handle compound durations like "1m30s" or "2h15m30s"
+        if (s.matches(".*\\d+[a-z]+.*\\d+[a-z]+.*")) {
+            return parseCompoundTimespan(s);
+        }
+        
+        // Handle simple durations - check extended units first
+        if (s.endsWith("hours")) {
+            double hours = Double.parseDouble(s.substring(0, s.length() - 5).trim());
+            return Math.round(hours * 3600.0 * 1_000_000_000.0);
+        }
+        if (s.endsWith("hour")) {
+            double hours = Double.parseDouble(s.substring(0, s.length() - 4).trim());
+            return Math.round(hours * 3600.0 * 1_000_000_000.0);
+        }
+        if (s.endsWith("days")) {
+            double days = Double.parseDouble(s.substring(0, s.length() - 4).trim());
+            return Math.round(days * 86400.0 * 1_000_000_000.0);
+        }
+        if (s.endsWith("day")) {
+            double days = Double.parseDouble(s.substring(0, s.length() - 3).trim());
+            return Math.round(days * 86400.0 * 1_000_000_000.0);
+        }
+        if (s.endsWith("min")) {
+            double minutes = Double.parseDouble(s.substring(0, s.length() - 3).trim());
+            return Math.round(minutes * 60.0 * 1_000_000_000.0);
+        }
         if (s.endsWith("ns")) {
-            return Long.parseLong(s.substring(0, s.length() - 2).trim());
+            return Math.round(Double.parseDouble(s.substring(0, s.length() - 2).trim()));
         }
         if (s.endsWith("us")) {
-            return MICROSECONDS.toNanos(Long.parseLong(s.substring(0, s.length() - 2).trim()));
+            double micros = Double.parseDouble(s.substring(0, s.length() - 2).trim());
+            return Math.round(micros * 1000.0); // Convert to nanoseconds
         }
         if (s.endsWith("ms")) {
-            return MILLISECONDS.toNanos(Long.parseLong(s.substring(0, s.length() - 2).trim()));
+            double millis = Double.parseDouble(s.substring(0, s.length() - 2).trim());
+            return Math.round(millis * 1_000_000.0); // Convert to nanoseconds
         }
         if (s.endsWith("s")) {
-            return SECONDS.toNanos(Long.parseLong(s.substring(0, s.length() - 1).trim()));
+            double seconds = Double.parseDouble(s.substring(0, s.length() - 1).trim());
+            return Math.round(seconds * 1_000_000_000.0); // Convert to nanoseconds
         }
         if (s.endsWith("m")) {
-            return MINUTES.toNanos(Long.parseLong(s.substring(0, s.length() - 1).trim()));
+            double minutes = Double.parseDouble(s.substring(0, s.length() - 1).trim());
+            return Math.round(minutes * 60.0 * 1_000_000_000.0); // Convert to nanoseconds
         }
         if (s.endsWith("h")) {
-            return HOURS.toNanos(Long.parseLong(s.substring(0, s.length() - 1).trim()));
+            double hours = Double.parseDouble(s.substring(0, s.length() - 1).trim());
+            return Math.round(hours * 3600.0 * 1_000_000_000.0); // Convert to nanoseconds
         }
         if (s.endsWith("d")) {
-            return DAYS.toNanos(Long.parseLong(s.substring(0, s.length() - 1).trim()));
+            double days = Double.parseDouble(s.substring(0, s.length() - 1).trim());
+            return Math.round(days * 86400.0 * 1_000_000_000.0); // Convert to nanoseconds
         }
 
         try {
             Long.parseLong(s);
         } catch (NumberFormatException nfe) {
-            throw new NumberFormatException("'" + s + "' is not a valid timespan. Should be numeric value followed by a unit, i.e. 20 ms. Valid units are ns, us, s, m, h and d.");
+            throw new NumberFormatException("'" + s + "' is not a valid timespan. Should be numeric value followed by a unit, i.e. 20 ms. Valid units are ns, us, s, m, min, h, hour, hours, d, day, days.");
         }
         // Only accept values with units
-        throw new NumberFormatException("Timespan + '" + s + "' is missing unit. Valid units are ns, us, s, m, h and d.");
+        throw new NumberFormatException("Timespan + '" + s + "' is missing unit. Valid units are ns, us, s, m, min, h, hour, hours, d, day, days.");
+    }
+    
+    /**
+     * Parse compound durations like "1m30s", "2h15m30s", etc.
+     */
+    private static long parseCompoundTimespan(String s) {
+        long totalNanos = 0;
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d+)?)(hours|hour|days|day|min|ns|us|ms|s|m|h|d)");
+        java.util.regex.Matcher matcher = pattern.matcher(s);
+        
+        while (matcher.find()) {
+            double value = Double.parseDouble(matcher.group(1));
+            String unit = matcher.group(2);
+            
+            switch (unit) {
+                case "ns" -> totalNanos += Math.round(value);
+                case "us" -> totalNanos += Math.round(value * 1000.0);
+                case "ms" -> totalNanos += Math.round(value * 1_000_000.0);
+                case "s" -> totalNanos += Math.round(value * 1_000_000_000.0);
+                case "m", "min" -> totalNanos += Math.round(value * 60.0 * 1_000_000_000.0);
+                case "h", "hour", "hours" -> totalNanos += Math.round(value * 3600.0 * 1_000_000_000.0);
+                case "d", "day", "days" -> totalNanos += Math.round(value * 86400.0 * 1_000_000_000.0);
+            }
+        }
+        
+        if (totalNanos == 0) {
+            throw new NumberFormatException("'" + s + "' is not a valid timespan. Should be numeric value followed by a unit, i.e. 20 ms. Valid units are ns, us, s, m, min, h, hour, hours, d, day, days.");
+        }
+        
+        return totalNanos;
     }
 
     /**
@@ -684,5 +746,37 @@ public final class Utils {
 
     public static String makeSimpleName(String qualified) {
         return qualified.substring(qualified.lastIndexOf(".") + 1);
+    }
+
+    /**
+     * Parse memory size string like "100MB", "5GB", etc. to bytes
+     * @param s memory size string with unit (B, KB, MB, GB, TB)
+     * @return size in bytes
+     */
+    public static long parseMemorySize(String s) {
+        if (s.endsWith("B") && !s.endsWith("KB") && !s.endsWith("MB") && !s.endsWith("GB") && !s.endsWith("TB")) {
+            return Long.parseLong(s.substring(0, s.length() - 1).trim());
+        }
+        if (s.endsWith("KB")) {
+            return (long) (Double.parseDouble(s.substring(0, s.length() - 2).trim()) * 1024);
+        }
+        if (s.endsWith("K") && !s.endsWith("KB")) {
+            return (long) (Double.parseDouble(s.substring(0, s.length() - 1).trim()) * 1024);
+        }
+        if (s.endsWith("MB")) {
+            return (long) (Double.parseDouble(s.substring(0, s.length() - 2).trim()) * 1024 * 1024);
+        }
+        if (s.endsWith("GB")) {
+            return (long) (Double.parseDouble(s.substring(0, s.length() - 2).trim()) * 1024 * 1024 * 1024);
+        }
+        if (s.endsWith("TB")) {
+            return (long) (Double.parseDouble(s.substring(0, s.length() - 2).trim()) * 1024L * 1024L * 1024L * 1024L);
+        }
+
+        try {
+            return Long.parseLong(s);
+        } catch (NumberFormatException nfe) {
+            throw new NumberFormatException("'" + s + "' is not a valid memory size. Should be numeric value followed by a unit, i.e. 100 MB. Valid units are B, K, KB, MB, GB and TB.");
+        }
     }
 }
