@@ -545,6 +545,8 @@ public class ASTNodes {
                 case GREATER_THAN -> ">";
                 case GREATER_EQUAL -> ">=";
                 case LIKE -> "LIKE";
+                case NOT_LIKE -> "NOT LIKE";
+                case BETWEEN -> "BETWEEN";
                 case IN -> "IN";
                 case AND -> "AND";
                 case OR -> "OR";
@@ -565,7 +567,9 @@ public class ASTNodes {
         // Logical
         AND, OR,
         // String
-        LIKE,
+        LIKE, NOT_LIKE,
+        // Range
+        BETWEEN,
         // Set
         IN,
         // Temporal
@@ -635,6 +639,7 @@ public class ASTNodes {
     public record FunctionCallNode(
         String functionName,
         List<ExpressionNode> arguments,
+        boolean distinct,
         Location location
     ) implements ExpressionNode {
         @Override
@@ -655,7 +660,7 @@ public class ASTNodes {
                     .reduce((a, b) -> a + ", " + b)
                     .orElse("");
             
-            return functionName + "(" + args + ")";
+            return functionName + "(" + (distinct ? "DISTINCT " : "") + args + ")";
         }
     }
     
@@ -732,23 +737,18 @@ public class ASTNodes {
     }
     
     /**
-     * Base interface for all condition nodes
+     * CASE expression node - supports both simple and searched CASE expressions
+     * CASE [expression] WHEN condition THEN result [WHEN condition THEN result ...] [ELSE result] END
      */
-    public interface ConditionNode extends ASTNode {
-    }
-    
-    /**
-     * GC correlation condition
-     */
-    public record GCCorrelationNode(
-        String field,
-        GCCorrelationType type,
-        ExpressionNode value,
+    public record CaseExpressionNode(
+        ExpressionNode expression, // null for searched CASE
+        List<WhenClauseNode> whenClauses,
+        ExpressionNode elseExpression, // optional
         Location location
-    ) implements ConditionNode {
+    ) implements ExpressionNode {
         @Override
         public <T> T accept(ASTVisitor<T> visitor) {
-            return visitor.visitGCCorrelation(this);
+            return visitor.visitCaseExpression(this);
         }
         
         @Override
@@ -759,16 +759,47 @@ public class ASTNodes {
         
         @Override
         public String format() {
-            return field + "_" + type.name().toLowerCase() + 
-                   "(" + value.format() + ")";
+            StringBuilder sb = new StringBuilder();
+            sb.append("CASE");
+            
+            if (expression != null) {
+                sb.append(" ").append(expression.format());
+            }
+            
+            for (WhenClauseNode whenClause : whenClauses) {
+                sb.append(" ").append(whenClause.format());
+            }
+            
+            if (elseExpression != null) {
+                sb.append(" ELSE ").append(elseExpression.format());
+            }
+            
+            sb.append(" END");
+            return sb.toString();
         }
     }
     
     /**
-     * GC correlation types
+     * WHEN clause within a CASE expression
      */
-    public enum GCCorrelationType {
-        BEFORE_GC, AFTER_GC, BEFORE_GC_IN_PERCENTILE
+    public record WhenClauseNode(
+        ExpressionNode condition,
+        ExpressionNode result,
+        Location location
+    ) {
+        public int getLine() { return location.line(); }
+        
+        public int getColumn() { return location.column(); }
+        
+        public String format() {
+            return "WHEN " + condition.format() + " THEN " + result.format();
+        }
+    }
+
+    /**
+     * Base interface for all condition nodes
+     */
+    public interface ConditionNode extends ASTNode {
     }
     
     /**
@@ -929,7 +960,7 @@ public class ASTNodes {
         String source,
         String alias,
         FuzzyJoinType joinType,
-        String joinField,
+        String joinField,  // Simple field name for fuzzy join
         ExpressionNode tolerance,
         ExpressionNode threshold,
         Location location
@@ -1094,8 +1125,7 @@ public class ASTNodes {
     public record StarNode(Location location) implements ExpressionNode {
         @Override
         public <T> T accept(ASTVisitor<T> visitor) {
-            // If you have a visitStar method, call it; otherwise, return null or throw
-            return visitor instanceof StarNodeVisitor<T> starVisitor ? starVisitor.visitStar(this) : null;
+            return visitor.visitStar(this);
         }
         
         @Override
@@ -1110,13 +1140,6 @@ public class ASTNodes {
         }
     }
 
-    /**
-     * Visitor interface for StarNode (optional, only if needed)
-     */
-    public interface StarNodeVisitor<T> extends ASTVisitor<T> {
-        T visitStar(StarNode node);
-    }
-    
     /**
      * Standard join types
      */

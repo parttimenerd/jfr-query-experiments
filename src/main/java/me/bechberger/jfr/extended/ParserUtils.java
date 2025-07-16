@@ -133,28 +133,9 @@ public class ParserUtils {
      * Parse a field reference (may include dots for nested fields)
      */
     public static String parseFieldReference(TokenStream tokens, String context) throws ParserException {
-        Token firstPart = consumeToken(tokens, TokenType.IDENTIFIER, "Expected field name in " + context);
-        StringBuilder fieldName = new StringBuilder(firstPart.value());
-        
-        while (tokens.match(TokenType.DOT)) {
-            Token nextPart = consumeToken(tokens, TokenType.IDENTIFIER, "Expected field name after dot");
-            fieldName.append(".").append(nextPart.value());
-        }
-        
-        return fieldName.toString();
+        return parseFieldReferenceWithKeywords(tokens, context);
     }
-    
-    /**
-     * Consume a token of the expected type, or throw an error
-     */
-    private static Token consumeToken(TokenStream tokens, TokenType type, String message) throws ParserException {
-        if (tokens.check(type)) {
-            return tokens.advance();
-        }
-        
-        throw new ParserException(message + " at " + tokens.current().getPositionString());
-    }
-    
+
     /**
      * Validates that a subquery has proper structure and doesn't violate nesting rules
      */
@@ -176,5 +157,73 @@ public class ParserUtils {
         if (subquery.having() != null && subquery.groupBy() == null) {
             throw new ParserException("Subquery with HAVING clause must also have GROUP BY clause");
         }
+    }
+    
+    /**
+     * Keywords that can be used as identifiers in certain contexts
+     */
+    private static final Set<TokenType> KEYWORDS_AS_IDENTIFIERS = Set.of(
+        // Aggregate function names
+        TokenType.PERCENTILE, TokenType.P90, TokenType.P95, TokenType.P99, TokenType.P999,
+        TokenType.P90SELECT, TokenType.P95SELECT, TokenType.P99SELECT, TokenType.P999SELECT,
+        TokenType.PERCENTILE_SELECT,
+        
+        // Join-related keywords 
+        TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL, TokenType.OUTER,
+        TokenType.JOIN, TokenType.FUZZY, TokenType.ON, TokenType.WITH,
+        
+        // Order and aggregate keywords
+        TokenType.ASC, TokenType.DESC, TokenType.DISTINCT,
+        
+        // Temporal and conditional keywords
+        TokenType.TOLERANCE, TokenType.NEAREST, TokenType.PREVIOUS, TokenType.AFTER,
+        TokenType.WITHIN, TokenType.OF, TokenType.OVER,
+        TokenType.CASE, TokenType.WHEN, TokenType.THEN, TokenType.ELSE, TokenType.END,
+        
+        // Core SQL keywords that might be used as column names
+        TokenType.FROM, TokenType.WHERE, TokenType.GROUP_BY, TokenType.HAVING, 
+        TokenType.ORDER_BY, TokenType.LIMIT, TokenType.AS,
+        
+        // Logical operators that might be column names
+        TokenType.AND, TokenType.OR, TokenType.NOT, TokenType.LIKE, TokenType.IN, TokenType.BETWEEN
+    );
+    
+    /**
+     * Checks if the current token can be used as an identifier (either IDENTIFIER or allowed keyword)
+     */
+    public static boolean canUseAsIdentifier(TokenStream tokens) {
+        return tokens.check(TokenType.IDENTIFIER) || 
+               KEYWORDS_AS_IDENTIFIERS.contains(tokens.current().type());
+    }
+    
+    /**
+     * Consumes a token that can be used as an identifier (IDENTIFIER or allowed keyword)
+     */
+    public static Token consumeIdentifierOrKeyword(TokenStream tokens, String context) throws ParserException {
+        if (tokens.check(TokenType.IDENTIFIER)) {
+            return tokens.advance();
+        }
+        
+        if (KEYWORDS_AS_IDENTIFIERS.contains(tokens.current().type())) {
+            return tokens.advance();
+        }
+        
+        throw new ParserException("Expected identifier in " + context + " but found " + 
+                                tokens.current().type() + " at " + tokens.current().getPositionString());
+    }
+    
+    /**
+     * Parse a field reference that allows keywords as identifiers
+     */
+    public static String parseFieldReferenceWithKeywords(TokenStream tokens, String context) throws ParserException {
+        Token firstPart = consumeIdentifierOrKeyword(tokens, context);
+        StringBuilder fieldName = new StringBuilder(firstPart.value());
+        
+        while (tokens.match(TokenType.DOT)) {
+            Token nextPart = consumeIdentifierOrKeyword(tokens, context + " after dot");
+            fieldName.append(".").append(nextPart.value());
+        }
+        
+        return fieldName.toString();
     }
 }

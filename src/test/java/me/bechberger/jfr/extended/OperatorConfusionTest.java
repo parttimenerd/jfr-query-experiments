@@ -20,7 +20,7 @@ public class OperatorConfusionTest {
         "@SELECT * FROM GarbageCollection WHERE duration == 1s",
         "@SELECT eventType FROM ThreadSleep WHERE startTime == '2021-01-01T00:00:00Z'",
         "@SELECT * FROM JavaExceptionThrow WHERE message == 'error'",
-        "@SELECT count FROM ProfiledEvent WHERE stackTrace == null"
+        "@SELECT * FROM ProfiledEvent WHERE stackTrace == null"
     })
     public void testDoubleEqualsOperatorConfusion(String query) {
         try {

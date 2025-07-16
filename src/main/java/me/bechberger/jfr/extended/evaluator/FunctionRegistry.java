@@ -100,6 +100,14 @@ public class FunctionRegistry {
     }
     
     /**
+     * Check if a function is an aggregate function
+     */
+    public boolean isAggregateFunction(String functionName) {
+        FunctionDefinition definition = functions.get(functionName.toUpperCase());
+        return definition instanceof AggregateFunctionDefinition;
+    }
+    
+    /**
      * Get all function definitions
      */
     public java.util.Collection<FunctionDefinition> getAllFunctions() {
@@ -313,6 +321,15 @@ public class FunctionRegistry {
                 "MEDIAN(duration)",
                 AggregateFunctions::evaluateP50
         ));
+        
+        // Add COLLECT function to collect values into an array
+        register(createAggregateFunction("COLLECT", null, FunctionType.AGGREGATE,
+                "Collect all values of an expression into an array",
+                List.of(new ParameterDefinition("expression", ParameterType.EXPRESSION, "Expression to evaluate for each row")),
+                ReturnType.ARRAY,
+                "COLLECT(threadName), COLLECT(duration), COLLECT(startTime / 1000000)",
+                AggregateFunctions::evaluateCollect
+        ));
     }
     
     /**
@@ -370,38 +387,59 @@ public class FunctionRegistry {
                 DataAccessFunctions::evaluateDiff
         ));
         
-        register(createAggregateFunction("HEAD", null, FunctionType.DATA_ACCESS,
-                "Get first N values from a field",
+        register(createSimpleFunction("HEAD", null, FunctionType.DATA_ACCESS,
+                "Get first element or first N elements from an array",
                 List.of(
-                    new ParameterDefinition("field", ParameterType.FIELD, "Field to get values from"),
-                    new ParameterDefinition("count", ParameterType.NUMBER, "Number of values to get")
+                    new ParameterDefinition("array", ParameterType.ARRAY, "Array to get elements from"),
+                    ParameterDefinition.optional("count", ParameterType.NUMBER, "Number of elements to get (optional, default: 1 element)")
                 ),
-                ReturnType.ARRAY,
-                "HEAD(duration, 10)",
-                DataAccessFunctions::evaluateHead
+                ReturnType.ANY,
+                "HEAD([1,2,3,4,5]) or HEAD([1,2,3,4,5], 3)",
+                ArrayFunctions::evaluateHead
         ));
         
-        register(createAggregateFunction("TAIL", null, FunctionType.DATA_ACCESS,
-                "Get last N values from a field",
+        register(createSimpleFunction("TAIL", null, FunctionType.DATA_ACCESS,
+                "Get last element or last N elements from an array",
                 List.of(
-                    new ParameterDefinition("field", ParameterType.FIELD, "Field to get values from"),
-                    new ParameterDefinition("count", ParameterType.NUMBER, "Number of values to get")
+                    new ParameterDefinition("array", ParameterType.ARRAY, "Array to get elements from"),
+                    ParameterDefinition.optional("count", ParameterType.NUMBER, "Number of elements to get (optional, default: 1 element)")
                 ),
-                ReturnType.ARRAY,
-                "TAIL(duration, 5)",
-                DataAccessFunctions::evaluateTail
+                ReturnType.ANY,
+                "TAIL([1,2,3,4,5]) or TAIL([1,2,3,4,5], 3)",
+                ArrayFunctions::evaluateTail
         ));
         
-        register(createAggregateFunction("SLICE", null, FunctionType.DATA_ACCESS,
-                "Get slice of values from a field",
+        register(createSimpleFunction("SIZE", null, FunctionType.DATA_ACCESS,
+                "Get the size/length of an array",
                 List.of(
-                    new ParameterDefinition("field", ParameterType.FIELD, "Field to get values from"),
-                    new ParameterDefinition("start", ParameterType.NUMBER, "Start index"),
-                    new ParameterDefinition("end", ParameterType.NUMBER, "End index")
+                    new ParameterDefinition("array", ParameterType.ARRAY, "Array to get size from")
+                ),
+                ReturnType.NUMBER,
+                "SIZE([1,2,3,4,5])",
+                ArrayFunctions::evaluateLength
+        ));
+        
+        register(createSimpleFunction("SLICE", null, FunctionType.DATA_ACCESS,
+                "Get a slice of an array from start to end index",
+                List.of(
+                    new ParameterDefinition("array", ParameterType.ARRAY, "Array to slice"),
+                    new ParameterDefinition("start", ParameterType.NUMBER, "Start index (inclusive)"),
+                    new ParameterDefinition("end", ParameterType.NUMBER, "End index (exclusive)")
                 ),
                 ReturnType.ARRAY,
-                "SLICE(duration, 2, 8)",
-                DataAccessFunctions::evaluateSlice
+                "SLICE([1,2,3,4,5], 1, 4)",
+                ArrayFunctions::evaluateSlice
+        ));
+        
+        register(createSimpleFunction("SORT", null, FunctionType.DATA_ACCESS,
+                "Sort an array in ascending or descending order",
+                List.of(
+                    new ParameterDefinition("array", ParameterType.ARRAY, "Array to sort"),
+                    ParameterDefinition.optional("direction", ParameterType.STRING, "Sort direction: ASC or DESC (optional, default: ASC)")
+                ),
+                ReturnType.ARRAY,
+                "SORT([3,1,4,1,5]) or SORT([3,1,4,1,5], 'DESC')",
+                ArrayFunctions::evaluateSort
         ));
         
         // GC-related functions
@@ -529,6 +567,18 @@ public class FunctionRegistry {
                 MathematicalFunctions::evaluateRound
         ));
         
+        // Also register ROUND with 2 parameters for precision
+        register(createSimpleFunction("ROUND", null, FunctionType.MATHEMATICAL,
+                "Round to specified decimal places",
+                List.of(
+                    new ParameterDefinition("value", ParameterType.NUMBER, "Value to round"),
+                    new ParameterDefinition("decimals", ParameterType.NUMBER, "Number of decimal places")
+                ),
+                ReturnType.NUMBER,
+                "ROUND(3.14159, 2)",
+                MathematicalFunctions::evaluateRound
+        ));
+        
         register(createSimpleFunction("SQRT", null, FunctionType.MATHEMATICAL,
                 "Calculate square root",
                 List.of(new ParameterDefinition("value", ParameterType.NUMBER, "Value to calculate square root for")),
@@ -622,6 +672,18 @@ public class FunctionRegistry {
                 ReturnType.SAME_AS_INPUT,
                 "MAX_VALUES(1, 2, 3)",
                 MathematicalFunctions::evaluateMaxMultiple
+        ));
+        
+        register(createSimpleFunction("CLAMP", null, FunctionType.MATHEMATICAL,
+                "Constrain a value between a minimum and maximum",
+                List.of(
+                    new ParameterDefinition("min", ParameterType.NUMBER, "Minimum value"),
+                    new ParameterDefinition("max", ParameterType.NUMBER, "Maximum value"),
+                    new ParameterDefinition("value", ParameterType.NUMBER, "Value to clamp")
+                ),
+                ReturnType.SAME_AS_INPUT,
+                "CLAMP(0, 100, duration), CLAMP(MIN(duration), MAX(duration), duration)",
+                MathematicalFunctions::evaluateClamp
         ));
     }
     

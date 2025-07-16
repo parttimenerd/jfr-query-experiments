@@ -110,6 +110,24 @@ public class TokenStream {
     }
     
     /**
+     * Consume a token that can be used as an identifier (IDENTIFIER or allowed keyword)
+     */
+    public Token consumeIdentifierOrKeyword(String message) throws ParserException {
+        if (ParserUtils.canUseAsIdentifier(this)) {
+            return advance();
+        }
+        
+        ParserErrorHandler.ParserError error = new ParserErrorHandler.ParserError(
+            message + ". Expected identifier or keyword that can be used as identifier, but found " + current().type(),
+            "Use a valid identifier or a keyword that can serve as an identifier",
+            current(),
+            "Near: " + current().value(),
+            ParserErrorHandler.ErrorType.UNEXPECTED_TOKEN
+        );
+        throw new ParserException(error);
+    }
+    
+    /**
      * Skip tokens until we reach one of the recovery points
      */
     public void skipToRecoveryPoint(TokenType... recoveryTokens) {

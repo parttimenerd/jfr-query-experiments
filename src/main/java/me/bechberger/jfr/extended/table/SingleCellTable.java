@@ -5,24 +5,31 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Optimized version of JfrTable for single-cell (one column, one row) results.
- * Used to efficiently store evaluation results that don't result in proper tables
- * (e.g., array literals, scalar expressions).
+ * Highly optimized implementation of JfrTable for single-cell (one column, one row) results.
+ * 
+ * This implementation is designed for maximum performance when dealing with single values,
+ * eliminating the overhead of lists, maps, and other data structures used in StandardJfrTable.
+ * 
+ * Used efficiently for:
+ * - Array literals
+ * - Scalar expressions  
+ * - Aggregation results
+ * - Function return values
+ * - Single-value query results
  */
-public class SingleCellTable extends JfrTable {
+public class SingleCellTable implements JfrTable {
     
     private final CellValue value;
-    private final Column column;
+    private final JfrTable.Column column;
+    private final JfrTable.Row row;
     
     /**
      * Create a SingleCellTable with the given column name and cell value
      */
     public SingleCellTable(String columnName, CellValue value) {
-        super(List.of(new Column(columnName, value.getType())));
         this.value = value;
-        this.column = new Column(columnName, value.getType());
-        // Add the single row
-        super.addRow(new Row(value));
+        this.column = new JfrTable.Column(columnName, value.getType());
+        this.row = new JfrTable.Row(value);
     }
     
     /**
@@ -88,6 +95,28 @@ public class SingleCellTable extends JfrTable {
         return value;
     }
     
+    // Optimized JfrTable interface implementation
+    
+    @Override
+    public List<JfrTable.Column> getColumns() {
+        return List.of(column);
+    }
+    
+    @Override
+    public List<JfrTable.Row> getRows() {
+        return List.of(row);
+    }
+    
+    @Override
+    public Optional<JfrTable.Column> getColumn(String name) {
+        return column.name().equals(name) ? Optional.of(column) : Optional.empty();
+    }
+    
+    @Override
+    public int getColumnIndex(String name) {
+        return column.name().equals(name) ? 0 : -1;
+    }
+    
     @Override
     public CellValue getCell(int rowIndex, String columnName) {
         if (rowIndex != 0 || !column.name().equals(columnName)) {
@@ -123,13 +152,47 @@ public class SingleCellTable extends JfrTable {
     }
     
     @Override
-    public Optional<Column> getColumn(String name) {
-        return column.name().equals(name) ? Optional.of(column) : Optional.empty();
+    public void addRow(JfrTable.Row row) {
+        throw new UnsupportedOperationException("Cannot add rows to SingleCellTable");
     }
     
     @Override
-    public int getColumnIndex(String name) {
-        return column.name().equals(name) ? 0 : -1;
+    public void addRow(CellValue... cells) {
+        throw new UnsupportedOperationException("Cannot add rows to SingleCellTable");
+    }
+    
+    @Override
+    public JfrTable filter(JfrTable.RowPredicate predicate) {
+        // For single-cell table, either return this or empty table
+        if (predicate.test(row, this)) {
+            return this;
+        } else {
+            // Return empty StandardJfrTable
+            return new StandardJfrTable(List.of(column));
+        }
+    }
+    
+    @Override
+    public JfrTable select(String... columnNames) {
+        for (String columnName : columnNames) {
+            if (column.name().equals(columnName)) {
+                return this; // Return self if our column is selected
+            }
+        }
+        // Return empty table if our column is not selected
+        return new StandardJfrTable(Collections.emptyList());
+    }
+    
+    @Override
+    public JfrTable sort(String columnName, boolean ascending) {
+        // Single row table is always sorted
+        return this;
+    }
+    
+    @Override
+    public JfrTable copy() {
+        // SingleCellTable is immutable, so we can return this
+        return this;
     }
     
     @Override

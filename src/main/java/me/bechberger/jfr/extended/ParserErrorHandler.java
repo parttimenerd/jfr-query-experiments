@@ -3,6 +3,7 @@ package me.bechberger.jfr.extended;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import me.bechberger.jfr.extended.engine.util.StringSimilarity;
 import me.bechberger.jfr.extended.evaluator.FunctionRegistry;
 
 /**
@@ -1704,7 +1705,7 @@ public class ParserErrorHandler {
             
             // Levenshtein distance with adaptive threshold
             int maxDistance = Math.max(2, Math.min(input.length(), func.length()) / 3);
-            if (calculateLevenshteinDistance(input, func) <= maxDistance) {
+            if (StringSimilarity.levenshteinDistanceIgnoreCase(input, func) <= maxDistance) {
                 suggestions.add(funcName);
             }
         }
@@ -1789,41 +1790,12 @@ public class ParserErrorHandler {
         }
         
         int lengthDiff = Math.abs(input.length() - func.length());
-        int levenshteinDist = calculateLevenshteinDistance(input, func);
+        int levenshteinDist = StringSimilarity.levenshteinDistanceIgnoreCase(input, func);
         
         // Score combines distance with preference for prefix matches and similar length
         return levenshteinDist * 10 - prefixScore * 5 + lengthDiff;
     }
-    
-    /**
-     * Calculate Levenshtein distance between two strings
-     */
-    private int calculateLevenshteinDistance(String s1, String s2) {
-        int len1 = s1.length();
-        int len2 = s2.length();
-        
-        int[][] dp = new int[len1 + 1][len2 + 1];
-        
-        for (int i = 0; i <= len1; i++) {
-            dp[i][0] = i;
-        }
-        for (int j = 0; j <= len2; j++) {
-            dp[0][j] = j;
-        }
-        
-        for (int i = 1; i <= len1; i++) {
-            for (int j = 1; j <= len2; j++) {
-                if (s1.charAt(i - 1) == s2.charAt(j - 1)) {
-                    dp[i][j] = dp[i - 1][j - 1];
-                } else {
-                    dp[i][j] = 1 + Math.min(dp[i - 1][j], Math.min(dp[i][j - 1], dp[i - 1][j - 1]));
-                }
-            }
-        }
-        
-        return dp[len1][len2];
-    }
-    
+
     /**
      * Apply recovery strategy and return suggested token position
      */
@@ -2119,5 +2091,169 @@ public class ParserErrorHandler {
         } else {
             return RecoveryStrategy.SKIP_TO_NEXT_CLAUSE;
         }
+    }
+    
+    /**
+     * Create an enhanced QuerySyntaxError for parser errors with context analysis and suggestions
+     */
+    public QuerySyntaxError createEnhancedParserError(Token errorToken, String problemDescription, String suggestion) {
+        return createEnhancedParserError(errorToken, problemDescription, suggestion, null, null);
+    }
+    
+    /**
+     * Create an enhanced QuerySyntaxError for parser errors with full context information
+     */
+    public QuerySyntaxError createEnhancedParserError(Token errorToken, String problemDescription, 
+                                                      String suggestion, String tips, String examples) {
+        // Detect the query context for better error categorization
+        QueryContext context = detectQueryContext(errorToken);
+        QuerySyntaxError.ErrorCategory category = categorizeParserError(errorToken, context);
+        
+        // Generate contextual tips if not provided
+        if (tips == null) {
+            tips = generateContextualTips(errorToken, context);
+        }
+        
+        // Generate examples if not provided
+        if (examples == null) {
+            examples = generateContextualExamples(context);
+        }
+        
+        return new QuerySyntaxError.Builder(QuerySyntaxError.ErrorOrigin.PARSER)
+            .category(category)
+            .problemDescription(problemDescription)
+            .suggestion(suggestion)
+            .tips(tips)
+            .examples(examples)
+            .errorToken(errorToken)
+            .originalQuery(originalQuery)
+            .build();
+    }
+    
+    /**
+     * Categorize parser errors for better organization
+     */
+    private QuerySyntaxError.ErrorCategory categorizeParserError(Token errorToken, QueryContext context) {
+        if (errorToken == null) {
+            return QuerySyntaxError.ErrorCategory.INVALID_SYNTAX;
+        }
+        
+        switch (errorToken.type()) {
+            case EOF:
+                return QuerySyntaxError.ErrorCategory.MISSING_TOKEN;
+            case LPAREN:
+            case RPAREN:
+                return QuerySyntaxError.ErrorCategory.MISSING_TOKEN;
+            case LBRACKET:
+            case RBRACKET:
+                return QuerySyntaxError.ErrorCategory.MISSING_TOKEN;
+            default:
+                return switch (context) {
+                    case FUNCTION_CALL -> QuerySyntaxError.ErrorCategory.INVALID_SYNTAX;
+                    case SELECT_CLAUSE, FROM_CLAUSE, WHERE_CLAUSE -> QuerySyntaxError.ErrorCategory.CONTEXT_ERROR;
+                    default -> QuerySyntaxError.ErrorCategory.UNEXPECTED_TOKEN;
+                };
+        }
+    }
+    
+    /**
+     * Generate contextual tips based on the error location and context
+     */
+    private String generateContextualTips(Token errorToken, QueryContext context) {
+        StringBuilder tips = new StringBuilder();
+        
+        switch (context) {
+            case SELECT_CLAUSE:
+                tips.append("• SELECT clause syntax: SELECT field1, field2, * FROM table\n");
+                tips.append("• Use comma to separate multiple fields\n");
+                tips.append("• Use * to select all fields");
+                break;
+                
+            case FROM_CLAUSE:
+                tips.append("• FROM clause specifies the data source\n");
+                tips.append("• Use table names or JFR event types (e.g., GarbageCollection)\n");
+                tips.append("• Multiple sources can be joined with JOIN syntax");
+                break;
+                
+            case WHERE_CLAUSE:
+                tips.append("• WHERE clause filters data with conditions\n");
+                tips.append("• Use comparison operators: =, !=, <, >, <=, >=\n");
+                tips.append("• Combine conditions with AND, OR");
+                break;
+                
+            case FUNCTION_CALL:
+                tips.append("• Function syntax: FUNCTION_NAME(arg1, arg2, ...)\n");
+                tips.append("• Use commas to separate function arguments\n");
+                tips.append("• Check function name spelling and argument count");
+                break;
+                
+            case EXPRESSION:
+                tips.append("• Expressions can use operators: +, -, *, /, %\n");
+                tips.append("• Use parentheses for grouping: (a + b) * c\n");
+                tips.append("• Check operator precedence and syntax");
+                break;
+                
+            default:
+                tips.append("• Check query syntax against JFR query language documentation\n");
+                tips.append("• Ensure all parentheses and brackets are properly matched\n");
+                tips.append("• Use semicolon to separate multiple statements");
+                break;
+        }
+        
+        return tips.toString();
+    }
+    
+    /**
+     * Generate contextual examples based on the parsing context
+     */
+    private String generateContextualExamples(QueryContext context) {
+        return switch (context) {
+            case SELECT_CLAUSE -> 
+                "SELECT * FROM Events\n" +
+                "SELECT duration, threadName FROM ExecutionSample\n" +
+                "SELECT COUNT(*) FROM GarbageCollection";
+                
+            case FROM_CLAUSE -> 
+                "FROM GarbageCollection\n" +
+                "FROM ExecutionSample e\n" +
+                "FROM Events e1 JOIN OtherEvents e2 ON e1.id = e2.id";
+                
+            case WHERE_CLAUSE -> 
+                "WHERE duration > 5ms\n" +
+                "WHERE threadName = 'main' AND startTime > '2023-01-01'\n" +
+                "WHERE allocation > 1mb OR gcType = 'G1'";
+                
+            case FUNCTION_CALL -> 
+                "COUNT(*)\n" +
+                "AVG(duration)\n" +
+                "P99(responseTime)";
+                
+            case EXPRESSION -> 
+                "duration * 2\n" +
+                "(startTime + duration)\n" +
+                "allocation / 1024";
+                
+            default -> 
+                "@SELECT * FROM Events\n" +
+                "@SELECT COUNT(*) FROM Events WHERE duration > 1ms\n" +
+                "SHOW EVENTS";
+        };
+    }
+    
+    /**
+     * Create a unified error from an existing ParserError
+     */
+    public QuerySyntaxError createUnifiedError(ParserError parserError) {
+        return createEnhancedParserError(
+            parserError.getErrorToken(),
+            parserError.getMessage(),
+            parserError.getSuggestion(),
+            null, // Let it generate contextual tips
+            parserError.getExamples()
+        );
+    }
+
+    public String getOriginalQuery() {
+        return originalQuery;
     }
 }

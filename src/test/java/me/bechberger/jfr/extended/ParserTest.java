@@ -2111,14 +2111,14 @@ public class ParserTest {
                 )
             ),
             Arguments.of(
-                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN 10s OF MAX(endTime)",
+                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN 10s OF MAX(start_time)",
                 (ASTBuilderSupplier) () -> program(
                     query(selectAll(), from(source("ExecutionSample")))
                         .where(where(condition(
                             within(
                                 identifier("timestamp"),
                                 durationLiteral("10s"),
-                                function("MAX", identifier("endTime"))
+                                function("MAX", identifier("start_time"))
                             )
                         )))
                         
@@ -2139,28 +2139,28 @@ public class ParserTest {
                 )
             ),
             Arguments.of(
-                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN 5m OF (MIN(startTime) + 5s)",
+                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN 5m OF (MIN(start_time) + 5s)",
                 (ASTBuilderSupplier) () -> program(
                     query(selectAll(), from(source("ExecutionSample")))
                         .where(where(condition(
                             within(
                                 identifier("timestamp"),
                                 durationLiteral("5m"),
-                                add(function("MIN", identifier("startTime")), durationLiteral("5s"))
+                                add(function("MIN", identifier("start_time")), durationLiteral("5s"))
                             )
                         )))
                         
                 )
             ),
             Arguments.of(
-                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN (MAX(duration) - MIN(duration)) OF AVG(startTime)",
+                "@SELECT * FROM ExecutionSample WHERE timestamp WITHIN (MAX(duration) - MIN(duration)) OF AVG(start_time)",
                 (ASTBuilderSupplier) () -> program(
                     query(selectAll(), from(source("ExecutionSample")))
                         .where(where(condition(
                             within(
                                 identifier("timestamp"),
                                 subtract(function("MAX", identifier("duration")), function("MIN", identifier("duration"))),
-                                function("AVG", identifier("startTime"))
+                                function("AVG", identifier("start_time"))
                             )
                         )))
                         
@@ -2340,10 +2340,10 @@ public class ParserTest {
     @ParameterizedTest
     @CsvSource({
         "'@SELECT * FROM Events WHERE timestamp WITHIN MAX(duration) OF startTime', MAX",
-        "'@SELECT * FROM Events WHERE timestamp WITHIN MIN(duration) OF endTime', MIN", 
+        "'@SELECT * FROM Events WHERE timestamp WITHIN MIN(duration) OF start_time', MIN", 
         "'@SELECT * FROM Events WHERE timestamp WITHIN AVG(duration) OF timestamp', AVG",
         "'@SELECT * FROM Events WHERE timestamp WITHIN COUNT(*) OF startTime', COUNT",
-        "'@SELECT * FROM Events WHERE timestamp WITHIN SUM(bytes) OF endTime', SUM"
+        "'@SELECT * FROM Events WHERE timestamp WITHIN SUM(bytes) OF start_time', SUM"
     })
     public void testWithinTimeWindowWithAggregationFunctions(String query, String expectedFunction) throws Exception {
         Parser parser = createParser(query);

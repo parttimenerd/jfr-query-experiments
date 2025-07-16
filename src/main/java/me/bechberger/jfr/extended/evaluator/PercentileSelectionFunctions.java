@@ -24,9 +24,7 @@ public class PercentileSelectionFunctions {
      * and returns the corresponding idField values.
      */
     static CellValue evaluatePercentileSelect(List<CellValue> arguments, EvaluationContext context) {
-        if (arguments.size() != 4) {
-            throw new IllegalArgumentException("PERCENTILE_SELECT requires exactly 4 arguments: percentile, table, idField, valueField");
-        }
+        FunctionUtils.assertArgumentCount("PERCENTILE_SELECT", arguments, 4);
         
         double percentile = ((Number) arguments.get(0).getValue()).doubleValue();
         String tableName = arguments.get(1).getValue().toString();
@@ -77,9 +75,7 @@ public class PercentileSelectionFunctions {
      * Evaluates P90SELECT function - shortcut for PERCENTILE_SELECT(90, ...)
      */
     static CellValue evaluateP90Select(List<CellValue> arguments, EvaluationContext context) {
-        if (arguments.size() != 3) {
-            throw new IllegalArgumentException("P90SELECT requires exactly 3 arguments: table, idField, valueField");
-        }
+        FunctionUtils.assertArgumentCount("P90SELECT", arguments, 3);
         
         // Prepend the percentile value (90) to the arguments
         List<CellValue> fullArgs = new ArrayList<>();
@@ -93,9 +89,7 @@ public class PercentileSelectionFunctions {
      * Evaluates P95SELECT function - shortcut for PERCENTILE_SELECT(95, ...)
      */
     static CellValue evaluateP95Select(List<CellValue> arguments, EvaluationContext context) {
-        if (arguments.size() != 3) {
-            throw new IllegalArgumentException("P95SELECT requires exactly 3 arguments: table, idField, valueField");
-        }
+        FunctionUtils.assertArgumentCount("P95SELECT", arguments, 3);
         
         // Prepend the percentile value (95) to the arguments
         List<CellValue> fullArgs = new ArrayList<>();
@@ -109,9 +103,7 @@ public class PercentileSelectionFunctions {
      * Evaluates P99SELECT function - shortcut for PERCENTILE_SELECT(99, ...)
      */
     static CellValue evaluateP99Select(List<CellValue> arguments, EvaluationContext context) {
-        if (arguments.size() != 3) {
-            throw new IllegalArgumentException("P99SELECT requires exactly 3 arguments: table, idField, valueField");
-        }
+        FunctionUtils.assertArgumentCount("P99SELECT", arguments, 3);
         
         // Prepend the percentile value (99) to the arguments
         List<CellValue> fullArgs = new ArrayList<>();
@@ -125,9 +117,7 @@ public class PercentileSelectionFunctions {
      * Evaluates P999SELECT function - shortcut for PERCENTILE_SELECT(99.9, ...)
      */
     static CellValue evaluateP999Select(List<CellValue> arguments, EvaluationContext context) {
-        if (arguments.size() != 3) {
-            throw new IllegalArgumentException("P999SELECT requires exactly 3 arguments: table, idField, valueField");
-        }
+        FunctionUtils.assertArgumentCount("P999SELECT", arguments, 3);
         
         // Prepend the percentile value (99.9) to the arguments
         List<CellValue> fullArgs = new ArrayList<>();

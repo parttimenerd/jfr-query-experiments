@@ -1,25 +1,35 @@
 package me.bechberger.jfr.extended.engine;
 
 import jdk.jfr.EventType;
+import jdk.jfr.ValueDescriptor;
 import me.bechberger.jfr.extended.evaluator.FunctionRegistry;
 import me.bechberger.jfr.extended.evaluator.AggregateFunctions;
+import me.bechberger.jfr.extended.evaluator.FunctionUtils;
+import me.bechberger.jfr.extended.ast.ASTNode;
 import me.bechberger.jfr.extended.ast.ASTNodes.*;
 import me.bechberger.jfr.extended.ast.ASTVisitor;
 import me.bechberger.jfr.extended.ast.Location;
 import me.bechberger.jfr.extended.table.JfrTable;
+import me.bechberger.jfr.extended.table.StandardJfrTable;
+import me.bechberger.jfr.extended.table.MultiResultTable;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.table.CellType;
 import me.bechberger.jfr.extended.table.SingleCellTable;
+import me.bechberger.jfr.extended.table.StarMarkerTable;
 import me.bechberger.jfr.extended.Parser;
-import me.bechberger.jfr.extended.Lexer;
-import me.bechberger.jfr.extended.Token;
+import me.bechberger.jfr.extended.ParserException;
+import me.bechberger.jfr.extended.engine.QuerySemanticValidator.QuerySemanticException;
+import me.bechberger.jfr.extended.engine.exception.*;
 
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.Set;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.Comparator;
+import java.util.stream.Collectors;
 
 // RawJfrQueryExecutor interface is now in its own file
 
@@ -42,8 +52,10 @@ interface ExtendedQueryExecutor {
 public class QueryEvaluator implements ASTVisitor<JfrTable> {
     
     private final FunctionRegistry functionRegistry;
+    private final ExpressionEvaluator expressionEvaluator;
     private final List<EventType> eventTypes;
     private final RawJfrQueryExecutor rawJfrExecutor;
+    private final JoinProcessor joinProcessor;
     private ExecutionContext context;
     private AggregateFunctions.EvaluationContext evaluationContext;
     
@@ -53,7 +65,9 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
      */
     public QueryEvaluator(RawJfrQueryExecutor rawJfrExecutor) {
         this.functionRegistry = FunctionRegistry.getInstance();
+        this.expressionEvaluator = new ExpressionEvaluator(functionRegistry);
         this.rawJfrExecutor = rawJfrExecutor;
+        this.joinProcessor = new JoinProcessor(JoinProcessor.createOptimizedConfig());
         this.eventTypes = new ArrayList<>(); // Event types will be retrieved as needed
         this.context = new ExecutionContext();
         
@@ -65,7 +79,13 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                     JfrTable result = this.jfrQuery(rawQueryNode);
                     return convertJfrTableToRows(result);
                 } catch (Exception e) {
-                    throw new RuntimeException("Failed to execute raw JFR query", e);
+                    throw new QueryEvaluationException(
+                        "raw JFR query execution: " + rawQueryNode.toString(), 
+                        rawQueryNode.toString(), 
+                        QueryEvaluationException.EvaluationErrorType.UNSUPPORTED_OPERATION, 
+                        rawQueryNode, 
+                        e
+                    );
                 }
             },
             // Extended query executor  
@@ -219,7 +239,7 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
      */
     public JfrTable jfrQuery(RawJfrQueryNode queryNode) throws Exception {
         if (rawJfrExecutor == null) {
-            throw new UnsupportedOperationException("Raw JFR query execution not supported - no executor provided");
+            throw QueryExecutorException.forMissingExecutor("Raw JFR", queryNode);
         }
         return rawJfrExecutor.execute(queryNode);
     }
@@ -233,34 +253,74 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     
     /**
      * Parse and execute a query string (possibly multi-statement)
+     * Supports:
+     * - Multi-statement queries with proper semantic validation
+     * - Variable assignments (x := @SELECT * FROM table)
+     * - View definitions (VIEW myview AS @SELECT ...)
+     * - State management between statements
      */
     public JfrTable query(String queryString) throws Exception {
         try {
-            // Tokenize the query string
-            Lexer lexer = new Lexer(queryString);
-            List<Token> tokens = lexer.tokenize();
-            
-            // Parse the tokens into an AST
-            Parser parser = new Parser(tokens, queryString);
-            ProgramNode program = parser.parse();
+            // Parse and validate the query using the enhanced parser method
+            // This handles both parsing and semantic validation in one step
+            ProgramNode program = Parser.parseAndValidate(queryString);
             
             // Execute the program and return the last result
             return program.accept(this);
+        } catch (ParserException e) {
+            // ParserException already has good error messages - just re-throw it
+            throw e;
+        } catch (QuerySemanticValidator.QuerySemanticException e) {
+            throw e;
         } catch (Exception e) {
-            throw new Exception("Failed to parse and execute query: " + queryString, e);
+            // Don't wrap exceptions that are already Query related exceptions
+            if (e instanceof QueryExecutionException) {
+                throw (QueryExecutionException) e;
+            }
+            
+            // For other exceptions, provide a clean error message
+            String errorMessage = e.getMessage() != null ? e.getMessage() : "Query execution failed";
+            throw new QueryEvaluationException(
+                errorMessage,
+                null,
+                QueryEvaluationException.EvaluationErrorType.UNSUPPORTED_OPERATION, 
+                null, 
+                e
+            );
         }
     }
     
     @Override
     public JfrTable visitProgram(ProgramNode node) {
+        if (node.statements().isEmpty()) {
+            throw new QuerySyntaxException(
+                "Program must contain at least one statement", 
+                "", 
+                QuerySyntaxException.SyntaxErrorType.SEMANTIC_VIOLATION, 
+                node
+            );
+        }
+        
+        List<JfrTable> topLevelResults = new ArrayList<>();
         JfrTable lastResult = null;
         
         for (StatementNode statement : node.statements()) {
             lastResult = statement.accept(this);
             context.setCurrentResult(lastResult);
+            
+            // Only collect results from top-level queries (not assignments or view definitions)
+            if (statement instanceof QueryNode) {
+                topLevelResults.add(lastResult);
+            }
         }
         
-        return lastResult;
+        // If we have multiple top-level query results, return a MultiResultTable
+        // Otherwise, return the last result directly
+        if (topLevelResults.size() > 1) {
+            return new MultiResultTable(topLevelResults, lastResult);
+        } else {
+            return lastResult;
+        }
     }
     
     @Override
@@ -279,20 +339,20 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         context.setLocalVariable(node.variable(), lazyQuery);
         
         // Return empty result for assignment statements
-        return new JfrTable(List.of());
+        return new StandardJfrTable(List.of());
     }
     
     @Override
     public JfrTable visitViewDefinition(ViewDefinitionNode node) {
         defineView(node.viewName(), node.query());
         // Return empty result for view definitions
-        return new JfrTable(List.of());
+        return new StandardJfrTable(List.of());
     }
     
     @Override
     public JfrTable visitQuery(QueryNode node) {
-        // Basic query execution - this is a simplified implementation
-        // A full implementation would integrate with the existing JFR query system
+        // Basic query execution - main implementation
+        // Integrates with the existing JFR query system
         
         if (node.isExtended()) {
             return executeExtendedQuery(node);
@@ -312,7 +372,11 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         }
     }
     
-    private JfrTable executeBasicQuery(QueryNode node) {
+    private JfrTable executeBasicQuery(QueryNode node) throws QuerySemanticException {
+        // Semantic validation before execution
+        QuerySemanticValidator validator = new QuerySemanticValidator();
+        validator.validate(node);
+        
         // Check cache first using query hash
         String cacheKey = generateQueryCacheKey(node);
         Set<String> dependencies = extractQueryDependencies(node);
@@ -332,7 +396,11 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             
             // Step 2: Apply GROUP BY aggregations
             if (node.groupBy() != null) {
-                sourceData = applyGroupByClause(sourceData, node.groupBy());
+                sourceData = applyGroupByClause(sourceData, node.groupBy(), node.select());
+                // GROUP BY already handles SELECT clause, so skip separate SELECT processing
+            } else {
+                // Step 4: Execute SELECT expressions on the filtered data (only if no GROUP BY)
+                sourceData = executeSelectClause(sourceData, node.select());
             }
             
             // Step 3: Apply HAVING conditions on aggregated groups
@@ -340,30 +408,43 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                 sourceData = applyHavingClause(sourceData, node.having());
             }
             
-            // Step 4: Execute SELECT expressions on the filtered/grouped data
-            JfrTable result = executeSelectClause(sourceData, node.select());
-            
             // Step 5: Apply ORDER BY sorting
             if (node.orderBy() != null) {
-                result = applyOrderByClause(result, node.orderBy());
+                sourceData = applyOrderByClause(sourceData, node.orderBy());
             }
             
             // Step 6: Apply LIMIT restrictions
             if (node.limit() != null) {
-                result = applyLimitClause(result, node.limit());
+                sourceData = applyLimitClause(sourceData, node.limit());
             }
             
             // Cache the result with dependencies for future use
-            context.cacheResult(cacheKey, result, dependencies);
+            context.cacheResult(cacheKey, sourceData, dependencies);
             if (context.isDebugMode()) {
                 System.out.println("Cached query result: " + cacheKey + " with dependencies: " + dependencies);
             }
             
-            return result;
+            return sourceData;
             
         } catch (Exception e) {
-            // Fallback to placeholder implementation for unsupported features
-            return createPlaceholderResult(node, "Error executing query: " + e.getMessage());
+            // Don't wrap exceptions that are already Query related exceptions
+            if (e instanceof QueryExecutionException) {
+                throw (QueryExecutionException) e;
+            }
+            
+            // Log the error for debugging
+            System.err.println("Query execution error: " + e.getMessage());
+            e.printStackTrace();
+            
+            // Instead of returning a placeholder result that creates false data,
+            // rethrow the exception so the query fails properly
+            throw new QueryEvaluationException(
+                "query execution", 
+                null, 
+                QueryEvaluationException.EvaluationErrorType.UNSUPPORTED_OPERATION, 
+                node, 
+                e
+            );
         }
     }
     
@@ -373,12 +454,12 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
      */
     private JfrTable processFromClauseWithFiltering(FromNode fromNode, WhereNode whereNode) {
         if (fromNode == null) {
-            return new JfrTable(List.of(new JfrTable.Column("default", CellType.STRING)));
+            return SingleCellTable.of("default", "");
         }
         
         List<SourceNodeBase> sources = fromNode.sources();
         if (sources.isEmpty()) {
-            return new JfrTable(List.of(new JfrTable.Column("empty", CellType.STRING)));
+            return SingleCellTable.of("empty", "");
         }
         
         // Process the first source as the base table and apply WHERE filtering immediately
@@ -432,19 +513,61 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         // Get the right table
         SourceNode rightSource = new SourceNode(standardJoin.source(), standardJoin.alias(), standardJoin.location());
         JfrTable rightTable = visitSource(rightSource);
-        
+
         // Apply WHERE filtering to right table before join to reduce join size
         rightTable = applyWhereFilteringIfApplicable(rightTable, whereNode);
+
+        // Parse qualified field names to extract table aliases and field names
+        String leftField = extractFieldNameFromQualified(standardJoin.leftJoinField());
+        String rightField = extractFieldNameFromQualified(standardJoin.rightJoinField());
         
+        // Get table alias for validation (optional - mainly for debugging)
+        String leftAlias = extractTableAliasFromQualified(standardJoin.leftJoinField());
+        String rightAlias = extractTableAliasFromQualified(standardJoin.rightJoinField());
+        
+        // Validate that the right alias matches the join source alias
+        if (rightAlias != null && standardJoin.alias() != null && !rightAlias.equals(standardJoin.alias())) {
+            throw new QueryEvaluationException(
+                "join field validation",
+                "Right join field alias '" + rightAlias + "' does not match source alias '" + standardJoin.alias() + "'",
+                QueryEvaluationException.EvaluationErrorType.INVALID_STATE,
+                standardJoin
+            );
+        }
+
         // Perform the join with optimized tables
         JfrTable result = switch (standardJoin.joinType()) {
-            case INNER -> performInnerJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), whereNode);
-            case LEFT -> performLeftJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), whereNode);
-            case RIGHT -> performRightJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), whereNode);
-            case FULL -> performFullJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), whereNode);
+            case INNER -> performInnerJoin(leftTable, rightTable, leftField, rightField);
+            case LEFT -> performLeftJoin(leftTable, rightTable, leftField, rightField);
+            case RIGHT -> performRightJoin(leftTable, rightTable, leftField, rightField);
+            case FULL -> performFullJoin(leftTable, rightTable, leftField, rightField);
         };
-        
+
         return result;
+    }
+
+    /**
+     * Extract the unqualified field name from a potentially qualified field reference.
+     * Examples: "e.threadId" -> "threadId", "threadId" -> "threadId"
+     */
+    private String extractFieldNameFromQualified(String qualifiedFieldName) {
+        if (qualifiedFieldName == null) {
+            return null;
+        }
+        int lastDotIndex = qualifiedFieldName.lastIndexOf('.');
+        return lastDotIndex >= 0 ? qualifiedFieldName.substring(lastDotIndex + 1) : qualifiedFieldName;
+    }
+    
+    /**
+     * Extract the table alias from a qualified field reference.
+     * Examples: "e.threadId" -> "e", "threadId" -> null
+     */
+    private String extractTableAliasFromQualified(String qualifiedFieldName) {
+        if (qualifiedFieldName == null) {
+            return null;
+        }
+        int lastDotIndex = qualifiedFieldName.lastIndexOf('.');
+        return lastDotIndex >= 0 ? qualifiedFieldName.substring(0, lastDotIndex) : null;
     }
     
     /**
@@ -465,12 +588,12 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
      */
     private JfrTable processFromClause(FromNode fromNode) {
         if (fromNode == null) {
-            return new JfrTable(List.of(new JfrTable.Column("default", CellType.STRING)));
+            return SingleCellTable.of("default", "");
         }
         
         List<SourceNodeBase> sources = fromNode.sources();
         if (sources.isEmpty()) {
-            return new JfrTable(List.of(new JfrTable.Column("empty", CellType.STRING)));
+            return SingleCellTable.of("empty", "");
         }
         
         // Process the first source as the base table
@@ -505,11 +628,11 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         }
         
         // Create filtered result table with same columns
-        JfrTable result = new JfrTable(sourceData.getColumns());
+        JfrTable result = new StandardJfrTable(sourceData.getColumns());
         
         // Evaluate WHERE condition for each row
         for (JfrTable.Row row : sourceData.getRows()) {
-            if (evaluateConditionForRow(row, whereNode.condition())) {
+            if (evaluateConditionForRow(row, whereNode.condition(), sourceData.getColumns())) {
                 result.addRow(row);
             }
         }
@@ -520,7 +643,7 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     /**
      * Apply GROUP BY clause to aggregate data with proper aggregate function evaluation
      */
-    private JfrTable applyGroupByClause(JfrTable sourceData, GroupByNode groupByNode) {
+    private JfrTable applyGroupByClause(JfrTable sourceData, GroupByNode groupByNode, SelectNode selectNode) {
         // Group rows by specified fields
         Map<String, List<JfrTable.Row>> groups = new HashMap<>();
         
@@ -529,17 +652,30 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             groups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(row);
         }
         
-        // Create result columns (same as source for now - in real implementation this would be determined by SELECT clause)
-        List<JfrTable.Column> resultColumns = new ArrayList<>(sourceData.getColumns());
-        JfrTable result = new JfrTable(resultColumns);
+        // Determine result columns based on SELECT clause
+        List<JfrTable.Column> resultColumns = new ArrayList<>();
+        if (selectNode != null && !selectNode.items().isEmpty()) {
+            for (SelectItemNode selectItem : selectNode.items()) {
+                String columnName = selectItem.alias() != null ? 
+                    selectItem.alias() : 
+                    QueryEvaluatorUtils.extractColumnName(selectItem.expression());
+                CellType columnType = QueryEvaluatorUtils.determineColumnType(selectItem.expression(), sourceData, this);
+                resultColumns.add(new JfrTable.Column(columnName, columnType));
+            }
+        } else {
+            // Fallback: use source columns if no SELECT clause
+            resultColumns = new ArrayList<>(sourceData.getColumns());
+        }
+        
+        JfrTable result = new StandardJfrTable(resultColumns);
         
         // For each group, compute aggregated values
         for (Map.Entry<String, List<JfrTable.Row>> group : groups.entrySet()) {
             List<JfrTable.Row> groupRows = group.getValue();
             if (groupRows.isEmpty()) continue;
             
-            // Compute aggregated row for this group
-            JfrTable.Row aggregatedRow = computeAggregatedRow(groupRows, sourceData.getColumns());
+            // Compute aggregated row for this group using SELECT clause
+            JfrTable.Row aggregatedRow = computeAggregatedRow(groupRows, sourceData.getColumns(), selectNode);
             result.addRow(aggregatedRow);
         }
         
@@ -547,10 +683,47 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     }
     
     /**
-     * Compute aggregated row from a group of rows
-     * This is a simplified implementation - in reality would use SELECT clause aggregate functions
+     * Compute aggregated row from a group of rows using proper SELECT clause aggregate functions
      */
-    private JfrTable.Row computeAggregatedRow(List<JfrTable.Row> groupRows, List<JfrTable.Column> columns) {
+    private JfrTable.Row computeAggregatedRow(List<JfrTable.Row> groupRows, List<JfrTable.Column> columns, SelectNode selectNode) {
+        if (selectNode == null || selectNode.items().isEmpty()) {
+            // Fallback: use simplified aggregation for backward compatibility
+            return computeAggregatedRowSimple(groupRows, columns);
+        }
+        
+        List<CellValue> aggregatedCells = new ArrayList<>();
+        
+        // Create a temporary table for this group to compute aggregates
+        JfrTable groupTable = new StandardJfrTable(columns);
+        groupRows.forEach(groupTable::addRow);
+        
+        // Evaluate each SELECT expression for this group
+        for (SelectItemNode selectItem : selectNode.items()) {
+            ExpressionNode expr = selectItem.expression();
+            
+            if (QueryEvaluatorUtils.containsAggregateFunction(expr)) {
+                // This is an aggregate expression - compute it over the entire group
+                CellValue aggregateValue = computeAggregateExpressionForGroup(expr, groupTable);
+                aggregatedCells.add(aggregateValue);
+            } else {
+                // This is a non-aggregate expression - use the first row's value
+                // (this is correct for GROUP BY since non-aggregate columns should be in GROUP BY)
+                if (!groupRows.isEmpty()) {
+                    CellValue value = CellValue.of(evaluateExpressionInRowContext(expr, groupRows.get(0), columns));
+                    aggregatedCells.add(value);
+                } else {
+                    aggregatedCells.add(new CellValue.NullValue());
+                }
+            }
+        }
+        
+        return new JfrTable.Row(aggregatedCells);
+    }
+    
+    /**
+     * Compute aggregated row from a group of rows - simplified fallback implementation
+     */
+    private JfrTable.Row computeAggregatedRowSimple(List<JfrTable.Row> groupRows, List<JfrTable.Column> columns) {
         List<CellValue> aggregatedCells = new ArrayList<>();
         
         for (int colIndex = 0; colIndex < columns.size(); colIndex++) {
@@ -571,38 +744,42 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     }
     
     /**
-     * Check if a column type is numeric for aggregation
+     * Compute an aggregate expression for a group of rows
      */
-    private boolean isNumericColumn(CellType type) {
-        return switch (type) {
-            case NUMBER, FLOAT, DURATION, MEMORY_SIZE, RATE -> true;
-            default -> false;
-        };
+    private CellValue computeAggregateExpressionForGroup(ExpressionNode expr, JfrTable groupTable) {
+        if (expr instanceof FunctionCallNode functionCall && isAggregateFunction(functionCall.functionName())) {
+            return computeAggregateValue(functionCall, groupTable);
+        } else if (expr instanceof BinaryExpressionNode binaryExpr) {
+            // Handle expressions like "COUNT(*) + 1" or "SUM(duration) / COUNT(*)"
+            CellValue leftValue = computeAggregateExpressionForGroup(binaryExpr.left(), groupTable);
+            CellValue rightValue = computeAggregateExpressionForGroup(binaryExpr.right(), groupTable);
+            return leftValue.mapBinary(rightValue, binaryExpr.operator());
+        } else if (expr instanceof UnaryExpressionNode unaryExpr) {
+            CellValue operandValue = computeAggregateExpressionForGroup(unaryExpr.operand(), groupTable);
+            return performUnaryOperation(unaryExpr.operator(), operandValue);
+        } else if (expr instanceof LiteralNode literal) {
+            return QueryEvaluatorUtils.convertLiteralToValue(literal);
+        } else {
+            // For non-aggregate expressions in aggregate context, use first row
+            if (!groupTable.getRows().isEmpty()) {
+                return CellValue.of(evaluateExpressionInRowContext(expr, groupTable.getRows().get(0), groupTable.getColumns()));
+            }
+            return new CellValue.NullValue();
+        }
     }
     
     /**
      * Compute sum of values in a specific column across group rows
      */
     private CellValue computeSum(List<JfrTable.Row> groupRows, int columnIndex) {
-        double sum = 0.0;
-        CellType resultType = CellType.NUMBER;
-        
-        for (JfrTable.Row row : groupRows) {
-            if (columnIndex < row.getCells().size()) {
-                CellValue cell = row.getCells().get(columnIndex);
-                if (isNumericValue(cell)) {
-                    sum += extractNumericValue(cell);
-                    // Preserve the most specific type
-                    if (cell.getType() == CellType.FLOAT) {
-                        resultType = CellType.FLOAT;
-                    }
-                }
-            }
-        }
-        
-        return resultType == CellType.FLOAT ? 
-            new CellValue.FloatValue(sum) : 
-            new CellValue.NumberValue((long) sum);
+        return QueryEvaluatorUtils.computeSum(groupRows, columnIndex);
+    }
+
+    /**
+     * Helper method: check if CellType is numeric
+     */
+    private boolean isNumericColumn(CellType type) {
+        return QueryEvaluatorUtils.isNumericColumn(type);
     }
     
     /**
@@ -612,7 +789,6 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         if (selectNode == null || selectNode.items().isEmpty()) {
             return sourceData; // Return all columns if no SELECT specified
         }
-        
         // Check for SELECT * first
         if (selectNode.items().size() == 1) {
             SelectItemNode singleItem = selectNode.items().get(0);
@@ -621,36 +797,63 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                 return sourceData;
             }
         }
-        
         // Build result columns based on SELECT items
         List<JfrTable.Column> resultColumns = new ArrayList<>();
         List<ExpressionNode> selectExpressions = new ArrayList<>();
-        
         for (SelectItemNode selectItem : selectNode.items()) {
             String columnName = selectItem.alias() != null ? 
                 selectItem.alias() : 
-                extractColumnName(selectItem.expression());
-            
+                QueryEvaluatorUtils.extractColumnName(selectItem.expression());
             // Determine column type by evaluating the expression on sample data
-            CellType columnType = determineColumnType(selectItem.expression(), sourceData);
+            CellType columnType = QueryEvaluatorUtils.determineColumnType(selectItem.expression(), sourceData, this);
             resultColumns.add(new JfrTable.Column(columnName, columnType));
             selectExpressions.add(selectItem.expression());
         }
+        // Check if any SELECT expression contains aggregate functions
+        boolean hasAggregateFunction = selectExpressions.stream()
+            .anyMatch(QueryEvaluatorUtils::containsAggregateFunction);
+        JfrTable result = new StandardJfrTable(resultColumns);
         
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Evaluate SELECT expressions for each row
-        for (JfrTable.Row sourceRow : sourceData.getRows()) {
-            List<CellValue> resultCells = new ArrayList<>();
+        if (hasAggregateFunction) {
+            // Pre-compute aggregate values that will be used in row-level expressions
+            Map<String, CellValue> precomputedAggregates = QueryEvaluatorUtils.precomputeAggregatesInSelect(selectExpressions, sourceData, this);
             
-            for (ExpressionNode expr : selectExpressions) {
-                CellValue cellValue = evaluateExpressionForRow(sourceRow, expr);
-                resultCells.add(cellValue);
+            // Check if this is a pure aggregate query (all expressions are aggregates or literals)
+            boolean isPureAggregate = selectExpressions.stream()
+                .allMatch(expr -> QueryEvaluatorUtils.containsAggregateFunction(expr) || 
+                                 expr instanceof LiteralNode);
+            
+            if (isPureAggregate) {
+                // Pure aggregate query - return single row with aggregate results
+                List<CellValue> resultCells = new ArrayList<>();
+                for (ExpressionNode expr : selectExpressions) {
+                    CellValue cellValue = evaluateAggregateExpression(expr, precomputedAggregates);
+                    resultCells.add(cellValue);
+                }
+                result.addRow(new JfrTable.Row(resultCells));
+            } else {
+                // Mixed aggregate/non-aggregate expressions, evaluate for each row
+                // but use pre-computed aggregate values where needed
+                for (JfrTable.Row sourceRow : sourceData.getRows()) {
+                    List<CellValue> resultCells = new ArrayList<>();
+                    for (ExpressionNode expr : selectExpressions) {
+                        CellValue cellValue = CellValue.of(evaluateExpressionInRowContext(expr, sourceRow, sourceData.getColumns()));
+                        resultCells.add(cellValue);
+                    }
+                    result.addRow(new JfrTable.Row(resultCells));
+                }
             }
-            
-            result.addRow(new JfrTable.Row(resultCells));
+        } else {
+            // Handle non-aggregate query - evaluate expressions for each row
+            for (JfrTable.Row sourceRow : sourceData.getRows()) {
+                List<CellValue> resultCells = new ArrayList<>();
+                for (ExpressionNode expr : selectExpressions) {
+                    CellValue cellValue = QueryEvaluatorUtils.evaluateExpressionForRow(sourceRow, expr, sourceData.getColumns(), this);
+                    resultCells.add(cellValue);
+                }
+                result.addRow(new JfrTable.Row(resultCells));
+            }
         }
-        
         return result;
     }
     
@@ -690,14 +893,18 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                     }
                     // If equal, continue to next sort field
                 } catch (Exception e) {
-                    throw new RuntimeException("Error evaluating ORDER BY expression: " + e.getMessage(), e);
+                    throw OrderByEvaluationException.expressionFailure(
+                        orderField.field().toString(), 
+                        e.getMessage(), 
+                        null
+                    );
                 }
             }
             return 0; // All fields are equal
         });
         
         // Create result table with sorted rows
-        JfrTable result = new JfrTable(sourceData.getColumns());
+        JfrTable result = new StandardJfrTable(sourceData.getColumns());
         for (JfrTable.Row row : sortedRows) {
             result.addRow(row);
         }
@@ -734,10 +941,17 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         } else if (expr instanceof PercentileFunctionNode percentileFunc) {
             // Percentile functions need special handling in ORDER BY context
             // For ORDER BY, we can't calculate percentiles per row - this should be an error
-            throw new IllegalArgumentException("Percentile functions like " + percentileFunc.functionName() + 
-                " cannot be used in ORDER BY clause without GROUP BY. Percentiles require aggregation over multiple rows.");
+            throw QueryExecutorException.forConfigurationError(
+                "percentile function",
+                "Percentile functions cannot be used in ORDER BY without GROUP BY",
+                percentileFunc,
+                null
+            );
         } else {
-            throw new IllegalArgumentException("Unsupported expression type in ORDER BY: " + expr.getClass().getSimpleName());
+            throw ExpressionEvaluationException.forFieldAccessError(
+                "ORDER BY expression", new String[]{"identifier", "function", "literal", "arithmetic"},
+                expr
+            );
         }
     }
     
@@ -745,25 +959,90 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
      * Evaluate a function call in the context of a single row.
      */
     private CellValue evaluateFunctionCallInRowContext(FunctionCallNode functionCall, JfrTable.Row row, JfrTable table) throws Exception {
-        // Evaluate function arguments in row context
-        List<CellValue> argValues = new ArrayList<>();
-        for (ExpressionNode arg : functionCall.arguments()) {
-            argValues.add(evaluateOrderByExpression(arg, row, table));
+        String functionName = functionCall.functionName().toLowerCase();
+        
+        // Check for aggregate functions - they might be valid if this is a GROUP BY result
+        if (isAggregateFunction(functionName)) {
+            // Try to find a column that matches this aggregate function
+            // This handles cases like ORDER BY COUNT(*) where COUNT(*) is already computed in GROUP BY
+            String aggregateKey = QueryEvaluatorUtils.createAggregateKey(functionCall);
+            
+            // Look for a column that matches this aggregate in several ways:
+            // 1. Exact function name match (COUNT, SUM, etc.)
+            // 2. Aggregate key match 
+            // 3. Common aliases (count for COUNT(*), etc.)
+            for (JfrTable.Column column : table.getColumns()) {
+                String columnName = column.name().toLowerCase();
+                String functionNameLower = functionName.toLowerCase();
+                
+                if (columnName.equals(functionNameLower) || 
+                    columnName.equals(aggregateKey.toLowerCase()) ||
+                    (functionNameLower.equals("count") && columnName.equals("count")) ||
+                    columnName.startsWith(functionNameLower + "(")) {
+                    // Found matching column - use its value
+                    return getRowValueByColumnName(row, table.getColumns(), column.name());
+                }
+            }
+            
+            // Special handling for COUNT(*) - look for any column with "count" in the name
+            if (functionCall.functionName().equalsIgnoreCase("COUNT") && 
+                functionCall.arguments().size() == 1 &&
+                functionCall.arguments().get(0) instanceof IdentifierNode &&
+                ((IdentifierNode) functionCall.arguments().get(0)).name().equals("*")) {
+                
+                for (JfrTable.Column column : table.getColumns()) {
+                    if (column.name().toLowerCase().contains("count")) {
+                        return getRowValueByColumnName(row, table.getColumns(), column.name());
+                    }
+                }
+            }
+            
+            // If no matching column found, this is likely ORDER BY with aggregate but no GROUP BY
+            throw AggregationEvaluationException.forInvalidState(
+                functionCall.functionName(), 
+                "aggregate function used in ORDER BY without GROUP BY",
+                AggregationEvaluationException.AggregationContext.SELECT_AGGREGATE,
+                functionCall
+            );
         }
         
-        // Check for aggregate functions in ORDER BY without GROUP BY
-        String functionName = functionCall.functionName().toLowerCase();
-        if (isAggregateFunction(functionName)) {
-            throw new IllegalArgumentException("Aggregate function " + functionCall.functionName() + 
-                " cannot be used in ORDER BY clause without GROUP BY. Use aggregate functions only with GROUP BY clause.");
+        // Evaluate function arguments in row context with error handling
+        List<CellValue> argValues = new ArrayList<>();
+        for (int i = 0; i < functionCall.arguments().size(); i++) {
+            try {
+                ExpressionNode arg = functionCall.arguments().get(i);
+                CellValue argValue = evaluateOrderByExpression(arg, row, table);
+                argValues.add(argValue);
+            } catch (Exception e) {
+                throw FunctionArgumentException.forInvalidValue(
+                    functionCall.functionName(), i, 
+                    functionCall.arguments().get(i).toString(),
+                    "evaluable expression in ORDER BY context",
+                    functionCall.arguments().get(i)
+                );
+            }
         }
         
         // Evaluate the function using the function registry
         try {
             return functionRegistry.evaluateFunction(functionCall.functionName(), argValues, evaluationContext);
+        } catch (IllegalArgumentException e) {
+            // Handle argument count or type validation errors
+            if (e.getMessage().contains("arguments") || e.getMessage().contains("parameter")) {
+                throw FunctionArgumentException.forWrongArgumentCount(
+                    functionCall.functionName(), -1, argValues.size(), functionCall
+                );
+            }
+            // Re-throw as FunctionEvaluationException with ORDER BY context
+            throw FunctionEvaluationException.forArgumentTypeMismatch(
+                functionCall.functionName(), argValues, null, functionCall
+            );
         } catch (Exception e) {
-            throw new IllegalArgumentException("Error executing function " + functionCall.functionName() + 
-                " in ORDER BY clause: " + e.getMessage(), e);
+            throw FunctionEvaluationException.forRuntimeError(
+                functionCall.functionName(), argValues,
+                FunctionEvaluationException.FunctionContext.ORDER_BY_CONTEXT,
+                functionCall, e
+            );
         }
     }
     
@@ -778,14 +1057,18 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                 } else if (operand instanceof CellValue.DurationValue durVal) {
                     yield new CellValue.DurationValue(durVal.value().negated());
                 } else {
-                    throw new IllegalArgumentException("Cannot apply unary minus to " + operand.getClass().getSimpleName());
+                    throw ExpressionEvaluationException.forTypeConversionError(
+                        "unary minus operation", operand, "numeric type", null
+                    );
                 }
             }
             case NOT -> {
                 if (operand instanceof CellValue.BooleanValue boolVal) {
                     yield new CellValue.BooleanValue(!boolVal.value());
                 } else {
-                    throw new IllegalArgumentException("Cannot apply NOT operator to " + operand.getClass().getSimpleName());
+                    throw ExpressionEvaluationException.forTypeConversionError(
+                        "unary NOT operation", operand, "boolean type", null
+                    );
                 }
             }
         };
@@ -797,7 +1080,7 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     private JfrTable applyLimitClause(JfrTable sourceData, LimitNode limitNode) {
         int limit = limitNode.limit();
         
-        JfrTable result = new JfrTable(sourceData.getColumns());
+        JfrTable result = new StandardJfrTable(sourceData.getColumns());
         
         int count = 0;
         for (JfrTable.Row row : sourceData.getRows()) {
@@ -809,206 +1092,31 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         return result;
     }
     
-    private String extractColumnName(ExpressionNode expr) {
-        if (expr instanceof FieldAccessNode fieldAccess) {
-            return fieldAccess.field();
-        } else if (expr instanceof IdentifierNode identifier) {
-            return identifier.name();
-        } else if (expr instanceof FunctionCallNode functionCall) {
-            return functionCall.functionName() + "()";
-        }
-        return "unknown";
-    }
-    
     /**
-     * Apply HAVING clause to filter aggregated groups
+     * Apply HAVING clause to filter aggregated groups using proper expression evaluation
      */
     private JfrTable applyHavingClause(JfrTable input, HavingNode havingNode) {
-        // The HAVING clause should filter groups after aggregation
-        // This is a simplified implementation that demonstrates the concept
-        
         if (havingNode == null || havingNode.condition() == null) {
             return input;
         }
         
         // Create a new table with the same columns
-        JfrTable result = new JfrTable(input.getColumns());
+        JfrTable result = new StandardJfrTable(input.getColumns());
         
-        // Evaluate the HAVING condition for each row
+        // Evaluate the HAVING condition for each row using proper expression evaluation
         for (JfrTable.Row row : input.getRows()) {
-            if (evaluateHavingCondition(row, havingNode.condition())) {
-                result.addRow(row);
+            try {
+                if (evaluateConditionForRow(row, havingNode.condition(), input.getColumns())) {
+                    result.addRow(row);
+                }
+            } catch (Exception e) {
+                // If evaluation fails, exclude the row but log the error
+                // In a production system, this might be logged
+                System.err.println("Error evaluating HAVING condition for row: " + e.getMessage());
             }
         }
         
         return result;
-    }
-    
-    /**
-     * Evaluate a HAVING condition against a row
-     */
-    private boolean evaluateHavingCondition(JfrTable.Row row, ConditionNode condition) {
-        // This is a simplified evaluation
-        // A full implementation would:
-        // 1. Parse the condition expression
-        // 2. Evaluate it against the row data
-        // 3. Return true/false based on the result
-        
-        // Handle ExpressionConditionNode which wraps expression nodes
-        if (condition instanceof ExpressionConditionNode exprCondition) {
-            ExpressionNode expr = exprCondition.expression();
-            
-            if (expr instanceof BinaryExpressionNode binaryExpr) {
-                return evaluateBinaryHavingCondition(row, binaryExpr);
-            } else if (expr instanceof FunctionCallNode functionCall) {
-                return evaluateFunctionHavingCondition(row, functionCall);
-            }
-        }
-        
-        // Default to including the row if we can't evaluate the condition
-        return true;
-    }
-    
-    /**
-     * Evaluate a binary expression in HAVING clause
-     */
-    private boolean evaluateBinaryHavingCondition(JfrTable.Row row, BinaryExpressionNode binaryExpr) {
-        BinaryOperator operator = binaryExpr.operator();
-        
-        try {
-            // Evaluate left and right operands using the AST visitor
-            JfrTable leftResult = binaryExpr.left().accept(this);
-            JfrTable rightResult = binaryExpr.right().accept(this);
-            
-            CellValue leftValue = extractSingleCellValue(leftResult);
-            CellValue rightValue = extractSingleCellValue(rightResult);
-            
-            // Handle comparison operations
-            if (operator == BinaryOperator.GREATER_THAN || 
-                operator == BinaryOperator.LESS_THAN || 
-                operator == BinaryOperator.EQUALS ||
-                operator == BinaryOperator.NOT_EQUALS ||
-                operator == BinaryOperator.GREATER_EQUAL ||
-                operator == BinaryOperator.LESS_EQUAL) {
-                
-                int comparison = CellValue.compare(leftValue, rightValue);
-                return switch (operator) {
-                    case GREATER_THAN -> comparison > 0;
-                    case LESS_THAN -> comparison < 0;
-                    case EQUALS -> comparison == 0;
-                    case NOT_EQUALS -> comparison != 0;
-                    case GREATER_EQUAL -> comparison >= 0;
-                    case LESS_EQUAL -> comparison <= 0;
-                    default -> true;
-                };
-            }
-            
-            // Handle logical operations
-            if (operator == BinaryOperator.AND || operator == BinaryOperator.OR) {
-                boolean leftBool = isTruthyValue(leftValue);
-                boolean rightBool = isTruthyValue(rightValue);
-                
-                return switch (operator) {
-                    case AND -> leftBool && rightBool;
-                    case OR -> leftBool || rightBool;
-                    default -> true;
-                };
-            }
-            
-            // Handle IN operation
-            if (operator == BinaryOperator.IN) {
-                if (rightValue instanceof CellValue.ArrayValue arrayValue) {
-                    return arrayValue.contains(leftValue);
-                } else {
-                    return CellValue.compare(leftValue, rightValue) == 0;
-                }
-            }
-            
-        } catch (Exception e) {
-            // If evaluation fails, log and return true to include the row
-            System.err.println("Error evaluating HAVING condition: " + e.getMessage());
-        }
-        
-        return true; // Default to including row
-    }
-    
-    /**
-     * Evaluate a function call in HAVING clause
-     * HAVING clause can contain aggregate functions
-     */
-    private boolean evaluateFunctionHavingCondition(JfrTable.Row row, FunctionCallNode functionCall) {
-        String functionName = functionCall.functionName();
-        
-        try {
-            // For aggregate functions in HAVING, we need to evaluate them properly
-            if (isAggregateFunction(functionName)) {
-                // Evaluate the aggregate function using the function registry
-                List<CellValue> arguments = new ArrayList<>();
-                for (ExpressionNode arg : functionCall.arguments()) {
-                    JfrTable argTable = arg.accept(this);
-                    CellValue argValue = extractSingleCellValue(argTable);
-                    arguments.add(argValue);
-                }
-                
-                CellValue result = functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
-                return isTruthyValue(result);
-            } else {
-                // For non-aggregate functions, evaluate normally
-                List<CellValue> arguments = new ArrayList<>();
-                for (ExpressionNode arg : functionCall.arguments()) {
-                    JfrTable argTable = arg.accept(this);
-                    CellValue argValue = extractSingleCellValue(argTable);
-                    arguments.add(argValue);
-                }
-                
-                CellValue result = functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
-                return isTruthyValue(result);
-            }
-        } catch (Exception e) {
-            // If function evaluation fails, log and return true to include the row
-            System.err.println("Error evaluating function in HAVING clause: " + e.getMessage());
-            return true;
-        }
-    }
-    
-    /**
-     * Evaluate an expression to get its value from a row
-     */
-    private Object evaluateExpressionValue(JfrTable.Row row, ExpressionNode expr) {
-        if (expr instanceof LiteralNode literal) {
-            return literal.value();
-        } else if (expr instanceof FieldAccessNode fieldAccess) {
-            // Try to find the field value in the row
-            String fieldName = fieldAccess.field();
-            // This is simplified - a full implementation would map field names to column indices
-            return 0; // Placeholder
-        } else if (expr instanceof FunctionCallNode functionCall) {
-            // Evaluate function call
-            return evaluateFunctionValue(row, functionCall);
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Evaluate a function call to get its value
-     */
-    private Object evaluateFunctionValue(JfrTable.Row row, FunctionCallNode functionCall) {
-        // Simplified function evaluation
-        // This would use the function registry in a full implementation
-        
-        String functionName = functionCall.functionName();
-        
-        // Handle common aggregate functions
-        if ("COUNT".equalsIgnoreCase(functionName)) {
-            return 1; // Simplified count
-        } else if ("SUM".equalsIgnoreCase(functionName)) {
-            return 10; // Simplified sum
-        } else if ("AVG".equalsIgnoreCase(functionName)) {
-            return 5.0; // Simplified average
-        }
-        
-        return 0;
     }
     
     @Override
@@ -1042,6 +1150,19 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
                 return result;
             }
             
+            // Check if this source is a view
+            QueryNode viewQuery = context.getView(node.source());
+            if (viewQuery != null) {
+                JfrTable result = viewQuery.accept(this);
+                
+                // Store the result in context if alias is provided
+                if (node.alias() != null && !node.alias().isEmpty()) {
+                    context.setIntermediateResult(node.alias(), result);
+                }
+                
+                return result;
+            }
+            
             // Otherwise, create a raw JFR query to select all events from the specified source
             String rawQuery = "SELECT * FROM " + node.source();
             RawJfrQueryNode rawQueryNode = new RawJfrQueryNode(rawQuery, node.location());
@@ -1056,7 +1177,7 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             
             return result;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to retrieve table for source: " + node.source(), e);
+            throw SourceTableException.dataSourceFailure(node.source(), e.getMessage(), null);
         }
     }
     
@@ -1121,7 +1242,7 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     
     @Override
     public JfrTable visitExpression(ExpressionNode node) {
-        // Expression evaluation - simplified implementation
+        // Expression evaluation - delegate to appropriate handler
         return context.getCurrentResult();
     }
     
@@ -1141,13 +1262,54 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
         
         switch (operator) {
             case ADD, SUBTRACT, MULTIPLY, DIVIDE, MODULO -> {
-                return performArithmeticOperation(leftTable, rightTable, operator);
+                return performArithmeticOperation(leftTable, rightTable, operator, node);
             }
             case IN -> {
-                return performInOperation(leftTable, rightTable);
+                return performInOperation(leftTable, rightTable, node);
             }
             case EQUALS, NOT_EQUALS, LESS_THAN, GREATER_THAN, LESS_EQUAL, GREATER_EQUAL -> {
-                return performComparisonOperation(leftTable, rightTable, operator);
+                return performComparisonOperation(leftTable, rightTable, operator, node);
+            }
+            case LIKE, NOT_LIKE -> {
+                return performLikeOperation(leftTable, rightTable, operator, node);
+            }
+            case WITHIN -> {
+                return performWithinOperation(leftTable, rightTable, node);
+            }
+            case OF -> {
+                // OF operator is used as part of WITHIN expressions: timeWindow OF referenceTime
+                // We need to create a special wrapper that contains both values
+                CellValue timeWindow = extractSingleCellValue(leftTable);
+                CellValue referenceTime = extractSingleCellValue(rightTable);
+                
+                // Validate that timeWindow is numeric (represents duration)
+                if (!(timeWindow instanceof CellValue.NumberValue)) {
+                    throw ExpressionEvaluationException.forTypeConversionError(
+                        "OF operator time window (left operand)", 
+                        timeWindow, 
+                        "number representing time duration (e.g., 5000 for 5000 nanoseconds)", 
+                        node,
+                        "binary operation with operator OF (duration validation)"
+                    );
+                }
+                if (!(referenceTime instanceof CellValue.NumberValue || referenceTime instanceof CellValue.TimestampValue)) {
+                    throw ExpressionEvaluationException.forTypeConversionError(
+                        "OF operator reference time (right operand)", 
+                        referenceTime, 
+                        "timestamp or number for temporal reference (e.g., 1000000000000)", 
+                        node,
+                        "binary operation with operator OF (reference time validation)"
+                    );
+                }
+                
+                // Create a composite structure to pass time window info to WITHIN operation
+                // We'll use a special array with [timeWindow, referenceTime]
+                java.util.List<CellValue> withinData = java.util.List.of(
+                    timeWindow,
+                    referenceTime
+                );
+                
+                return SingleCellTable.of(new CellValue.ArrayValue(withinData));
             }
             default -> {
                 // For unsupported operations, return current result
@@ -1174,16 +1336,115 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     }
     
     /**
+     * Enhanced version with node context for better error reporting
+     */
+    private JfrTable performArithmeticOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator, BinaryExpressionNode node) {
+        // Extract values from tables
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        try {
+            // Perform arithmetic operation using map approach
+            CellValue result = performArithmeticOperationWithMap(leftValue, rightValue, operator);
+            
+            // Use the optimized SingleCellTable for the result
+            return new SingleCellTable("result", result);
+        } catch (Exception e) {
+            // Enhanced error reporting with node context
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "arithmetic operation with operator " + operator,
+                leftValue,
+                rightValue.getType().toString(),
+                node,
+                "binary operation with operator " + operator + " (arithmetic operation)"
+            );
+        }
+    }
+    
+    /**
+     * Handle COLLECT function calls that need access to full table context
+     * This method handles COLLECT when it's called outside of GROUP BY context
+     */
+    private JfrTable evaluateCollectFunctionCall(FunctionCallNode node) {
+        if (node.arguments().isEmpty()) {
+            throw AggregationEvaluationException.forInvalidState(
+                "COLLECT", "no arguments provided", 
+                AggregationEvaluationException.AggregationContext.SELECT_AGGREGATE, 
+                node
+            );
+        }
+        
+        // For COLLECT in SELECT context, we need to delegate to the aggregate computation
+        // to ensure it gets the right source table context
+        try {
+            // Get the current source table from context
+            JfrTable sourceTable = context.getCurrentResult();
+            
+            // Validate that we have the source table and can evaluate the expression
+            ExpressionNode expr = node.arguments().get(0);
+            if (expr instanceof IdentifierNode identifier) {
+                String columnName = identifier.name();
+                if (sourceTable != null) {
+                    boolean hasColumn = sourceTable.getColumns().stream()
+                        .anyMatch(col -> col.name().equals(columnName));
+                    
+                    if (!hasColumn) {
+                        // Column not found in current table - this might be a context issue
+                        String[] availableColumns = sourceTable.getColumns().stream()
+                            .map(c -> c.name()).toArray(String[]::new);
+                        throw new ColumnNotFoundException(columnName, availableColumns, expr);
+                    }
+                }
+            }
+            
+            // Use the standard aggregate computation path
+            if (sourceTable != null) {
+                CellValue result = computeAggregateValue(node, sourceTable);
+                return SingleCellTable.of("result", result);
+            } else {
+                // No source table available
+                CellValue emptyArray = new CellValue.ArrayValue(List.of());
+                return SingleCellTable.of("result", emptyArray);
+            }
+            
+        } catch (Exception e) {
+            // If any error occurs during evaluation, wrap and rethrow
+            if (e instanceof ColumnNotFoundException || e instanceof AggregationEvaluationException) {
+                throw e;
+            }
+            
+            throw AggregationEvaluationException.forInvalidState(
+                "COLLECT", "error evaluating expression: " + e.getMessage(), 
+                AggregationEvaluationException.AggregationContext.SELECT_AGGREGATE, 
+                node
+            );
+        }
+    }
+    
+    /**
      * Extracts a single CellValue from a table (assuming single-cell table)
+     * with proper error handling for invalid table structures
      */
     private CellValue extractSingleCellValue(JfrTable table) {
+        if (table == null) {
+            throw new IllegalArgumentException("Cannot extract value from null table");
+        }
+        
         if (table.getRows().isEmpty()) {
+            // Return null value for empty tables
             return new CellValue.NullValue();
         }
         
         JfrTable.Row firstRow = table.getRows().get(0);
         if (firstRow.getCells().isEmpty()) {
+            // Return null value for rows with no cells
             return new CellValue.NullValue();
+        }
+        
+        if (table.getRows().size() > 1) {
+            // Log warning for multiple rows - this might indicate a problem
+            System.err.println("Warning: extractSingleCellValue called on table with " + 
+                             table.getRows().size() + " rows, using first row only");
         }
         
         return firstRow.getCells().get(0);
@@ -1199,67 +1460,372 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     }
     
     /**
-     * Checks if a value is numeric (supports all numeric types)
+     * Check if CellValue is numeric
      */
-    private boolean isNumericValue(Object value) {
-        if (value instanceof Number) {
-            return true;
+    private boolean isNumericValue(CellValue cellValue) {
+        return QueryEvaluatorUtils.isNumericValue(cellValue);
+    }
+    
+    /**
+     * Perform IN operation
+     */
+    private JfrTable performInOperation(JfrTable leftTable, JfrTable rightTable) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        boolean result;
+        if (rightValue instanceof CellValue.ArrayValue arrayValue) {
+            result = arrayValue.contains(leftValue);
+        } else {
+            result = leftValue.equals(rightValue);
         }
         
-        if (value instanceof CellValue cellValue) {
-            return switch (cellValue.getType()) {
-                case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
-                default -> false;
+        return SingleCellTable.of(new CellValue.BooleanValue(result));
+    }
+    
+    /**
+     * Enhanced version with node context for better error reporting
+     */
+    private JfrTable performInOperation(JfrTable leftTable, JfrTable rightTable, BinaryExpressionNode node) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        try {
+            boolean result;
+            if (rightValue instanceof CellValue.ArrayValue arrayValue) {
+                result = arrayValue.contains(leftValue);
+            } else {
+                result = leftValue.equals(rightValue);
+            }
+            
+            return SingleCellTable.of(new CellValue.BooleanValue(result));
+        } catch (Exception e) {
+            // Enhanced error reporting with node context
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "IN operation",
+                leftValue,
+                "value compatible with collection or single value",
+                node,
+                "binary operation with operator IN"
+            );
+        }
+    }
+    
+    /**
+     * Perform comparison operations
+     */
+    private JfrTable performComparisonOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        int comparison = CellValue.compare(leftValue, rightValue);
+        boolean result = switch (operator) {
+            case EQUALS -> comparison == 0;
+            case NOT_EQUALS -> comparison != 0;
+            case LESS_THAN -> comparison < 0;
+            case GREATER_THAN -> comparison > 0;
+            case LESS_EQUAL -> comparison <= 0;
+            case GREATER_EQUAL -> comparison >= 0;
+            default -> throw ExpressionEvaluationException.forTypeConversionError(
+                "comparison operation with operator " + operator, 
+                new CellValue.StringValue(operator.toString()), 
+                "supported comparison operator (EQUALS, NOT_EQUALS, LESS_THAN, GREATER_THAN, LESS_EQUAL, GREATER_EQUAL)", 
+                null
+            );
+        };
+        
+        return SingleCellTable.of(new CellValue.BooleanValue(result));
+    }
+    
+    /**
+     * Enhanced version with node context for better error reporting
+     */
+    private JfrTable performComparisonOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator, BinaryExpressionNode node) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        try {
+            int comparison = CellValue.compare(leftValue, rightValue);
+            boolean result = switch (operator) {
+                case EQUALS -> comparison == 0;
+                case NOT_EQUALS -> comparison != 0;
+                case LESS_THAN -> comparison < 0;
+                case GREATER_THAN -> comparison > 0;
+                case LESS_EQUAL -> comparison <= 0;
+                case GREATER_EQUAL -> comparison >= 0;
+                default -> throw ExpressionEvaluationException.forTypeConversionError(
+                    "comparison operation with operator " + operator, 
+                    new CellValue.StringValue(operator.toString()), 
+                    "supported comparison operator (EQUALS, NOT_EQUALS, LESS_THAN, GREATER_THAN, LESS_EQUAL, GREATER_EQUAL)", 
+                    node,
+                    "binary operation with operator " + operator + " (comparison operation)"
+                );
             };
+            
+            return SingleCellTable.of(new CellValue.BooleanValue(result));
+        } catch (Exception e) {
+            // Enhanced error reporting with node context
+            if (e instanceof ExpressionEvaluationException) {
+                throw e;
+            }
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "comparison operation with operator " + operator,
+                leftValue,
+                rightValue.getType().toString(),
+                node,
+                "binary operation with operator " + operator + " (comparison operation)"
+            );
         }
-        
-        return false;
     }
     
     /**
-     * Checks if a value represents an integer type
+     * Performs LIKE and NOT LIKE operations on two tables
+     * Supports SQL-style pattern matching with % (any characters) and _ (single character)
      */
-    private boolean isIntegerValue(Object value) {
-        if (value instanceof Number number) {
-            return number instanceof Byte || number instanceof Short || 
-                   number instanceof Integer || number instanceof Long;
+    private JfrTable performLikeOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        if (!(leftValue instanceof CellValue.StringValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operation left operand", leftValue, "string", null
+            );
+        }
+        if (!(rightValue instanceof CellValue.StringValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operation right operand (pattern)", rightValue, "string", null
+            );
         }
         
-        if (value instanceof CellValue cellValue) {
-            return cellValue instanceof CellValue.NumberValue || 
-                   cellValue instanceof CellValue.MemorySizeValue ||
-                   cellValue instanceof CellValue.DurationValue ||
-                   cellValue instanceof CellValue.TimestampValue ||
-                   cellValue instanceof CellValue.RateValue;
-        }
+        String text = ((CellValue.StringValue) leftValue).value();
+        String pattern = ((CellValue.StringValue) rightValue).value();
         
-        return false;
+        // Convert SQL LIKE pattern to Java regex
+        // % matches any sequence of characters
+        // _ matches exactly one character
+        String regexPattern = pattern
+            .replace("\\", "\\\\")  // Escape backslashes first
+            .replace(".", "\\.")    // Escape dots
+            .replace("*", "\\*")    // Escape asterisks
+            .replace("+", "\\+")    // Escape plus signs
+            .replace("?", "\\?")    // Escape question marks
+            .replace("^", "\\^")    // Escape carets
+            .replace("$", "\\$")    // Escape dollar signs
+            .replace("{", "\\{")    // Escape braces
+            .replace("}", "\\}")    
+            .replace("(", "\\(")    // Escape parentheses
+            .replace(")", "\\)")
+            .replace("[", "\\[")    // Escape brackets
+            .replace("]", "\\]")
+            .replace("|", "\\|")    // Escape pipes
+            .replace("%", ".*")     // % becomes .*
+            .replace("_", ".");     // _ becomes .
+        
+        boolean matches = text.matches(regexPattern);
+        boolean result = switch (operator) {
+            case LIKE -> matches;
+            case NOT_LIKE -> !matches;
+            default -> throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operator", 
+                new CellValue.StringValue(operator.toString()), 
+                "LIKE or NOT_LIKE", 
+                null
+            );
+        };
+        
+        return SingleCellTable.of(new CellValue.BooleanValue(result));
     }
     
     /**
-     * Extracts numeric value from CellValue types
+     * Enhanced version with node context for better error reporting
      */
-    private double extractNumericValue(CellValue cellValue) {
-        return switch (cellValue.getType()) {
-            case NUMBER -> ((CellValue.NumberValue) cellValue).value();
-            case FLOAT -> ((CellValue.FloatValue) cellValue).value();
-            case DURATION -> ((CellValue.DurationValue) cellValue).value().toNanos() / 1_000_000.0; // Convert to milliseconds
-            case TIMESTAMP -> ((CellValue.TimestampValue) cellValue).value().toEpochMilli();
-            case MEMORY_SIZE -> ((CellValue.MemorySizeValue) cellValue).value();
-            case RATE -> ((CellValue.RateValue) cellValue).count();
-            default -> throw new IllegalArgumentException(
-                "Cannot extract numeric value from " + cellValue.getType()
+    private JfrTable performLikeOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator, BinaryExpressionNode node) {
+        CellValue leftValue = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        if (!(leftValue instanceof CellValue.StringValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operation left operand", leftValue, "string", node,
+                "binary operation with operator " + operator + " (left operand validation)"
+            );
+        }
+        if (!(rightValue instanceof CellValue.StringValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operation right operand (pattern)", rightValue, "string", node,
+                "binary operation with operator " + operator + " (pattern validation)"
+            );
+        }
+        
+        try {
+            String text = ((CellValue.StringValue) leftValue).value();
+            String pattern = ((CellValue.StringValue) rightValue).value();
+            
+            // Convert SQL LIKE pattern to Java regex
+            // % matches any sequence of characters
+            // _ matches exactly one character
+            String regexPattern = pattern
+                .replace("\\", "\\\\")  // Escape backslashes first
+                .replace(".", "\\.")    // Escape dots
+                .replace("*", "\\*")    // Escape asterisks
+                .replace("+", "\\+")    // Escape plus signs
+                .replace("?", "\\?")    // Escape question marks
+                .replace("^", "\\^")    // Escape carets
+                .replace("$", "\\$")    // Escape dollar signs
+                .replace("{", "\\{")    // Escape braces
+                .replace("}", "\\}")    
+                .replace("(", "\\(")    // Escape parentheses
+                .replace(")", "\\)")
+                .replace("[", "\\[")    // Escape brackets
+                .replace("]", "\\]")
+                .replace("|", "\\|")    // Escape pipes
+                .replace("%", ".*")     // % becomes .*
+                .replace("_", ".");     // _ becomes .
+            
+            boolean matches = text.matches(regexPattern);
+            boolean result = switch (operator) {
+                case LIKE -> matches;
+                case NOT_LIKE -> !matches;
+                default -> throw ExpressionEvaluationException.forTypeConversionError(
+                    "LIKE operator", 
+                    new CellValue.StringValue(operator.toString()), 
+                    "LIKE or NOT_LIKE", 
+                    node,
+                    "binary operation with operator " + operator + " (operator validation)"
+                );
+            };
+            
+            return SingleCellTable.of(new CellValue.BooleanValue(result));
+        } catch (Exception e) {
+            // Enhanced error reporting with node context
+            if (e instanceof ExpressionEvaluationException) {
+                throw e;
+            }
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "LIKE operation with operator " + operator,
+                leftValue,
+                "string pattern matching",
+                node,
+                "binary operation with operator " + operator + " (pattern matching)"
+            );
+        }
+    }
+    
+    /**
+     * Performs a WITHIN operation to check temporal proximity.
+     * Syntax: value WITHIN timeWindow OF referenceTime
+     * For example: timestamp WITHIN 5m OF startTime
+     * 
+     * The rightTable should contain the result of the "timeWindow OF referenceTime" expression,
+     * which stores both the time window and reference time values as an array.
+     * 
+     * @param leftTable the value to check (timestamp)
+     * @param rightTable the result of "timeWindow OF referenceTime" expression (array with [timeWindow, referenceTime])
+     * @return a single-cell table with a boolean result
+     */
+    private JfrTable performWithinOperation(JfrTable leftTable, JfrTable rightTable, BinaryExpressionNode node) {
+        CellValue valueToCheck = extractSingleCellValue(leftTable);
+        CellValue rightValue = extractSingleCellValue(rightTable);
+        
+        // Validate value to check
+        if (!(valueToCheck instanceof CellValue.NumberValue || valueToCheck instanceof CellValue.TimestampValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition value to check (left operand)", 
+                valueToCheck, 
+                "timestamp or number for temporal comparison (e.g., 1000000003000)", 
+                node,
+                "binary operation with operator WITHIN (left operand validation)"
+            );
+        }
+        
+        // Extract time window and reference time from the OF operation result
+        CellValue timeWindowValue;
+        CellValue referenceTime;
+        
+        if (rightValue instanceof CellValue.ArrayValue) {
+            // This is the result from "timeWindow OF referenceTime"
+            CellValue.ArrayValue arrayValue = (CellValue.ArrayValue) rightValue;
+            
+            if (arrayValue.size() != 2) {
+                throw ExpressionEvaluationException.forTypeConversionError(
+                    "WITHIN operation OF expression result", 
+                    rightValue, 
+                    "array with exactly 2 elements [timeWindow, referenceTime]", 
+                    node,
+                    "binary operation with operator WITHIN (OF expression structure validation)"
+                );
+            }
+            
+            timeWindowValue = arrayValue.get(0);
+            referenceTime = arrayValue.get(1);
+        } else {
+            // Fallback: treat right value as reference time with default window
+            timeWindowValue = new CellValue.NumberValue(1_000_000_000.0); // 1 second default
+            referenceTime = rightValue;
+        }
+        
+        // Validate time window and reference time
+        if (!(timeWindowValue instanceof CellValue.NumberValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition time window (from OF operation)", 
+                timeWindowValue, 
+                "number representing time duration (e.g., 5000 for 5000 nanoseconds)", 
+                node,
+                "binary operation with operator WITHIN (time window validation)"
+            );
+        }
+        if (!(referenceTime instanceof CellValue.NumberValue || referenceTime instanceof CellValue.TimestampValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition reference time (from OF operation)", 
+                referenceTime, 
+                "timestamp or number for temporal comparison (e.g., 1000000000000)", 
+                node,
+                "binary operation with operator WITHIN (reference time validation)"
+            );
+        }
+        
+        // Extract numeric values (timestamps as nanoseconds)
+        long valueTime = extractTimeValue(valueToCheck, node);
+        long refTime = extractTimeValue(referenceTime, node);
+        long timeWindowNanos = convertToNanoseconds(((CellValue.NumberValue) timeWindowValue).value());
+        
+        // Check if the value is within the time window of the reference time
+        long timeDifference = Math.abs(valueTime - refTime);
+        boolean isWithin = timeDifference <= timeWindowNanos;
+        
+        return SingleCellTable.of(new CellValue.BooleanValue(isWithin));
+    }
+    
+    /**
+     * Extracts a time value in nanoseconds from a CellValue.
+     */
+    private long extractTimeValue(CellValue value, BinaryExpressionNode node) {
+        return switch (value) {
+            case CellValue.NumberValue num -> (long) num.value(); // Cast double to long
+            case CellValue.TimestampValue timestamp -> timestamp.value().toEpochMilli() * 1_000_000L; // Convert to nanoseconds
+            default -> throw ExpressionEvaluationException.forTypeConversionError(
+                "time extraction", 
+                value, 
+                "timestamp or number (representing nanoseconds)", 
+                node,
+                "binary operation with operator WITHIN (time value extraction)"
             );
         };
     }
     
     /**
-     * Check if CellValue is numeric
+     * Overloaded version for backward compatibility where node is not available
      */
-    private boolean isNumericValue(CellValue cellValue) {
-        return switch (cellValue.getType()) {
-            case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
-            default -> false;
+    private long extractTimeValue(CellValue value) {
+        return switch (value) {
+            case CellValue.NumberValue num -> (long) num.value(); // Cast double to long
+            case CellValue.TimestampValue timestamp -> timestamp.value().toEpochMilli() * 1_000_000L; // Convert to nanoseconds
+            default -> throw ExpressionEvaluationException.forTypeConversionError(
+                "time extraction", 
+                value, 
+                "timestamp or number (representing nanoseconds)", 
+                null,
+                "time value extraction (no node context available)"
+            );
         };
     }
     
@@ -1283,17 +1849,73 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
     
     private JfrTable evaluateFunctionCall(FunctionCallNode node) {
         String functionName = node.functionName();
+        boolean distinct = node.distinct();
         
         if (!functionRegistry.isFunction(functionName)) {
-            throw new RuntimeException("Unknown function: " + functionName);
+            Set<String> availableFunctions = functionRegistry.getFunctionNames();
+            throw new UnknownFunctionException(functionName, availableFunctions, node);
         }
         
-        // Evaluate all arguments
+        // Handle DISTINCT for aggregate functions specially
+        if (distinct && functionRegistry.isAggregateFunction(functionName)) {
+            return evaluateDistinctAggregateFunction(node);
+        }
+        
+        // Special handling for COLLECT function - needs access to full table context
+        if ("COLLECT".equalsIgnoreCase(functionName)) {
+            return evaluateCollectFunctionCall(node);
+        }
+        
+        // Special handling for COUNT(*) - detect when COUNT has a StarMarkerTable argument
+        if ("COUNT".equalsIgnoreCase(functionName) && node.arguments().size() == 1) {
+            ExpressionNode firstArg = node.arguments().get(0);
+            JfrTable argTable = firstArg.accept(this);
+            
+            // Check if this is COUNT(*) by seeing if the argument evaluates to StarMarkerTable
+            if (StarMarkerTable.isStarMarker(argTable)) {
+                // For COUNT(*), we need to get the row count from the current evaluation context
+                JfrTable currentResult = context.getCurrentResult();
+                if (currentResult != null) {
+                    long rowCount = currentResult.getRowCount();
+                    CellValue result = new CellValue.NumberValue(rowCount);
+                    return SingleCellTable.of("result", result);
+                } else {
+                    // Fallback: return 0 if no current result
+                    CellValue result = new CellValue.NumberValue(0L);
+                    return SingleCellTable.of("result", result);
+                }
+            }
+        }
+        
+        // Evaluate all arguments with proper error handling
         List<CellValue> arguments = new ArrayList<>();
-        for (ExpressionNode arg : node.arguments()) {
-            JfrTable argTable = arg.accept(this);
-            CellValue argValue = extractSingleCellValue(argTable);
-            arguments.add(argValue);
+        for (int i = 0; i < node.arguments().size(); i++) {
+            ExpressionNode arg = node.arguments().get(i);
+            try {
+                JfrTable argTable = arg.accept(this);
+                CellValue argValue = extractSingleCellValue(argTable);
+                
+                // Validate argument is not null for critical functions
+                if (argValue instanceof CellValue.NullValue) {
+                    // Some functions may not handle nulls well - this could be enhanced
+                    // with function metadata about null handling
+                    if (functionName.equalsIgnoreCase("HEAD") || functionName.equalsIgnoreCase("TAIL")) {
+                        throw FunctionArgumentException.forNullArgument(functionName, i, arg);
+                    }
+                }
+                
+                arguments.add(argValue);
+            } catch (Exception e) {
+                if (e instanceof FunctionArgumentException) {
+                    throw e; // Re-throw function argument exceptions
+                }
+                
+                // Wrap other exceptions as function argument errors
+                throw FunctionArgumentException.forInvalidValue(
+                    functionName, i, arg.toString(), 
+                    "evaluable expression", arg
+                );
+            }
         }
         
         try {
@@ -1303,8 +1925,26 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             // Return result as a single-cell table
             return SingleCellTable.of("result", result);
             
+        } catch (IllegalArgumentException e) {
+            // Check if this is an argument count error
+            if (e.getMessage().contains("arguments") || e.getMessage().contains("parameter")) {
+                // Try to extract expected vs actual count from message
+                throw FunctionArgumentException.forWrongArgumentCount(
+                    functionName, -1, arguments.size(), node
+                );
+            }
+            
+            // Other argument validation errors - use FunctionEvaluationException factory method
+            throw FunctionEvaluationException.forArgumentTypeMismatch(
+                functionName, arguments, null, node
+            );
         } catch (Exception e) {
-            throw new RuntimeException("Error evaluating function " + functionName + ": " + e.getMessage(), e);
+            // Handle runtime errors during function execution
+            throw FunctionEvaluationException.forRuntimeError(
+                functionName, arguments, 
+                FunctionEvaluationException.FunctionContext.ROW_CONTEXT, 
+                node, e
+            );
         }
     }
     
@@ -1357,11 +1997,8 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             return SingleCellTable.of(name, value);
         }
         
-        // Return error table if not found
-        List<JfrTable.Column> columns = List.of(new JfrTable.Column("error", CellType.STRING));
-        JfrTable errorTable = new JfrTable(columns);
-        errorTable.addRow(new JfrTable.Row(List.of(new CellValue.StringValue("Variable not found: " + name))));
-        return errorTable;
+        // Throw proper exception if not found
+        throw new VariableNotFoundException(name, new String[0], node);
     }
     
     @Override
@@ -1376,1473 +2013,1115 @@ public class QueryEvaluator implements ASTVisitor<JfrTable> {
             } else {
                 // Fallback to placeholder result if no executor available
                 List<JfrTable.Column> columns = List.of(new JfrTable.Column("nested_result", CellType.STRING));
-                JfrTable result = new JfrTable(columns);
+                JfrTable result = new StandardJfrTable(columns);
                 result.addRow(new JfrTable.Row(List.of(new CellValue.StringValue("Nested query: " + node.jfrQuery()))));
                 return result;
             }
         } catch (Exception e) {
-            throw new RuntimeException("Failed to execute nested JFR query: " + node.jfrQuery(), e);
+            // Don't wrap exceptions that are already Query related exceptions
+            if (e instanceof QueryExecutionException) {
+                throw (QueryExecutionException) e;
+            }
+            
+            throw new QueryEvaluationException(
+                "nested JFR query execution: " + node.jfrQuery(),
+                node.jfrQuery(),
+                QueryEvaluationException.EvaluationErrorType.UNSUPPORTED_OPERATION,
+                node,
+                e
+            );
         } finally {
             evaluationContext.popScope();
         }
     }
     
+    // Missing visitor methods required by ASTVisitor interface
+    
+    @Override
+    public JfrTable visitRawJfrQuery(RawJfrQueryNode node) {
+        try {
+            return jfrQuery(node);
+        } catch (Exception e) {
+            throw new QueryEvaluationException(
+                "nested JFR query execution", 
+                null, 
+                QueryEvaluationException.EvaluationErrorType.UNSUPPORTED_OPERATION, 
+                node, 
+                e
+            );
+        }
+    }
+    
+    @Override
+    public JfrTable visitSelectItem(SelectItemNode node) {
+        throw new QueryEvaluationException(
+            "select item evaluation", 
+            "SelectItem should be handled by visitSelect method", 
+            QueryEvaluationException.EvaluationErrorType.INVALID_STATE, 
+            node
+        );
+    }
+    
+    @Override
+    public JfrTable visitArrayLiteral(ArrayLiteralNode node) {
+        List<CellValue> values = new ArrayList<>();
+        for (ExpressionNode element : node.elements()) {
+            JfrTable elementTable = element.accept(this);
+            CellValue elementValue = extractSingleCellValue(elementTable);
+            values.add(elementValue);
+        }
+        return SingleCellTable.of("array", new CellValue.ArrayValue(values));
+    }
+    
+    @Override
+    public JfrTable visitStar(StarNode node) {
+        // Star (*) represents "all rows" or "count all" for aggregate functions like COUNT(*)
+        // Return the specialized StarMarkerTable that aggregate functions can recognize
+        return StarMarkerTable.getInstance();
+    }
+    
     @Override
     public JfrTable visitCondition(ConditionNode node) {
-        // Condition evaluation is handled in WHERE clause processing
-        return context.getCurrentResult();
-    }
-    
-    @Override
-    public JfrTable visitWithinCondition(WithinConditionNode node) {
-        // Within condition evaluation - used for temporal relationships
-        // For now, return current result
-        return context.getCurrentResult();
-    }
-    
-    @Override
-    public JfrTable visitGCCorrelation(GCCorrelationNode node) {
-        // GC correlation processing - advanced feature
-        // For now, return current result
-        return context.getCurrentResult();
+        throw new QueryEvaluationException(
+            "condition evaluation",
+            "Condition nodes should be handled in specific contexts (WHERE, HAVING, etc.)",
+            QueryEvaluationException.EvaluationErrorType.INVALID_STATE,
+            node
+        );
     }
     
     @Override
     public JfrTable visitVariableDeclaration(VariableDeclarationNode node) {
-        // Variable declaration processing
-        return context.getCurrentResult();
+        throw new QueryEvaluationException(
+            "variable declaration",
+            "Variable declarations should be handled by visitStatement method",
+            QueryEvaluationException.EvaluationErrorType.INVALID_STATE,
+            node
+        );
     }
     
     @Override
     public JfrTable visitExpressionCondition(ExpressionConditionNode node) {
-        // Expression condition evaluation
-        return context.getCurrentResult();
+        return node.expression().accept(this);
     }
     
     @Override
     public JfrTable visitShowEvents(ShowEventsNode node) {
-        // Initialize event types if needed
         initializeEventTypes();
         
-        // Show events implementation
-        List<JfrTable.Column> columns = List.of(
-            new JfrTable.Column("Event Type", CellType.STRING),
-            new JfrTable.Column("Count", CellType.NUMBER)
-        );
-        JfrTable result = new JfrTable(columns);
+        StringBuilder result = new StringBuilder();
+        result.append("Event Types (number of events):\n");
         
-        for (EventType eventType : eventTypes) {
-            result.addRow(new JfrTable.Row(List.of(
-                new CellValue.StringValue(eventType.getName()),
-                new CellValue.NumberValue(0L) // Would be actual count in real implementation
-            )));
+        // Sort event types by name for consistent output
+        List<EventType> sortedEventTypes = new ArrayList<>(eventTypes);
+        sortedEventTypes.sort(Comparator.comparing(EventType::getName));
+        
+        for (EventType eventType : sortedEventTypes) {
+            String name = eventType.getName();
+            String simpleName = name.substring(name.lastIndexOf('.') + 1);
+            result.append(simpleName).append(" (0) ");
         }
         
-        return result;
+        return SingleCellTable.of("Events", result.toString().trim());
     }
-
-    @Override
-    public JfrTable visitHelp(HelpNode node) {
-        return SingleCellTable.of("Help", new CellValue.StringValue(HelpProvider.getGeneralHelp()));
-    }
-
-    @Override
-    public JfrTable visitHelpFunction(HelpFunctionNode node) {
-        return SingleCellTable.of(
-            "Function Help",
-            new CellValue.StringValue(HelpProvider.getFunctionHelp(node.functionName()))
-        );
-    }
-
-    @Override
-    public JfrTable visitHelpGrammar(HelpGrammarNode node) {
-        return SingleCellTable.of(
-            "Grammar Help",
-            new CellValue.StringValue(HelpProvider.getGrammarHelp())
-        );
-    }
-
+    
     @Override
     public JfrTable visitShowFields(ShowFieldsNode node) {
-        // Initialize event types if needed
         initializeEventTypes();
         
-        // Show fields implementation
         String eventTypeName = node.eventType();
+        StringBuilder result = new StringBuilder();
         
-        // Find the event type
-        EventType eventType = eventTypes.stream()
-            .filter(et -> et.getName().equals(eventTypeName) || 
-                         et.getName().endsWith("." + eventTypeName))
-            .findFirst()
-            .orElse(null);
-        
-        if (eventType == null) {
-            List<JfrTable.Column> errorColumns = List.of(new JfrTable.Column("Error", CellType.STRING));
-            JfrTable errorResult = new JfrTable(errorColumns);
-            errorResult.addRow(new JfrTable.Row(List.of(
-                new CellValue.StringValue("Event type not found: " + eventTypeName)
-            )));
-            return errorResult;
+        // Find the matching event type
+        EventType matchedEventType = null;
+        for (EventType eventType : eventTypes) {
+            String name = eventType.getName();
+            String simpleName = name.substring(name.lastIndexOf('.') + 1);
+            if (name.equals(eventTypeName) || simpleName.equals(eventTypeName)) {
+                matchedEventType = eventType;
+                break;
+            }
         }
         
-        List<JfrTable.Column> columns = List.of(
-            new JfrTable.Column("Field Name", CellType.STRING),
-            new JfrTable.Column("Type", CellType.STRING)
-        );
-        JfrTable result = new JfrTable(columns);
-        
-        for (var field : eventType.getFields()) {
-            result.addRow(new JfrTable.Row(List.of(
-                new CellValue.StringValue(field.getName()),
-                new CellValue.StringValue(field.getTypeName())
-            )));
+        if (matchedEventType == null) {
+            result.append("Unknown event type: ").append(eventTypeName);
+            return SingleCellTable.of("Error", result.toString());
         }
         
-        return result;
+        // Format the output similar to the original JFR tool
+        result.append(matchedEventType.getName()).append(":\n");
+        
+        List<ValueDescriptor> fields = matchedEventType.getFields();
+        for (ValueDescriptor field : fields) {
+            String typeName = field.getTypeName();
+            // Simplify type names for common Java types
+            if (typeName.startsWith("java.lang.")) {
+                typeName = typeName.substring("java.lang.".length());
+            }
+            result.append(typeName).append(" ").append(field.getName()).append("\n");
+        }
+        
+        return SingleCellTable.of("Fields", result.toString().trim());
+    }
+    
+    @Override
+    public JfrTable visitHelp(HelpNode node) {
+        String helpContent = HelpProvider.getGeneralHelp();
+        return SingleCellTable.of("Help", helpContent);
+    }
+    
+    @Override
+    public JfrTable visitHelpFunction(HelpFunctionNode node) {
+        String functionName = node.functionName();
+        String helpContent = HelpProvider.getFunctionHelp(functionName);
+        return SingleCellTable.of("Function Help", helpContent);
+    }
+    
+    @Override
+    public JfrTable visitHelpGrammar(HelpGrammarNode node) {
+        String grammarContent = HelpProvider.getGrammarHelp();
+        return SingleCellTable.of("Grammar", grammarContent);
     }
     
     @Override
     public JfrTable visitFuzzyJoinSource(FuzzyJoinSourceNode node) {
-        // Get the current left table from context (should be set by processFromClause)
-        JfrTable leftTable = context.getCurrentResult();
-        if (leftTable == null) {
-            // If no left table, create a simple metadata table for testing
-            List<JfrTable.Column> columns = List.of(
-                new JfrTable.Column("source", CellType.STRING),
-                new JfrTable.Column("alias", CellType.STRING),
-                new JfrTable.Column("join_type", CellType.STRING),
-                new JfrTable.Column("join_field", CellType.STRING),
-                new JfrTable.Column("tolerance", CellType.STRING),
-                new JfrTable.Column("threshold", CellType.STRING)
-            );
-            
-            JfrTable result = new JfrTable(columns);
-            
-            // Evaluate tolerance and threshold for display
-            String toleranceStr = node.tolerance() != null ? 
-                extractSingleCellValue(node.tolerance().accept(this)).toString() : "default";
-            String thresholdStr = node.threshold() != null ? 
-                extractSingleCellValue(node.threshold().accept(this)).toString() : "1.0";
-            
-            List<CellValue> row = List.of(
-                new CellValue.StringValue(node.source()),
-                new CellValue.StringValue(node.alias() != null ? node.alias() : ""),
-                new CellValue.StringValue(node.joinType().toString()),
-                new CellValue.StringValue(node.joinField()),
-                new CellValue.StringValue(toleranceStr),
-                new CellValue.StringValue(thresholdStr)
-            );
-            
-            result.addRow(new JfrTable.Row(row));
-            return result;
-        }
-        
-        // Perform actual fuzzy join
-        return performFuzzyJoin(leftTable, node);
+        throw FeatureNotImplementedException.forInProgressFeature(
+            "Fuzzy Joins", 
+            "Use standard joins or multiple FROM sources as a workaround", 
+            node
+        );
+    }
+    
+    @Override
+    public JfrTable visitStandardJoinSource(StandardJoinSourceNode node) {
+        throw new QueryEvaluationException(
+            "standard join evaluation",
+            "Standard joins should be handled by FROM clause processing",
+            QueryEvaluationException.EvaluationErrorType.INVALID_STATE,
+            node
+        );
     }
     
     @Override
     public JfrTable visitPercentileFunction(PercentileFunctionNode node) {
-        // Evaluate percentile function
-        String functionName = "PERCENTILE";
-        
-        // Build arguments: percentile value and data expression
-        List<CellValue> arguments = new ArrayList<>();
-        
-        // Add percentile value as first argument
-        arguments.add(new CellValue.FloatValue(node.percentile()));
-        
-        // Evaluate the value expression
-        JfrTable dataTable = node.valueExpression().accept(this);
-        CellValue dataValue = extractSingleCellValue(dataTable);
-        arguments.add(dataValue);
-        
-        // If there's a time slice filter, evaluate it as well
-        if (node.timeSliceFilter() != null) {
-            JfrTable filterTable = node.timeSliceFilter().accept(this);
-            CellValue filterValue = extractSingleCellValue(filterTable);
-            arguments.add(filterValue);
-        }
-        
-        try {
-            // Use the function registry to evaluate the percentile function
-            CellValue result = functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
-            
-            // Return result as a single-cell table
-            return SingleCellTable.of("percentile", result);
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Error evaluating percentile function: " + e.getMessage(), e);
-        }
+        throw new QueryEvaluationException(
+            "percentile function evaluation",
+            "Percentile functions should be handled by function call processing",
+            QueryEvaluationException.EvaluationErrorType.INVALID_STATE,
+            node
+        );
     }
     
     @Override
     public JfrTable visitPercentileSelection(PercentileSelectionNode node) {
-        // Evaluate percentile selection function (P99SELECT, P95SELECT, etc.)
+        throw FeatureNotImplementedException.forPlannedFeature("Percentile Selection", node);
+    }
+    
+    @Override
+    public JfrTable visitWithinCondition(WithinConditionNode node) {
+        // Evaluate the value to check (e.g., timestamp)
+        JfrTable valueTable = node.value().accept(this);
+        CellValue valueToCheck = extractSingleCellValue(valueTable);
+        
+        // Evaluate the time window (e.g., 5m)
+        JfrTable timeWindowTable = node.timeWindow().accept(this);
+        CellValue timeWindowValue = extractSingleCellValue(timeWindowTable);
+        
+        // Evaluate the reference time (e.g., startTime)
+        JfrTable referenceTable = node.referenceTime().accept(this);
+        CellValue referenceTime = extractSingleCellValue(referenceTable);
+        
+        // Validate value types
+        if (!(valueToCheck instanceof CellValue.NumberValue || valueToCheck instanceof CellValue.TimestampValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition value", valueToCheck, "timestamp or number", null
+            );
+        }
+        if (!(referenceTime instanceof CellValue.NumberValue || referenceTime instanceof CellValue.TimestampValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition reference time", referenceTime, "timestamp or number", null
+            );
+        }
+        if (!(timeWindowValue instanceof CellValue.NumberValue)) {
+            throw ExpressionEvaluationException.forTypeConversionError(
+                "WITHIN condition time window", timeWindowValue, "number (duration)", null
+            );
+        }
+        
+        // Extract time values
+        long valueTime = extractTimeValue(valueToCheck);
+        long refTime = extractTimeValue(referenceTime);
+        long timeWindowNanos = convertToNanoseconds(((CellValue.NumberValue) timeWindowValue).value());
+        
+        // Check if the value is within the time window of the reference time
+        long timeDifference = Math.abs(valueTime - refTime);
+        boolean isWithin = timeDifference <= timeWindowNanos;
+        
+        return SingleCellTable.of(new CellValue.BooleanValue(isWithin));
+    }
+    
+    /**
+     * Converts a time duration value to nanoseconds.
+     * For now, assumes the input is already in nanoseconds.
+     * In a full implementation, this would handle different time units.
+     */
+    private long convertToNanoseconds(double timeValue) {
+        // For simplicity, assume the value is already in nanoseconds
+        // In a full implementation, this would handle units like "5m", "30s", etc.
+        return (long) timeValue;
+    }
+    
+    @Override
+    public JfrTable visitCaseExpression(CaseExpressionNode node) {
+        // Evaluate the CASE expression
+        CellValue expressionValue = null;
+        if (node.expression() != null) {
+            // Simple CASE: CASE expression WHEN value THEN result ...
+            JfrTable expressionTable = node.expression().accept(this);
+            expressionValue = extractSingleCellValue(expressionTable);
+        }
+        
+        // Evaluate WHEN clauses in order
+        for (WhenClauseNode whenClause : node.whenClauses()) {
+            JfrTable conditionTable = whenClause.condition().accept(this);
+            CellValue conditionValue = extractSingleCellValue(conditionTable);
+            
+            boolean matches;
+            if (expressionValue != null) {
+                // Simple CASE: compare expression value with WHEN value
+                matches = expressionValue.equals(conditionValue);
+            } else {
+                // Searched CASE: evaluate WHEN condition as boolean
+                if (conditionValue instanceof CellValue.BooleanValue boolVal) {
+                    matches = boolVal.value();
+                } else {
+                    // Convert other types to boolean (non-null and non-zero are truthy)
+                    matches = conditionValue != null && 
+                             !(conditionValue instanceof CellValue.NullValue) &&
+                             !conditionValue.equals(new CellValue.NumberValue(0));
+                }
+            }
+            
+            if (matches) {
+                // Return the THEN result
+                return whenClause.result().accept(this);
+            }
+        }
+        
+        // No WHEN clause matched, return ELSE result or NULL
+        if (node.elseExpression() != null) {
+            return node.elseExpression().accept(this);
+        } else {
+            return SingleCellTable.of("case_result", new CellValue.NullValue());
+        }
+    }
+    
+    // Missing helper methods
+    
+    /**
+     * Get a value from a row by column name with proper exception handling
+     */
+    private CellValue getRowValueByColumnName(JfrTable.Row row, List<JfrTable.Column> columns, String columnName) {
+        try {
+            return QueryEvaluatorUtils.getRowValueByColumnName(row, columns, columnName);
+        } catch (Exception e) {
+            // Extract available column names for better error reporting
+            String[] availableColumns = columns.stream()
+                .map(JfrTable.Column::name)
+                .toArray(String[]::new);
+            
+            throw new ColumnNotFoundException(columnName, availableColumns, null);
+        }
+    }
+    
+    /**
+     * Evaluate an aggregate expression with precomputed aggregates
+     */
+    private CellValue evaluateAggregateExpression(ExpressionNode expr, Map<String, CellValue> precomputedAggregates) {
+        if (expr instanceof FunctionCallNode functionCall) {
+            String aggregateKey = QueryEvaluatorUtils.createAggregateKey(functionCall);
+            if (precomputedAggregates.containsKey(aggregateKey)) {
+                return precomputedAggregates.get(aggregateKey);
+            }
+        }
+        
+        // If not a precomputed aggregate, evaluate normally
+        JfrTable result = expr.accept(this);
+        return extractSingleCellValue(result);
+    }
+    
+    /**
+     * Efficiently evaluate DISTINCT aggregate functions by collecting unique values
+     * Optimized with HashMap for fast duplicate detection
+     */
+    private JfrTable evaluateDistinctAggregateFunction(FunctionCallNode node) {
         String functionName = node.functionName();
+        List<ExpressionNode> arguments = node.arguments();
         
-        if (!functionRegistry.isFunction(functionName)) {
-            throw new RuntimeException("Unknown percentile selection function: " + functionName);
+        if (arguments.isEmpty()) {
+            throw FunctionArgumentException.forWrongArgumentCount(
+                functionName, 1, 0, node
+            );
         }
         
-        // Build arguments: idField, valueExpression, tableName, percentile
-        List<CellValue> arguments = new ArrayList<>();
-        arguments.add(new CellValue.StringValue(node.idField()));
-        
-        // Evaluate the value expression
-        JfrTable valueTable = node.valueExpression().accept(this);
-        CellValue valueField = extractSingleCellValue(valueTable);
-        arguments.add(valueField);
-        
-        arguments.add(new CellValue.StringValue(node.tableName()));
-        arguments.add(new CellValue.FloatValue(node.percentile()));
-        
-        try {
-            // Use the function registry to evaluate the percentile selection function
-            CellValue result = functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
-            
-            // Return result as a single-cell table
-            return SingleCellTable.of("percentile_selection", result);
-            
-        } catch (Exception e) {
-            throw new RuntimeException("Error evaluating percentile selection function " + functionName + ": " + e.getMessage(), e);
-        }
-    }
-    
-    // ===== QUERY ENGINE FUNCTIONALITY INTEGRATED INTO QUERYEVALUATOR =====
-    
-    /**
-     * Set a variable value
-     */
-    public void setVariable(String name, Object value) {
-        context.setVariable(name, value);
-    }
-    
-    /**
-     * Get a variable value - handles both regular variables and lazy variables
-     */
-    public Object getVariable(String name) {
-        // First check lazy variables (they take precedence)
-        LazyQuery lazyQuery = context.getLazyVariable(name);
-        if (lazyQuery != null) {
-            return lazyQuery.evaluate();
+        // Get the current evaluation context which should contain the source data
+        JfrTable sourceTable = context.getCurrentResult();
+        if (sourceTable == null) {
+            throw AggregationEvaluationException.forInvalidState(
+                functionName, "no data context available for DISTINCT evaluation",
+                AggregationEvaluationException.AggregationContext.DISTINCT_AGGREGATE,
+                node
+            );
         }
         
-        // Fall back to regular variables
-        return context.getVariable(name);
-    }
-    
-    /**
-     * Get a lazy variable if it exists
-     */
-    public LazyQuery getLazyVariable(String name) {
-        return context.getLazyVariable(name);
-    }
-    
-    /**
-     * Define a view
-     */
-    public void defineView(String name, QueryNode query) {
-        context.setView(name, query);
-    }
-    
-    /**
-     * Get a view definition
-     */
-    public QueryNode getView(String name) {
-        return context.getView(name);
-    }
-    
-    /**
-     * Clear the result cache
-     */
-    public void clearCache() {
-        context.clearCache();
-    }
-    
-    /**
-     * Get cached result if available
-     */
-    public JfrTable getCachedResult(String cacheKey) {
-        return context.getCachedResult(cacheKey);
-    }
-    
-    /**
-     * Cache a result
-     */
-    public void cacheResult(String cacheKey, JfrTable result) {
-        context.cacheResult(cacheKey, result);
-    }
-    
-    /**
-     * Get all variable names (including lazy variables)
-     */
-    public Map<String, Object> getVariables() {
-        Map<String, Object> allVariables = new HashMap<>(context.getVariables());
+        ExpressionNode fieldExpression = arguments.get(0);
         
-        // Add lazy variables (but don't evaluate them yet)
-        for (Map.Entry<String, LazyQuery> entry : context.getLazyVariables().entrySet()) {
-            allVariables.put(entry.getKey(), entry.getValue());
-        }
+        // Use HashMap for O(1) duplicate detection and LinkedHashSet for order preservation
+        Map<CellValue, Boolean> seenValues = new HashMap<>();
+        Set<CellValue> distinctValues = new LinkedHashSet<>();
         
-        return allVariables;
-    }
-    
-    /**
-     * Get all lazy variable names
-     */
-    public Set<String> getLazyVariableNames() {
-        initializeEventTypeVariables(); // Ensure event types are initialized
-        return new HashSet<>(context.getLazyVariables().keySet());
-    }
-    
-    /**
-     * Manually trigger initialization of event type variables.
-     * This can be called to ensure all event types are available as variables.
-     */
-    public void initializeLazyVariables() {
-        initializeEventTypeVariables();
-    }
-    
-    /**
-     * Get all views
-     */
-    public Map<String, QueryNode> getViews() {
-        return context.getViews();
-    }
-    
-    
-    /**
-     * Get cache statistics from the execution context
-     */
-    public ExecutionContext.CacheStats getCacheStats() {
-        return context.getCacheStats();
-    }
-    
-    /**
-     * Configure cache settings
-     */
-    public void configureCaching(long maxSize, long ttlMs) {
-        context.setCacheConfig(maxSize, ttlMs);
-    }
-    
-    /**
-     * Invalidate cache entries that depend on a specific resource
-     */
-    public void invalidateCacheDependencies(String dependency) {
-        context.invalidateCacheDependencies(dependency);
-    }
-    
-    /**
-     * Execution result wrapper that includes success/failure information
-     */
-    public static class ExecutionResult {
-        private final JfrTable result;
-        private final boolean success;
-        private final String errorMessage;
-        private final Exception exception;
+        // Save the current context
+        JfrTable originalResult = context.getCurrentResult();
         
-        public ExecutionResult(JfrTable result) {
-            this.result = result;
-            this.success = true;
-            this.errorMessage = null;
-            this.exception = null;
-        }
-        
-        public ExecutionResult(String errorMessage, Exception exception) {
-            this.result = null;
-            this.success = false;
-            this.errorMessage = errorMessage;
-            this.exception = exception;
-        }
-        
-        public boolean isSuccess() { return success; }
-        public JfrTable getResult() { return result; }
-        public String getErrorMessage() { return errorMessage; }
-        public Exception getException() { return exception; }
-    }
-    
-    /**
-     * Execute a query and return a result wrapper
-     */
-    public ExecutionResult executeQuery(QueryNode query) {
-        try {
-            JfrTable result = query.accept(this);
-            return new ExecutionResult(result);
-        } catch (Exception e) {
-            return new ExecutionResult(e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Execute a complete program containing multiple statements
-     */
-    public ExecutionResult execute(ProgramNode program) {
-        try {
-            ExecutionContext context = new ExecutionContext();
-            setContext(context);
-            JfrTable result = visitProgram(program);
-            return new ExecutionResult(result);
-        } catch (Exception e) {
-            return new ExecutionResult("Execution failed: " + e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Set the execution context
-     */
-    public void setContext(ExecutionContext context) {
-        this.context = context;
-    }
-    
-    /**
-     * Get the execution context
-     */
-    public ExecutionContext getContext() {
-        return context;
-    }
-    
-    // ===== HELPER METHODS FOR QUERY EXECUTION =====
-    
-    /**
-     * Create placeholder result for unsupported features
-     */
-    private JfrTable createPlaceholderResult(QueryNode node, String message) {
-        List<JfrTable.Column> columns = List.of(new JfrTable.Column("message", CellType.STRING));
-        JfrTable result = new JfrTable(columns);
-        result.addRow(new JfrTable.Row(List.of(new CellValue.StringValue(message))));
-        return result;
-    }
-    
-    /**
-     * Evaluate a condition for a specific row in WHERE clause
-     * WHERE clauses should not contain aggregate functions
-     */
-    private boolean evaluateConditionForRow(JfrTable.Row row, ConditionNode condition) {
-        try {
-            // Set current row context for evaluation
-            JfrTable singleRowTable = new JfrTable(List.of(new JfrTable.Column("temp", CellType.STRING)));
+        for (JfrTable.Row row : sourceTable.getRows()) {
+            // Create a single-row table to set as context for field evaluation
+            JfrTable singleRowTable = new StandardJfrTable(sourceTable.getColumns());
             singleRowTable.addRow(row);
             context.setCurrentResult(singleRowTable);
             
-            // Use the WHERE-specific condition evaluation (no aggregates allowed)
-            return evaluateWhereCondition(row, condition);
-        } catch (Exception e) {
-            // Default to including the row if evaluation fails
-            return true;
-        }
-    }
-    
-    /**
-     * Evaluate a WHERE condition against a row
-     * WHERE conditions cannot contain aggregate functions
-     */
-    private boolean evaluateWhereCondition(JfrTable.Row row, ConditionNode condition) {
-        // Handle ExpressionConditionNode which wraps expression nodes
-        if (condition instanceof ExpressionConditionNode exprCondition) {
-            ExpressionNode expr = exprCondition.expression();
+            // Evaluate the field expression for this row
+            JfrTable fieldResult = fieldExpression.accept(this);
+            CellValue fieldValue = extractSingleCellValue(fieldResult);
             
-            if (expr instanceof BinaryExpressionNode binaryExpr) {
-                return evaluateBinaryWhereCondition(row, binaryExpr);
-            } else if (expr instanceof FunctionCallNode functionCall) {
-                return evaluateFunctionWhereCondition(row, functionCall);
-            } else if (expr instanceof FieldAccessNode fieldAccess) {
-                // Simple field access - evaluate as boolean
-                CellValue value = getRowValueByColumnName(row, List.of(), fieldAccess.field());
-                return isTruthyValue(value);
-            } else if (expr instanceof IdentifierNode identifier) {
-                // Simple identifier - evaluate as boolean
-                CellValue value = getRowValueByColumnName(row, List.of(), identifier.name());
-                return isTruthyValue(value);
-            }
-        }
-        
-        // Default to including the row if we can't evaluate the condition
-        return true;
-    }
-    
-    /**
-     * Check if a CellValue is considered "truthy" for boolean evaluation
-     */
-    private boolean isTruthyValue(CellValue value) {
-        if (value instanceof CellValue.BooleanValue boolVal) {
-            return boolVal.value();
-        } else if (value instanceof CellValue.NumberValue numVal) {
-            return numVal.value() != 0;
-        } else if (value instanceof CellValue.FloatValue floatVal) {
-            return floatVal.value() != 0.0;
-        } else if (value instanceof CellValue.StringValue strVal) {
-            return !strVal.value().isEmpty() && !"false".equalsIgnoreCase(strVal.value());
-        } else if (value instanceof CellValue.NullValue) {
-            return false;
-        }
-        return true; // Default to true for other types
-    }
-    
-    /**
-     * Evaluate a binary expression in WHERE clause
-     */
-    private boolean evaluateBinaryWhereCondition(JfrTable.Row row, BinaryExpressionNode binaryExpr) {
-        BinaryOperator operator = binaryExpr.operator();
-        
-        try {
-            // Evaluate left and right operands using the AST visitor
-            JfrTable leftResult = binaryExpr.left().accept(this);
-            JfrTable rightResult = binaryExpr.right().accept(this);
-            
-            CellValue leftValue = extractSingleCellValue(leftResult);
-            CellValue rightValue = extractSingleCellValue(rightResult);
-            
-            // Handle comparison operations
-            if (operator == BinaryOperator.GREATER_THAN || 
-                operator == BinaryOperator.LESS_THAN || 
-                operator == BinaryOperator.EQUALS ||
-                operator == BinaryOperator.NOT_EQUALS ||
-                operator == BinaryOperator.GREATER_EQUAL ||
-                operator == BinaryOperator.LESS_EQUAL) {
-                
-                int comparison = CellValue.compare(leftValue, rightValue);
-                return switch (operator) {
-                    case GREATER_THAN -> comparison > 0;
-                    case LESS_THAN -> comparison < 0;
-                    case EQUALS -> comparison == 0;
-                    case NOT_EQUALS -> comparison != 0;
-                    case GREATER_EQUAL -> comparison >= 0;
-                    case LESS_EQUAL -> comparison <= 0;
-                    default -> true;
-                };
-            }
-            
-            // Handle logical operations
-            if (operator == BinaryOperator.AND || operator == BinaryOperator.OR) {
-                boolean leftBool = isTruthyValue(leftValue);
-                boolean rightBool = isTruthyValue(rightValue);
-                
-                return switch (operator) {
-                    case AND -> leftBool && rightBool;
-                    case OR -> leftBool || rightBool;
-                    default -> true;
-                };
-            }
-            
-            // Handle IN operation
-            if (operator == BinaryOperator.IN) {
-                if (rightValue instanceof CellValue.ArrayValue arrayValue) {
-                    return arrayValue.contains(leftValue);
-                } else {
-                    return CellValue.compare(leftValue, rightValue) == 0;
-                }
-            }
-            
-        } catch (Exception e) {
-            // If evaluation fails, log and return true to include the row
-            System.err.println("Error evaluating WHERE condition: " + e.getMessage());
-        }
-        
-        return true; // Default to including row
-    }
-    
-    /**
-     * Evaluate a function call in WHERE clause
-     * Aggregate functions are not allowed in WHERE clauses
-     */
-    private boolean evaluateFunctionWhereCondition(JfrTable.Row row, FunctionCallNode functionCall) {
-        String functionName = functionCall.functionName();
-        
-        // Check if this is an aggregate function - these are not allowed in WHERE clauses
-        if (isAggregateFunction(functionName)) {
-            throw new RuntimeException("Aggregate function '" + functionName + "' cannot be used in WHERE clause. Use HAVING clause instead.");
-        }
-        
-        try {
-            // Evaluate non-aggregate function using the function registry
-            List<CellValue> arguments = new ArrayList<>();
-            for (ExpressionNode arg : functionCall.arguments()) {
-                JfrTable argTable = arg.accept(this);
-                CellValue argValue = extractSingleCellValue(argTable);
-                arguments.add(argValue);
-            }
-            
-            CellValue result = functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
-            return isTruthyValue(result);
-            
-        } catch (Exception e) {
-            // If function evaluation fails, log and return true to include the row
-            System.err.println("Error evaluating function in WHERE clause: " + e.getMessage());
-            return true;
-        }
-    }
-    
-    /**
-     * Check if a function is an aggregate function
-     */
-    private boolean isAggregateFunction(String functionName) {
-        String upperName = functionName.toUpperCase();
-        return switch (upperName) {
-            case "COUNT", "SUM", "AVG", "AVERAGE", "MIN", "MAX", 
-                 "STDDEV", "VARIANCE", "PERCENTILE", "MEDIAN" -> true;
-            default -> upperName.startsWith("P9") || upperName.startsWith("PERCENTILE");
-        };
-    }
-    
-    /**
-     * Build group key from row values for specified fields
-     */
-    private String buildGroupKey(JfrTable.Row row, List<JfrTable.Column> columns, List<ExpressionNode> fields) {
-        StringBuilder keyBuilder = new StringBuilder();
-        for (ExpressionNode field : fields) {
-            if (keyBuilder.length() > 0) {
-                keyBuilder.append("|");
-            }
-            // Extract field name and get value from row
-            String fieldName = extractColumnName(field);
-            CellValue value = getRowValueByColumnName(row, columns, fieldName);
-            keyBuilder.append(fieldName).append("=").append(value.toString());
-        }
-        return keyBuilder.toString();
-    }
-    
-    /**
-     * Get row value as string for grouping
-     */
-    private String getRowValueAsString(JfrTable.Row row, String fieldName) {
-        // Simplified implementation - would map field names to column indices
-        if (!row.getCells().isEmpty()) {
-            return row.getCells().get(0).toString();
-        }
-        return "";
-    }
-    
-    /**
-     * Determine column type by evaluating expression
-     */
-    private CellType determineColumnType(ExpressionNode expression, JfrTable sourceData) {
-        try {
-            // Try to evaluate the expression on sample data to determine type
-            if (!sourceData.getRows().isEmpty()) {
-                CellValue sampleValue = evaluateExpressionForRow(sourceData.getRows().get(0), expression);
-                return sampleValue.getType();
-            }
-        } catch (Exception e) {
-            // Fall back to STRING type if evaluation fails
-        }
-        return CellType.STRING;
-    }
-    
-    /**
-     * Evaluate expression for a specific row
-     */
-    private CellValue evaluateExpressionForRow(JfrTable.Row row, ExpressionNode expression) {
-        try {
-            // Set row context and evaluate expression
-            JfrTable rowTable = new JfrTable(List.of(new JfrTable.Column("temp", CellType.STRING)));
-            rowTable.addRow(row);
-            context.setCurrentResult(rowTable);
-            
-            JfrTable result = expression.accept(this);
-            return extractSingleCellValue(result);
-        } catch (Exception e) {
-            return new CellValue.StringValue("Error: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Get row value by column name
-     */
-    private CellValue getRowValueByColumnName(JfrTable.Row row, List<JfrTable.Column> columns, String columnName) {
-        // First try to find by exact column name match
-        for (int i = 0; i < columns.size() && i < row.getCells().size(); i++) {
-            if (columns.get(i).name().equals(columnName)) {
-                return row.getCells().get(i);
-            }
-        }
-        
-        // If columns list is empty or no match found, try to get value from current result context
-        if (context.getCurrentResult() != null) {
-            JfrTable currentResult = context.getCurrentResult();
-            List<JfrTable.Column> currentColumns = currentResult.getColumns();
-            
-            for (int i = 0; i < currentColumns.size() && i < row.getCells().size(); i++) {
-                if (currentColumns.get(i).name().equals(columnName)) {
-                    return row.getCells().get(i);
+            // Only add non-null values to maintain SQL semantics
+            if (!(fieldValue instanceof CellValue.NullValue)) {
+                // Use HashMap for fast duplicate detection - O(1) vs Set.contains() which can be O(n)
+                if (!seenValues.containsKey(fieldValue)) {
+                    seenValues.put(fieldValue, true);
+                    distinctValues.add(fieldValue);
                 }
             }
         }
         
-        // If still no match, check if it's a special identifier like "*"
-        if ("*".equals(columnName) && !row.getCells().isEmpty()) {
-            return row.getCells().get(0); // Return first cell for "*"
-        }
+        // Restore the original context
+        context.setCurrentResult(originalResult);
         
-        return new CellValue.NullValue();
+        // Now apply the aggregate function to the distinct values
+        CellValue result = applyAggregateFunctionToDistinctValues(functionName, distinctValues, arguments, node);
+        
+        return SingleCellTable.of("result", result);
     }
     
     /**
-     * Performs IN operation: checks if left value is contained in right array
+     * Apply aggregate function to a collection of distinct values using function registry delegation
      */
-    private JfrTable performInOperation(JfrTable leftTable, JfrTable rightTable) {
-        CellValue leftValue = extractSingleCellValue(leftTable);
-        CellValue rightValue = extractSingleCellValue(rightTable);
+    private CellValue applyAggregateFunctionToDistinctValues(String functionName, Set<CellValue> distinctValues, List<ExpressionNode> originalArguments, ASTNode errorNode) {
+        // Prepare arguments for function registry delegation
+        List<CellValue> arguments = new ArrayList<>();
         
-        boolean result;
-        if (rightValue instanceof CellValue.ArrayValue arrayValue) {
-            // Use the optimized contains method from ArrayValue
-            result = arrayValue.contains(leftValue);
-        } else {
-            // Fallback: convert right value to string and check if left is equal
-            result = leftValue.equals(rightValue);
+        // Add the collection of distinct values as the first argument
+        arguments.add(new CellValue.ArrayValue(new ArrayList<>(distinctValues)));
+        
+        // Add any additional arguments from the original function call (skip the first which was the expression we aggregated)
+        for (int i = 1; i < originalArguments.size(); i++) {
+            JfrTable argResult = originalArguments.get(i).accept(this);
+            arguments.add(extractSingleCellValue(argResult));
         }
         
-        return SingleCellTable.of(new CellValue.BooleanValue(result));
-    }
-    
-    /**
-     * Performs comparison operations between two values
-     */
-    private JfrTable performComparisonOperation(JfrTable leftTable, JfrTable rightTable, BinaryOperator operator) {
-        CellValue leftValue = extractSingleCellValue(leftTable);
-        CellValue rightValue = extractSingleCellValue(rightTable);
-        
-        int comparison = CellValue.compare(leftValue, rightValue);
-        boolean result = switch (operator) {
-            case EQUALS -> comparison == 0;
-            case NOT_EQUALS -> comparison != 0;
-            case LESS_THAN -> comparison < 0;
-            case GREATER_THAN -> comparison > 0;
-            case LESS_EQUAL -> comparison <= 0;
-            case GREATER_EQUAL -> comparison >= 0;
-            default -> throw new IllegalArgumentException("Unsupported comparison operator: " + operator);
-        };
-        
-        return SingleCellTable.of(new CellValue.BooleanValue(result));
-    }
-
-    @Override
-    public JfrTable visitRawJfrQuery(RawJfrQueryNode node) {
-        // Execute raw JFR query using the provided executor
+        // Delegate to function registry for consistent behavior
         try {
-            if (rawJfrExecutor == null) {
-                throw new UnsupportedOperationException("Raw JFR query execution not supported - no executor provided");
-            }
-            
-            return rawJfrExecutor.execute(node);
-            
+            return functionRegistry.evaluateFunction(functionName, arguments, evaluationContext);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to execute raw JFR query: " + node.rawQuery(), e);
+            throw FunctionEvaluationException.forRuntimeError(
+                functionName, arguments, 
+                FunctionEvaluationException.FunctionContext.AGGREGATE_CONTEXT,
+                errorNode, e
+            );
         }
     }
 
-    @Override
-    public JfrTable visitStandardJoinSource(StandardJoinSourceNode node) {
-        // Get the left table from context (should be set by processFromClause)
-        JfrTable leftTable = context.getCurrentResult();
-        if (leftTable == null) {
-            throw new IllegalStateException("No left table available for join");
-        }
-        
-        // Get the right table by processing the source
-        SourceNode rightSource = new SourceNode(node.source(), node.alias(), node.location());
-        JfrTable rightTable = visitSource(rightSource);
-        
-        // Perform the appropriate join based on join type
-        return switch (node.joinType()) {
-            case INNER -> performInnerJoin(leftTable, rightTable, node.leftJoinField(), node.rightJoinField());
-            case LEFT -> performLeftJoin(leftTable, rightTable, node.leftJoinField(), node.rightJoinField());
-            case RIGHT -> performRightJoin(leftTable, rightTable, node.leftJoinField(), node.rightJoinField());
-            case FULL -> performFullJoin(leftTable, rightTable, node.leftJoinField(), node.rightJoinField());
-        };
-    }
-    
     /**
-     * Perform inner join between two tables
+     * Generate a cache key for the given query node.
+     * This is used for query result caching.
      */
-    private JfrTable performInnerJoin(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            // Avoid duplicate column names by prefixing with table alias
-            String columnName = rightCol.name().equals(rightField) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Find matching rows
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), leftField);
-            
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), rightField);
-                
-                // Check if join condition is satisfied
-                if (CellValue.compare(leftJoinValue, rightJoinValue) == 0) {
-                    // Combine rows
-                    List<CellValue> combinedCells = new ArrayList<>(leftRow.getCells());
-                    combinedCells.addAll(rightRow.getCells());
-                    result.addRow(new JfrTable.Row(combinedCells));
-                }
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Perform left outer join between two tables
-     */
-    private JfrTable performLeftJoin(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            String columnName = rightCol.name().equals(rightField) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Process each left row
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), leftField);
-            boolean foundMatch = false;
-            
-            // Look for matching right rows
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), rightField);
-                
-                if (CellValue.compare(leftJoinValue, rightJoinValue) == 0) {
-                    // Found match - combine rows
-                    List<CellValue> combinedCells = new ArrayList<>(leftRow.getCells());
-                    combinedCells.addAll(rightRow.getCells());
-                    result.addRow(new JfrTable.Row(combinedCells));
-                    foundMatch = true;
-                }
-            }
-            
-            // If no match found, add left row with nulls for right columns
-            if (!foundMatch) {
-                List<CellValue> combinedCells = new ArrayList<>(leftRow.getCells());
-                for (int i = 0; i < rightTable.getColumns().size(); i++) {
-                    combinedCells.add(new CellValue.NullValue());
-                }
-                result.addRow(new JfrTable.Row(combinedCells));
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Perform right outer join between two tables
-     */
-    private JfrTable performRightJoin(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField) {
-        // Right join is equivalent to left join with tables swapped
-        return performLeftJoin(rightTable, leftTable, rightField, leftField);
-    }
-    
-    /**
-     * Perform full outer join between two tables
-     */
-    private JfrTable performFullJoin(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            String columnName = rightCol.name().equals(rightField) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Track which right rows have been matched
-        Set<Integer> matchedRightRows = new HashSet<>();
-        
-        // Process left rows (similar to left join)
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), leftField);
-            boolean foundMatch = false;
-            
-            for (int rightIndex = 0; rightIndex < rightTable.getRows().size(); rightIndex++) {
-                JfrTable.Row rightRow = rightTable.getRows().get(rightIndex);
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), rightField);
-                
-                if (CellValue.compare(leftJoinValue, rightJoinValue) == 0) {
-                    // Found match
-                    List<CellValue> combinedCells = new ArrayList<>(leftRow.getCells());
-                    combinedCells.addAll(rightRow.getCells());
-                    result.addRow(new JfrTable.Row(combinedCells));
-                    matchedRightRows.add(rightIndex);
-                    foundMatch = true;
-                }
-            }
-            
-            // If no match found, add left row with nulls
-            if (!foundMatch) {
-                List<CellValue> combinedCells = new ArrayList<>(leftRow.getCells());
-                for (int i = 0; i < rightTable.getColumns().size(); i++) {
-                    combinedCells.add(new CellValue.NullValue());
-                }
-                result.addRow(new JfrTable.Row(combinedCells));
-            }
-        }
-        
-        // Add unmatched right rows with nulls for left columns
-        for (int rightIndex = 0; rightIndex < rightTable.getRows().size(); rightIndex++) {
-            if (!matchedRightRows.contains(rightIndex)) {
-                JfrTable.Row rightRow = rightTable.getRows().get(rightIndex);
-                List<CellValue> combinedCells = new ArrayList<>();
-                
-                // Add nulls for left columns
-                for (int i = 0; i < leftTable.getColumns().size(); i++) {
-                    combinedCells.add(new CellValue.NullValue());
-                }
-                // Add right row data
-                combinedCells.addAll(rightRow.getCells());
-                result.addRow(new JfrTable.Row(combinedCells));
-            }
-        }
-        
-        return result;
-    }
-    
-    // ===== OPTIMIZED JOIN METHODS WITH WHERE CLAUSE INTEGRATION =====
-    
-    /**
-     * Perform optimized inner join with WHERE clause filtering during join operation
-     * This reduces the size of intermediate results by applying filters as rows are joined
-     */
-    private JfrTable performInnerJoinOptimized(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField, WhereNode whereNode) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            String columnName = rightCol.name().equals(rightField) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Find matching rows and apply WHERE filtering during join
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), leftField);
-            
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), rightField);
-                
-                // Check join condition
-                if (CellValue.compare(leftJoinValue, rightJoinValue) == 0) {
-                    // Create joined row
-                    List<CellValue> joinedCells = new ArrayList<>(leftRow.getCells());
-                    joinedCells.addAll(rightRow.getCells());
-                    JfrTable.Row joinedRow = new JfrTable.Row(joinedCells);
-                    
-                    // Apply WHERE filtering immediately to reduce result size
-                    if (whereNode == null || evaluateConditionForRow(joinedRow, whereNode.condition())) {
-                        result.addRow(joinedRow);
-                    }
-                }
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Perform optimized left outer join with WHERE clause filtering
-     */
-    private JfrTable performLeftJoinOptimized(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField, WhereNode whereNode) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            String columnName = rightCol.name().equals(rightField) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Process each left row
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), leftField);
-            boolean foundMatch = false;
-            
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), rightField);
-                
-                if (CellValue.compare(leftJoinValue, rightJoinValue) == 0) {
-                    foundMatch = true;
-                    
-                    // Create joined row
-                    List<CellValue> joinedCells = new ArrayList<>(leftRow.getCells());
-                    joinedCells.addAll(rightRow.getCells());
-                    JfrTable.Row joinedRow = new JfrTable.Row(joinedCells);
-                    
-                    // Apply WHERE filtering
-                    if (whereNode == null || evaluateConditionForRow(joinedRow, whereNode.condition())) {
-                        result.addRow(joinedRow);
-                    }
-                }
-            }
-            
-            // If no match found, add left row with nulls for right columns
-            if (!foundMatch) {
-                List<CellValue> joinedCells = new ArrayList<>(leftRow.getCells());
-                // Add null values for right table columns
-                for (int i = 0; i < rightTable.getColumns().size(); i++) {
-                    joinedCells.add(new CellValue.NullValue());
-                }
-                JfrTable.Row joinedRow = new JfrTable.Row(joinedCells);
-                
-                // Apply WHERE filtering
-                if (whereNode == null || evaluateConditionForRow(joinedRow, whereNode.condition())) {
-                    result.addRow(joinedRow);
-                }
-            }
-        }
-        
-        return result;
-    }
-    
-    /**
-     * Perform optimized right outer join with WHERE clause filtering
-     */
-    private JfrTable performRightJoinOptimized(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField, WhereNode whereNode) {
-        // For simplicity, implement as left join with tables swapped
-        return performLeftJoinOptimized(rightTable, leftTable, rightField, leftField, whereNode);
-    }
-    
-    /**
-     * Perform optimized full outer join with WHERE clause filtering
-     */
-    private JfrTable performFullJoinOptimized(JfrTable leftTable, JfrTable rightTable, String leftField, String rightField, WhereNode whereNode) {
-        // Combine left and right joins, removing duplicates
-        JfrTable leftResult = performLeftJoinOptimized(leftTable, rightTable, leftField, rightField, whereNode);
-        JfrTable rightResult = performRightJoinOptimized(leftTable, rightTable, leftField, rightField, whereNode);
-        
-        // Merge results (simplified - in practice would need to detect and remove duplicates)
-        JfrTable result = new JfrTable(leftResult.getColumns());
-        
-        // Add all left join results
-        for (JfrTable.Row row : leftResult.getRows()) {
-            result.addRow(row);
-        }
-        
-        // Add right join results that aren't already included
-        // (This is a simplified implementation - would need proper duplicate detection)
-        for (JfrTable.Row row : rightResult.getRows()) {
-            result.addRow(row);
-        }
-        
-        return result;
+    private String generateQueryCacheKey(QueryNode node) {
+        // Simple implementation - convert the query to string and hash it
+        return String.valueOf(node.toString().hashCode());
     }
 
-    @Override
-    public JfrTable visitArrayLiteral(ArrayLiteralNode node) {
-        // Return a table containing the array literal values
-        List<JfrTable.Column> columns = List.of(new JfrTable.Column("array_value", CellType.STRING));
-        JfrTable result = new JfrTable(columns);
-        
-        for (ExpressionNode element : node.elements()) {
-            JfrTable elementResult = element.accept(this);
-            // Add each element as a row
-            if (!elementResult.getRows().isEmpty()) {
-                result.addRow(elementResult.getRows().get(0));
-            }
-        }
-        
-        return result;
-    }
-    
-    @Override 
-    public JfrTable visitSelectItem(SelectItemNode node) {
-        // Evaluate the expression and create a single-column table
-        JfrTable expressionResult = node.expression().accept(this);
-        
-        // If alias is provided, rename the column
-        if (node.alias() != null) {
-            List<JfrTable.Column> renamedColumns = new ArrayList<>();
-            for (JfrTable.Column col : expressionResult.getColumns()) {
-                renamedColumns.add(new JfrTable.Column(node.alias(), col.type()));
-                break; // Only rename first column for select item
-            }
-            
-            JfrTable result = new JfrTable(renamedColumns);
-            for (JfrTable.Row row : expressionResult.getRows()) {
-                result.addRow(row);
-            }
-            return result;
-        }
-        
-        return expressionResult;
-    }
-    
     /**
-     * Perform cross join between two tables
+     * Extract dependencies from the given query node.
+     * This returns the set of table/view names that the query depends on.
+     */
+    private Set<String> extractQueryDependencies(QueryNode node) {
+        Set<String> dependencies = new HashSet<>();
+        if (node.from() != null) {
+            // Simple implementation - just get the table names from FROM clause sources
+            for (SourceNodeBase source : node.from().sources()) {
+                if (source instanceof SourceNode sourceNode) {
+                    dependencies.add(sourceNode.source());
+                }
+            }
+        }
+        return dependencies;
+    }
+
+    /**
+     * Create a placeholder result table for error cases.
+     */
+    private JfrTable createPlaceholderResult(QueryNode node, String errorMessage) {
+        // Create a simple table with the error message using SingleCellTable
+        return new SingleCellTable(new CellValue.StringValue(errorMessage));
+    }
+
+    /**
+     * Perform cross join between two tables.
+     * Creates a Cartesian product of all rows from both tables.
      */
     private JfrTable performCrossJoin(JfrTable leftTable, JfrTable rightTable) {
-        // Create combined column list
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            resultColumns.add(new JfrTable.Column("right_" + rightCol.name(), rightCol.type()));
-        }
+        // Create combined columns
+        List<JfrTable.Column> leftColumns = leftTable.getColumns();
+        List<JfrTable.Column> rightColumns = rightTable.getColumns();
         
-        JfrTable result = new JfrTable(resultColumns);
+        // Combine all columns (no duplicate handling for now - simple cross join)
+        List<JfrTable.Column> allColumns = new ArrayList<>();
+        allColumns.addAll(leftColumns);
+        allColumns.addAll(rightColumns);
         
-        // Cross product of all rows
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                List<CellValue> joinedCells = new ArrayList<>(leftRow.getCells());
-                joinedCells.addAll(rightRow.getCells());
-                result.addRow(new JfrTable.Row(joinedCells));
+        // Create result table with combined columns
+        StandardJfrTable result = new StandardJfrTable(allColumns);
+        
+        // Perform cross join - for each row in left table, combine with each row in right table
+        List<JfrTable.Row> leftRows = leftTable.getRows();
+        List<JfrTable.Row> rightRows = rightTable.getRows();
+        
+        for (JfrTable.Row leftRow : leftRows) {
+            for (JfrTable.Row rightRow : rightRows) {
+                // Combine cells from both rows
+                List<CellValue> combinedCells = new ArrayList<>();
+                combinedCells.addAll(leftRow.getCells());
+                combinedCells.addAll(rightRow.getCells());
+                
+                result.addRow(new JfrTable.Row(combinedCells));
             }
         }
         
         return result;
     }
+
+    /**
+     * Evaluates an expression in the context of a specific row
+     */
+    public Object evaluateExpressionInRowContext(ExpressionNode expression, JfrTable.Row row, List<JfrTable.Column> columns) {
+        if (expression == null) {
+            return null;
+        }
+        
+        // Handle different expression types
+        if (expression instanceof LiteralNode) {
+            // Return the CellValue directly to preserve type information 
+            return ((LiteralNode) expression).value();
+        } else if (expression instanceof IdentifierNode) {
+            String columnName = ((IdentifierNode) expression).name();
+            // Find the column by name
+            for (JfrTable.Column column : columns) {
+                if (column.name().equals(columnName)) {
+                    CellValue cellValue = row.getCell(columns.indexOf(column));
+                    // Return the CellValue directly to preserve type information
+                    return cellValue;
+                }
+            }
+            
+            // Create available column names array for ColumnNotFoundException
+            String[] availableColumns = columns.stream()
+                .map(JfrTable.Column::name)
+                .toArray(String[]::new);
+            
+            throw new ColumnNotFoundException(columnName, availableColumns, expression);
+        } else if (expression instanceof FieldAccessNode) {
+            FieldAccessNode fieldAccess = (FieldAccessNode) expression;
+            String fieldName = fieldAccess.field();
+            String qualifier = fieldAccess.qualifier();
+            
+            // For qualified field access (e.g., e.threadId), we need to resolve the qualifier
+            // to the actual column name in a JOIN context
+            if (qualifier != null && !qualifier.isEmpty()) {
+                // First try the direct qualified name (table.field)
+                String qualifiedName = qualifier + "." + fieldName;
+                for (JfrTable.Column column : columns) {
+                    if (column.name().equals(qualifiedName)) {
+                        CellValue cellValue = row.getCell(columns.indexOf(column));
+                        return cellValue;
+                    }
+                }
+                
+                // In JOIN contexts, look for prefixed column names
+                // Try left_fieldName if qualifier might be left table
+                String leftPrefixedName = "left_" + fieldName;
+                for (JfrTable.Column column : columns) {
+                    if (column.name().equals(leftPrefixedName)) {
+                        CellValue cellValue = row.getCell(columns.indexOf(column));
+                        return cellValue;
+                    }
+                }
+                
+                // Try right_fieldName if qualifier might be right table
+                String rightPrefixedName = "right_" + fieldName;
+                for (JfrTable.Column column : columns) {
+                    if (column.name().equals(rightPrefixedName)) {
+                        CellValue cellValue = row.getCell(columns.indexOf(column));
+                        return cellValue;
+                    }
+                }
+            }
+            
+            // Fall back to unqualified field name lookup
+            for (JfrTable.Column column : columns) {
+                if (column.name().equals(fieldName)) {
+                    CellValue cellValue = row.getCell(columns.indexOf(column));
+                    return cellValue;
+                }
+            }
+            
+            // Create available column names array for ColumnNotFoundException
+            String[] availableColumns = columns.stream()
+                .map(JfrTable.Column::name)
+                .toArray(String[]::new);
+            
+            throw new ColumnNotFoundException(fieldName, availableColumns, expression);
+        } else if (expression instanceof FunctionCallNode) {
+            FunctionCallNode funcCall = (FunctionCallNode) expression;
+            return evaluateFunctionCall(funcCall, row, columns);
+        } else if (expression instanceof CaseExpressionNode) {
+            return visitCaseExpression((CaseExpressionNode) expression, row, columns);
+        } else if (expression instanceof BinaryExpressionNode) {
+            BinaryExpressionNode binOp = (BinaryExpressionNode) expression;
+            Object left = evaluateExpressionInRowContext(binOp.left(), row, columns);
+            Object right = evaluateExpressionInRowContext(binOp.right(), row, columns);
+            BinaryOperator operator = binOp.operator();
+            
+            // Route to appropriate evaluator based on operator type
+            if (isComparisonOperator(operator)) {
+                // Convert Objects to CellValues for comparison
+                CellValue leftCell = CellValue.of(left);
+                CellValue rightCell = CellValue.of(right);
+                return evaluateComparison(operator, leftCell, rightCell);
+            } else {
+                return evaluateBinaryOperation(operator, left, right);
+            }
+        }
+        
+        throw ExpressionEvaluationException.forTypeConversionError(
+            "expression of type " + expression.getClass().getSimpleName(),
+            new CellValue.StringValue(expression.getClass().getName()),
+            "evaluable expression", 
+            null
+        );
+    }
+
+    /**
+     * Evaluates a condition in the context of a specific row
+     */
+    private boolean evaluateConditionForRow(JfrTable.Row row, ConditionNode condition, List<JfrTable.Column> columns) {
+        if (condition == null) {
+            return true;
+        }
+        
+        if (condition instanceof ExpressionConditionNode) {
+            ExpressionConditionNode exprCondition = (ExpressionConditionNode) condition;
+            Object result = evaluateExpressionInRowContext(exprCondition.expression(), row, columns);
+            
+            // Convert result to boolean
+            if (result instanceof Boolean) {
+                return (Boolean) result;
+            } else if (result instanceof Number) {
+                return ((Number) result).doubleValue() != 0.0;
+            } else if (result != null) {
+                return true; // Non-null values are truthy
+            } else {
+                return false; // Null is falsy
+            }
+        }
+        
+        // For other condition types, treat as true for now
+        return true;
+    }
+
+    /**
+     * Evaluates a function call in the context of a specific row
+     */
+    private Object evaluateFunctionCall(FunctionCallNode funcCall, JfrTable.Row row, List<JfrTable.Column> columns) {
+        String funcName = funcCall.functionName();
+        List<ExpressionNode> args = funcCall.arguments();
+        
+        // Check if the function exists in the registry
+        if (!functionRegistry.isFunction(funcName)) {
+            Set<String> availableFunctions = functionRegistry.getFunctionNames();
+            throw new UnknownFunctionException(funcName, availableFunctions, funcCall);
+        }
+        
+        // Check if this is an aggregate function being called in row context
+        if (functionRegistry.isAggregateFunction(funcName)) {
+            // For aggregate functions in row context, we need to handle them specially
+            // This can happen in contexts like COLLECT expressions or subqueries
+            
+            // Convert arguments to CellValues for evaluation
+            List<CellValue> argValues = new ArrayList<>();
+            for (ExpressionNode arg : args) {
+                Object argResult = evaluateExpressionInRowContext(arg, row, columns);
+                argValues.add(CellValue.of(argResult));
+            }
+            
+            try {
+                // Delegate to function registry with proper evaluation context
+                CellValue result = functionRegistry.evaluateFunction(funcName, argValues, evaluationContext);
+                return result.getValue();
+            } catch (Exception e) {
+                throw FunctionEvaluationException.forRuntimeError(
+                    funcName, argValues, 
+                    FunctionEvaluationException.FunctionContext.ROW_CONTEXT,
+                    funcCall, e
+                );
+            }
+        }
+        
+        // For non-aggregate functions, evaluate arguments and delegate to function registry
+        List<CellValue> argValues = new ArrayList<>();
+        for (ExpressionNode arg : args) {
+            Object argResult = evaluateExpressionInRowContext(arg, row, columns);
+            argValues.add(CellValue.of(argResult));
+        }
+        
+        try {
+            CellValue result = functionRegistry.evaluateFunction(funcName, argValues, evaluationContext);
+            return result.getValue();
+        } catch (Exception e) {
+            throw FunctionEvaluationException.forRuntimeError(
+                funcName, argValues, FunctionEvaluationException.FunctionContext.ROW_CONTEXT,
+                funcCall, e
+            );
+        }
+    }
     
     /**
-     * Perform fuzzy join using similarity matching
+     * Handles aggregate functions when called in row context.
+     * Delegates to the function registry's aggregate function implementations.
      */
-    private JfrTable performFuzzyJoin(JfrTable leftTable, FuzzyJoinSourceNode fuzzyJoin) {
-        // Get the right table data
+    private Object evaluateAggregateFunctionInRowContext(FunctionCallNode funcCall, JfrTable.Row row, List<JfrTable.Column> columns) {
+        // Aggregate functions should not be evaluated in row context.
+        // They should be handled at the query level through the function registry.
+        throw AggregationEvaluationException.forInvalidState(
+            funcCall.functionName(), 
+            "aggregate function cannot be evaluated in row context - use GROUP BY or SELECT aggregate",
+            AggregationEvaluationException.AggregationContext.SELECT_AGGREGATE,
+            funcCall
+        );
+    }
+
+    /**
+     * Evaluates a CASE expression in the context of a specific row
+     */
+    private Object visitCaseExpression(CaseExpressionNode caseExpr, JfrTable.Row row, List<JfrTable.Column> columns) {
+        // Check each WHEN clause
+        for (WhenClauseNode whenClause : caseExpr.whenClauses()) {
+            // Evaluate the condition as an expression and convert to boolean
+            Object conditionResult = evaluateExpressionInRowContext(whenClause.condition(), row, columns);
+            boolean matches = false;
+            if (conditionResult instanceof Boolean) {
+                matches = (Boolean) conditionResult;
+            } else if (conditionResult instanceof Number) {
+                matches = ((Number) conditionResult).doubleValue() != 0.0;
+            } else if (conditionResult != null) {
+                matches = true;
+            }
+            
+            if (matches) {
+                return evaluateExpressionInRowContext(whenClause.result(), row, columns);
+            }
+        }
+        
+        // If no WHEN clause matched, use ELSE clause or null
+        if (caseExpr.elseExpression() != null) {
+            return evaluateExpressionInRowContext(caseExpr.elseExpression(), row, columns);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Evaluates a binary operation
+     */
+    private Object evaluateBinaryOperation(BinaryOperator operator, Object left, Object right) {
+        if (left == null || right == null) {
+            return null;
+        }
+        
+        switch (operator) {
+            case ADD:
+                // Handle string concatenation first - check if either operand is a string type
+                boolean isStringOp = (left instanceof CellValue && ((CellValue) left).getType() == CellType.STRING) ||
+                                   (right instanceof CellValue && ((CellValue) right).getType() == CellType.STRING) ||
+                                   (left instanceof String) || (right instanceof String);
+                                   
+                if (isStringOp) {
+                    String leftStr = (left instanceof CellValue) ? left.toString() : left.toString();
+                    String rightStr = (right instanceof CellValue) ? right.toString() : right.toString();
+                    return leftStr + rightStr;
+                }
+                // For numeric operations, use CellValue type-preserving arithmetic
+                return performTypedArithmetic(left, right, operator);
+            case SUBTRACT:
+            case MULTIPLY:
+            case DIVIDE:
+            case MODULO:
+                // Use CellValue type-preserving arithmetic for all numeric operations
+                return performTypedArithmetic(left, right, operator);
+            case AND:
+                return FunctionUtils.convertToBoolean(left) && FunctionUtils.convertToBoolean(right);
+            case OR:
+                return FunctionUtils.convertToBoolean(left) || FunctionUtils.convertToBoolean(right);
+            default:
+                throw ExpressionEvaluationException.forTypeConversionError(
+                    "binary operation with operator " + operator,
+                    new CellValue.StringValue(operator.toString()),
+                    "supported binary operator", 
+                    null
+                );
+        }
+    }
+    
+    /**
+     * Performs typed arithmetic operations using CellValue's type-preserving system
+     */
+    private CellValue performTypedArithmetic(Object left, Object right, BinaryOperator operator) {
+        // Convert raw values to CellValues to leverage type-preserving arithmetic
+        CellValue leftValue = CellValue.of(left);
+        CellValue rightValue = CellValue.of(right);
+        
+        try {
+            // Use CellValue's sophisticated type-preserving binary operations
+            return leftValue.mapBinary(rightValue, operator);
+        } catch (Exception e) {
+            throw ExpressionEvaluationException.forArithmeticError(
+                operator + " operation", 
+                operator, 
+                leftValue, 
+                rightValue, 
+                null, 
+                e
+            );
+        }
+    }
+
+    /**
+     * Evaluates a comparison operation
+     */
+    private boolean evaluateComparison(BinaryOperator operator, CellValue left, CellValue right) {
+        if (left instanceof CellValue.NullValue && right instanceof CellValue.NullValue) {
+            return operator == BinaryOperator.EQUALS;
+        }
+        if (left instanceof CellValue.NullValue || right instanceof CellValue.NullValue) {
+            return operator == BinaryOperator.NOT_EQUALS;
+        }
+        
+        // Try numeric comparison first
+        if (left instanceof CellValue.NumberValue && right instanceof CellValue.NumberValue) {
+            double leftVal = ((CellValue.NumberValue) left).value();
+            double rightVal = ((CellValue.NumberValue) right).value();
+            
+            switch (operator) {
+                case EQUALS:
+                    return leftVal == rightVal;
+                case NOT_EQUALS:
+                    return leftVal != rightVal;
+                case LESS_THAN:
+                    return leftVal < rightVal;
+                case LESS_EQUAL:
+                    return leftVal <= rightVal;
+                case GREATER_THAN:
+                    return leftVal > rightVal;
+                case GREATER_EQUAL:
+                    return leftVal >= rightVal;
+                default:
+                    throw ExpressionEvaluationException.forTypeConversionError(
+                        "comparison operation with operator " + operator,
+                        new CellValue.StringValue(operator.toString()),
+                        "supported comparison operator", 
+                        null
+                    );
+            }
+        }
+        
+        // Use CellValue comparison for other types
+        int comparison = CellValue.compare(left, right);
+        
+        switch (operator) {
+            case EQUALS:
+                return comparison == 0;
+            case NOT_EQUALS:
+                return comparison != 0;
+            case LESS_THAN:
+                return comparison < 0;
+            case LESS_EQUAL:
+                return comparison <= 0;
+            case GREATER_THAN:
+                return comparison > 0;
+            case GREATER_EQUAL:
+                return comparison >= 0;
+            default:
+                throw ExpressionEvaluationException.forTypeConversionError(
+                    "comparison operation with operator " + operator,
+                    new CellValue.StringValue(operator.toString()),
+                    "supported comparison operator", 
+                    null
+                );
+        }
+    }
+
+    /**
+     * Checks if an operator is a comparison operator
+     */
+    private boolean isComparisonOperator(BinaryOperator operator) {
+        switch (operator) {
+            case EQUALS:
+            case NOT_EQUALS:
+            case LESS_THAN:
+            case GREATER_THAN:
+            case LESS_EQUAL:
+            case GREATER_EQUAL:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Missing methods implementation
+    
+    // Join methods - powered by optimized JoinProcessor
+    private JfrTable performInnerJoin(JfrTable left, JfrTable right, String leftField, String rightField) {
+        return joinProcessor.performInnerJoin(left, right, leftField, rightField);
+    }
+    
+    private JfrTable performLeftJoin(JfrTable left, JfrTable right, String leftField, String rightField) {
+        return joinProcessor.performLeftJoin(left, right, leftField, rightField);
+    }
+    
+    private JfrTable performRightJoin(JfrTable left, JfrTable right, String leftField, String rightField) {
+        return joinProcessor.performRightJoin(left, right, leftField, rightField);
+    }
+    
+    private JfrTable performFullJoin(JfrTable left, JfrTable right, String leftField, String rightField) {
+        return joinProcessor.performFullJoin(left, right, leftField, rightField);
+    }
+    
+    private JfrTable performFuzzyJoin(JfrTable left, FuzzyJoinSourceNode fuzzyJoin) {
+        // Get the right table
         SourceNode rightSource = new SourceNode(fuzzyJoin.source(), fuzzyJoin.alias(), fuzzyJoin.location());
         JfrTable rightTable = visitSource(rightSource);
         
-        // Create combined column list  
-        List<JfrTable.Column> resultColumns = new ArrayList<>(leftTable.getColumns());
-        for (JfrTable.Column rightCol : rightTable.getColumns()) {
-            String columnName = rightCol.name().equals(fuzzyJoin.joinField()) ? 
-                "right_" + rightCol.name() : rightCol.name();
-            resultColumns.add(new JfrTable.Column(columnName, rightCol.type()));
-        }
-        
-        JfrTable result = new JfrTable(resultColumns);
-        
-        // Evaluate threshold expression to get similarity threshold
-        double thresholdValue = 0.8; // Default threshold
-        if (fuzzyJoin.threshold() != null) {
-            JfrTable thresholdResult = fuzzyJoin.threshold().accept(this);
-            if (!thresholdResult.getRows().isEmpty() && !thresholdResult.getRows().get(0).getCells().isEmpty()) {
-                CellValue thresholdCell = thresholdResult.getRows().get(0).getCells().get(0);
-                if (thresholdCell instanceof CellValue.FloatValue floatVal) {
-                    thresholdValue = floatVal.value();
-                } else if (thresholdCell instanceof CellValue.NumberValue numberVal) {
-                    thresholdValue = numberVal.value();
-                }
-            }
-        }
-        
-        for (JfrTable.Row leftRow : leftTable.getRows()) {
-            CellValue leftJoinValue = getRowValueByColumnName(leftRow, leftTable.getColumns(), fuzzyJoin.joinField());
-            
-            for (JfrTable.Row rightRow : rightTable.getRows()) {
-                CellValue rightJoinValue = getRowValueByColumnName(rightRow, rightTable.getColumns(), fuzzyJoin.joinField());
-                
-                // Calculate similarity between join values
-                double similarity = calculateSimilarity(leftJoinValue, rightJoinValue);
-                
-                if (similarity >= thresholdValue) {
-                    // Create joined row
-                    List<CellValue> joinedCells = new ArrayList<>(leftRow.getCells());
-                    joinedCells.addAll(rightRow.getCells());
-                    result.addRow(new JfrTable.Row(joinedCells));
-                }
-            }
-        }
-        
-        return result;
+        // Use JoinProcessor for optimized fuzzy join execution
+        return joinProcessor.performFuzzyJoin(left, rightTable, fuzzyJoin);
     }
     
-    /**
-     * Perform standard join (delegates to appropriate optimized join method)
-     */
-    private JfrTable performStandardJoin(JfrTable leftTable, StandardJoinSourceNode standardJoin) {
+    private JfrTable performStandardJoin(JfrTable result, StandardJoinSourceNode standardJoin) {
         // Get the right table
         SourceNode rightSource = new SourceNode(standardJoin.source(), standardJoin.alias(), standardJoin.location());
         JfrTable rightTable = visitSource(rightSource);
         
-        // Delegate to optimized join methods with null WHERE clause
-        return switch (standardJoin.joinType()) {
-            case INNER -> performInnerJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), null);
-            case LEFT -> performLeftJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), null);
-            case RIGHT -> performRightJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), null);
-            case FULL -> performFullJoinOptimized(leftTable, rightTable, standardJoin.leftJoinField(), standardJoin.rightJoinField(), null);
-        };
+        // Use JoinProcessor for optimized standard join execution
+        return joinProcessor.performStandardJoin(result, rightTable, standardJoin);
     }
     
     /**
-     * Calculate similarity between two cell values for fuzzy matching
+     * Get join performance statistics and cache metrics
      */
-    private double calculateSimilarity(CellValue left, CellValue right) {
-        if (left == null || right == null) {
-            return 0.0;
-        }
-        
-        String leftStr = left.toString();
-        String rightStr = right.toString();
-        
-        if (leftStr.equals(rightStr)) {
-            return 1.0;
-        }
-        
-        // Simple string similarity using Levenshtein distance
-        int maxLen = Math.max(leftStr.length(), rightStr.length());
-        if (maxLen ==  0) {
-            return 1.0;
-        }
-        
-        int distance = levenshteinDistance(leftStr, rightStr);
-        return 1.0 - (double) distance / maxLen;
+    public Map<String, Object> getJoinPerformanceStats() {
+        return joinProcessor.getCacheStats();
     }
     
     /**
-     * Calculate Levenshtein distance between two strings
+     * Clear join index cache to free memory
      */
-    private int levenshteinDistance(String s1, String s2) {
-        int[][] dp = new int[s1.length() + 1][s2.length() + 1];
+    public void clearJoinCache() {
+        joinProcessor.clearCache();
+    }
+    
+    // View definition method
+    private void defineView(String viewName, QueryNode query) {
+        context.setView(viewName, query);
+    }
+    
+    // Group key building method
+    private String buildGroupKey(JfrTable.Row row, List<JfrTable.Column> columns, List<ExpressionNode> fields) {
+        return QueryEvaluatorUtils.buildGroupKey(row, columns, fields);
+    }
+    
+    // Aggregate function checking
+    private boolean isAggregateFunction(String functionName) {
+        return QueryEvaluatorUtils.isAggregateFunction(functionName.toLowerCase());
+    }
+    
+    // Aggregate value computation
+    public CellValue computeAggregateValue(FunctionCallNode functionCall, JfrTable groupTable) {
+        String functionName = functionCall.functionName();
+        List<ExpressionNode> arguments = functionCall.arguments();
         
-        for (int i = 0; i <= s1.length(); i++) {
-            dp[i][0] = i;
-        }
-        for (int j = 0; j <= s2.length(); j++) {
-            dp[0][j] = j;
-        }
-        
-        for (int i = 1; i <= s1.length(); i++) {
-            for (int j = 1; j <= s2.length(); j++) {
-                if (s1.charAt(i - 1) == s2.charAt(j - 1)) {
-                    dp[i][j] = dp[i - 1][j - 1];
+        // Special handling for COLLECT function - evaluate expression for each row
+        if ("COLLECT".equalsIgnoreCase(functionName)) {
+            if (arguments.isEmpty()) {
+                throw AggregationEvaluationException.forInvalidState(
+                    "COLLECT", "no arguments provided", 
+                    AggregationEvaluationException.AggregationContext.GROUP_BY, 
+                    functionCall
+                );
+            }
+            
+            ExpressionNode expr = arguments.get(0);
+            List<CellValue> collectedValues = new ArrayList<>();
+            
+            // Evaluate the expression for each row in the group
+            for (JfrTable.Row row : groupTable.getRows()) {
+                Object result = evaluateExpressionInRowContext(expr, row, groupTable.getColumns());
+                // If result is already a CellValue, use it directly to preserve type information
+                if (result instanceof CellValue cellValue) {
+                    collectedValues.add(cellValue);
                 } else {
-                    dp[i][j] = 1 + Math.min(Math.min(dp[i - 1][j], dp[i][j - 1]), dp[i - 1][j - 1]);
+                    collectedValues.add(CellValue.of(result));
                 }
             }
+            
+            return new CellValue.ArrayValue(collectedValues);
         }
         
-        return dp[s1.length()][s2.length()];
-    }
-    
-    /**
-     * Generate a cache key for a query node based on its structure
-     */
-    private String generateQueryCacheKey(QueryNode node) {
-        StringBuilder keyBuilder = new StringBuilder();
-        
-        // Include query structure in the key
-        keyBuilder.append("Q:");
-        keyBuilder.append(node.isExtended() ? "EXT:" : "BASIC:");
-        
-        // Add SELECT clause
-        if (node.select() != null) {
-            keyBuilder.append("SELECT:");
-            for (SelectItemNode item : node.select().items()) {
-                keyBuilder.append(extractExpressionKey(item.expression()));
-                if (item.alias() != null) {
-                    keyBuilder.append(" AS ").append(item.alias());
+        // Convert arguments to CellValues for other aggregate functions
+        List<CellValue> argValues = new ArrayList<>();
+        for (ExpressionNode arg : arguments) {
+            if (arg instanceof LiteralNode literal) {
+                argValues.add(literal.value());
+            } else if (arg instanceof IdentifierNode identifier) {
+                // Get column values from group table
+                String columnName = identifier.name();
+                List<CellValue> columnValues = new ArrayList<>();
+                for (JfrTable.Row row : groupTable.getRows()) {
+                    for (int i = 0; i < groupTable.getColumns().size(); i++) {
+                        if (groupTable.getColumns().get(i).name().equals(columnName)) {
+                            columnValues.add(row.getCell(i));
+                            break;
+                        }
+                    }
                 }
-                keyBuilder.append(",");
-            }
-        }
-        
-        // Add FROM clause
-        if (node.from() != null) {
-            keyBuilder.append("FROM:");
-            for (SourceNodeBase source : node.from().sources()) {
-                keyBuilder.append(extractSourceKey(source));
-                keyBuilder.append(",");
-            }
-        }
-        
-        // Add WHERE clause
-        if (node.where() != null) {
-            keyBuilder.append("WHERE:");
-            keyBuilder.append(extractConditionKey(node.where().condition()));
-        }
-        
-        // Add GROUP BY clause
-        if (node.groupBy() != null) {
-            keyBuilder.append("GROUP_BY:");
-            for (ExpressionNode expr : node.groupBy().fields()) {
-                keyBuilder.append(extractExpressionKey(expr));
-                keyBuilder.append(",");
-            }
-        }
-        
-        // Add HAVING clause
-        if (node.having() != null) {
-            keyBuilder.append("HAVING:");
-            keyBuilder.append(extractConditionKey(node.having().condition()));
-        }
-        
-        // Add ORDER BY clause
-        if (node.orderBy() != null) {
-            keyBuilder.append("ORDER_BY:");
-            for (OrderFieldNode field : node.orderBy().fields()) {
-                keyBuilder.append(extractExpressionKey(field.field()));
-                keyBuilder.append(":").append(field.order());
-                keyBuilder.append(",");
-            }
-        }
-        
-        // Add LIMIT clause
-        if (node.limit() != null) {
-            keyBuilder.append("LIMIT:").append(node.limit().limit());
-        }
-        
-        return keyBuilder.toString();
-    }
-    
-    /**
-     * Extract a key representation of an expression for caching
-     */
-    private String extractExpressionKey(ExpressionNode expr) {
-        if (expr instanceof IdentifierNode id) {
-            return "ID:" + id.name();
-        } else if (expr instanceof FieldAccessNode field) {
-            return "FIELD:" + (field.qualifier() != null ? field.qualifier() + "." : "") + field.field();
-        } else if (expr instanceof LiteralNode literal) {
-            return "LIT:" + literal.value().toString();
-        } else if (expr instanceof FunctionCallNode func) {
-            StringBuilder funcKey = new StringBuilder("FUNC:" + func.functionName() + "(");
-            for (ExpressionNode arg : func.arguments()) {
-                funcKey.append(extractExpressionKey(arg)).append(",");
-            }
-            funcKey.append(")");
-            return funcKey.toString();
-        } else if (expr instanceof BinaryExpressionNode binary) {
-            return "BIN:" + extractExpressionKey(binary.left()) + ":" + binary.operator() + ":" + extractExpressionKey(binary.right());
-        }
-        return expr.getClass().getSimpleName();
-    }
-    
-    /**
-     * Extract a key representation of a source for caching
-     */
-    private String extractSourceKey(SourceNodeBase source) {
-        if (source instanceof SourceNode src) {
-            return "SRC:" + src.source() + (src.alias() != null ? " AS " + src.alias() : "");
-        } else if (source instanceof SubquerySourceNode sub) {
-            // For subqueries, create a simplified cache key 
-            return "SUBQ:" + sub.query().hashCode() + (sub.alias() != null ? " AS " + sub.alias() : "");
-        } else if (source instanceof StandardJoinSourceNode join) {
-            return "JOIN:" + join.joinType() + ":" + join.source() + " ON " + join.leftJoinField() + "=" + join.rightJoinField();
-        } else if (source instanceof FuzzyJoinSourceNode fuzzy) {
-            return "FUZZY:" + fuzzy.joinType() + ":" + fuzzy.source() + " ON " + fuzzy.joinField();
-        }
-        return source.getClass().getSimpleName();
-    }
-    
-    /**
-     * Extract a key representation of a condition for caching
-     */
-    private String extractConditionKey(ConditionNode condition) {
-        if (condition instanceof ExpressionConditionNode exprCond) {
-            return "EXPR:" + extractExpressionKey(exprCond.expression());
-        } else if (condition instanceof WithinConditionNode within) {
-            return "WITHIN:" + within.toString(); // Simplified
-        }
-        return condition.getClass().getSimpleName();
-    }
-    
-    /**
-     * Extract query dependencies for cache invalidation
-     */
-    private Set<String> extractQueryDependencies(QueryNode node) {
-        Set<String> dependencies = new HashSet<>();
-        
-        // Extract table dependencies from FROM clause
-        if (node.from() != null) {
-            for (SourceNodeBase source : node.from().sources()) {
-                extractSourceDependencies(source, dependencies);
-            }
-        }
-        
-        // Extract variable dependencies from expressions
-        extractExpressionDependencies(node, dependencies);
-        
-        return dependencies;
-    }
-    
-    /**
-     * Extract dependencies from a source node
-     */
-    private void extractSourceDependencies(SourceNodeBase source, Set<String> dependencies) {
-        if (source instanceof SourceNode sourceNode) {
-            dependencies.add("table:" + sourceNode.source());
-        } else if (source instanceof SubquerySourceNode subquerySource) {
-            // Handle subquery dependencies - check if the statement is a QueryNode
-            if (subquerySource.query() instanceof QueryNode queryNode) {
-                dependencies.addAll(extractQueryDependencies(queryNode));
+                argValues.add(new CellValue.ArrayValue(columnValues));
+            } else if (arg instanceof FieldAccessNode fieldAccess) {
+                // Handle qualified field references like "i.innerValue"
+                String columnName = fieldAccess.field();
+                List<CellValue> columnValues = new ArrayList<>();
+                for (JfrTable.Row row : groupTable.getRows()) {
+                    for (int i = 0; i < groupTable.getColumns().size(); i++) {
+                        if (groupTable.getColumns().get(i).name().equals(columnName)) {
+                            columnValues.add(row.getCell(i));
+                            break;
+                        }
+                    }
+                }
+                argValues.add(new CellValue.ArrayValue(columnValues));
+            } else if (arg instanceof StarNode) {
+                // Handle COUNT(*) - pass the row count directly as a NumberValue
+                argValues.add(new CellValue.NumberValue(groupTable.getRowCount()));
             } else {
-                // For non-query statements, add a generic dependency
-                dependencies.add("subquery:" + subquerySource.query().hashCode());
+                // For other expression types, evaluate in the context of each row
+                List<CellValue> expressionValues = new ArrayList<>();
+                for (JfrTable.Row row : groupTable.getRows()) {
+                    Object result = evaluateExpressionInRowContext(arg, row, groupTable.getColumns());
+                    expressionValues.add(CellValue.of(result));
+                }
+                argValues.add(new CellValue.ArrayValue(expressionValues));
             }
-        } else if (source instanceof StandardJoinSourceNode joinSource) {
-            dependencies.add("table:" + joinSource.source());
-        } else if (source instanceof FuzzyJoinSourceNode fuzzyJoinSource) {
-            dependencies.add("table:" + fuzzyJoinSource.source());
+        }
+        
+        // Create a group-specific evaluation context that can provide getAllValues
+        AggregateFunctions.EvaluationContext groupContext = new AggregateFunctions.EvaluationContext(
+            // Reuse the same executors as the parent context
+            (rawQueryNode) -> evaluationContext.jfrQuery(rawQueryNode),
+            (queryNode, ctx) -> evaluationContext.extendedQuery(queryNode)
+        ) {
+            @Override
+            public List<CellValue> getAllValues(String fieldName) {
+                List<CellValue> values = new ArrayList<>();
+                for (JfrTable.Row row : groupTable.getRows()) {
+                    for (int i = 0; i < groupTable.getColumns().size(); i++) {
+                        if (groupTable.getColumns().get(i).name().equals(fieldName)) {
+                            values.add(row.getCell(i));
+                            break;
+                        }
+                    }
+                }
+                return values;
+            }
+            
+            @Override
+            public CellValue getFieldValue(String fieldName) {
+                // Return the first value for single-value access
+                List<CellValue> values = getAllValues(fieldName);
+                return values.isEmpty() ? new CellValue.NullValue() : values.get(0);
+            }
+        };
+        
+        try {
+            return functionRegistry.evaluateFunction(functionName, argValues, groupContext);
+        } catch (Exception e) {
+            // Extract group by fields if available
+            List<String> groupByFields = groupTable.getColumns().stream()
+                .map(JfrTable.Column::name)
+                .collect(Collectors.toList());
+            
+            throw AggregationEvaluationException.forGroupTableError(
+                functionName, groupTable, groupByFields, functionCall, e
+            );
         }
     }
     
     /**
-     * Extract dependencies from query expressions (variables, views, etc.)
+     * Variable access method with comprehensive scope resolution.
+     * 
+     * Resolves variables in the following order:
+     * 1. Local variables (execution context scope)
+     * 2. Global variables (engine scope)  
+     * 3. Lazy variables (deferred evaluation)
+     * 
+     * @param name the variable name to resolve
+     * @return the variable value, or null if not found
      */
-    private void extractExpressionDependencies(QueryNode node, Set<String> dependencies) {
-        // Extract from SELECT clause
-        if (node.select() != null) {
-            for (SelectItemNode item : node.select().items()) {
-                extractExpressionNodeDependencies(item.expression(), dependencies);
+    private Object getVariable(String name) {
+        // Check local variables first (execution context scope)
+        Object localValue = context.getLocalVariable(name);
+        if (localValue != null) {
+            return localValue;
+        }
+        
+        // Check global variables (engine scope)
+        Object globalValue = context.getVariable(name);
+        if (globalValue != null) {
+            return globalValue;
+        }
+        
+        // Check lazy variables (deferred evaluation)
+        LazyQuery lazyQuery = context.getLazyVariable(name);
+        if (lazyQuery != null) {
+            try {
+                // Evaluate lazy variable and cache result for performance
+                Object result = lazyQuery.evaluate();
+                // Cache the evaluated result as a global variable for future access
+                context.setVariable(name, result);
+                return result;
+            } catch (Exception e) {
+                // Log evaluation failure but don't crash - return null instead
+                if (context.isDebugMode()) {
+                    System.err.println("Failed to evaluate lazy variable '" + name + "': " + e.getMessage());
+                }
+                return null;
             }
         }
         
-        // Extract from WHERE clause
-        if (node.where() != null && node.where().condition() instanceof ExpressionConditionNode) {
-            ExpressionConditionNode exprCond = (ExpressionConditionNode) node.where().condition();
-            extractExpressionNodeDependencies(exprCond.expression(), dependencies);
-        }
-        
-        // Extract from HAVING clause
-        if (node.having() != null && node.having().condition() instanceof ExpressionConditionNode) {
-            ExpressionConditionNode exprCond = (ExpressionConditionNode) node.having().condition();
-            extractExpressionNodeDependencies(exprCond.expression(), dependencies);
-        }
-        
-        // Extract from GROUP BY clause
-        if (node.groupBy() != null) {
-            for (ExpressionNode expr : node.groupBy().fields()) {
-                extractExpressionNodeDependencies(expr, dependencies);
-            }
-        }
-        
-        // Extract from ORDER BY clause
-        if (node.orderBy() != null) {
-            for (OrderFieldNode field : node.orderBy().fields()) {
-                extractExpressionNodeDependencies(field.field(), dependencies);
-            }
-        }
-    }
-    
-    /**
-     * Extract dependencies from an expression node
-     */
-    private void extractExpressionNodeDependencies(ExpressionNode expr, Set<String> dependencies) {
-        if (expr instanceof IdentifierNode id) {
-            // Check if this is a variable or view reference
-            if (context.getVariable(id.name()) != null) {
-                dependencies.add("variable:" + id.name());
-            }
-            if (context.getView(id.name()) != null) {
-                dependencies.add("view:" + id.name());
-            }
-        } else if (expr instanceof FunctionCallNode func) {
-            // Extract dependencies from function arguments
-            for (ExpressionNode arg : func.arguments()) {
-                extractExpressionNodeDependencies(arg, dependencies);
-            }
-        } else if (expr instanceof BinaryExpressionNode binary) {
-            extractExpressionNodeDependencies(binary.left(), dependencies);
-            extractExpressionNodeDependencies(binary.right(), dependencies);
-        }
+        return null;
     }
 }

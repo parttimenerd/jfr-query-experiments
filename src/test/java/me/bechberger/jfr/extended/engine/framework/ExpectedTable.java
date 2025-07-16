@@ -49,6 +49,7 @@ public class ExpectedTable {
         String[] columnSpecs = headerLine.split("\\|");
         List<String> columnNames = new ArrayList<>();
         List<CellType> columnTypes = new ArrayList<>();
+        List<Boolean> hasExplicitType = new ArrayList<>();
 
         for (String columnSpec : columnSpecs) {
             String[] parts = columnSpec.trim().split("\\s+");
@@ -56,23 +57,50 @@ public class ExpectedTable {
                 throw new IllegalArgumentException("Column specification cannot be empty: " + columnSpec);
             }
             String columnName = parts[0];
-            // Default to STRING if no type specified
-            CellType columnType = parts.length > 1 ? TableParsingUtils.parseColumnType(parts[1]) : CellType.STRING;
+            boolean explicitType = parts.length > 1;
+            // Default to STRING if no type specified, but we'll try to infer from data
+            CellType columnType = explicitType ? TableParsingUtils.parseColumnType(parts[1]) : CellType.STRING;
             columnNames.add(columnName);
             columnTypes.add(columnType);
+            hasExplicitType.add(explicitType);
         }
 
-        // Parse data rows
-        List<List<Object>> expectedRows = new ArrayList<>();
+        // Parse data rows first to enable type inference
+        List<List<String>> rawRowValues = new ArrayList<>();
         for (int i = 1; i < lines.length; i++) {
             String line = lines[i].trim();
             if (line.isEmpty()) continue;
 
             String[] values = line.split("\\|");
+            List<String> rowStringValues = new ArrayList<>();
+            for (String value : values) {
+                rowStringValues.add(value.trim());
+            }
+            rawRowValues.add(rowStringValues);
+        }
+
+        // Infer types for columns without explicit types using first data row
+        if (!rawRowValues.isEmpty()) {
+            List<String> firstDataRow = rawRowValues.get(0);
+            for (int j = 0; j < columnTypes.size() && j < firstDataRow.size(); j++) {
+                if (!hasExplicitType.get(j)) {
+                    // Infer type from first data value
+                    String firstValue = firstDataRow.get(j);
+                    if (!firstValue.equalsIgnoreCase("null") && !firstValue.isEmpty()) {
+                        CellType inferredType = TableParsingUtils.inferColumnType(firstValue);
+                        columnTypes.set(j, inferredType);
+                    }
+                }
+            }
+        }
+
+        // Parse data rows with correct types
+        List<List<Object>> expectedRows = new ArrayList<>();
+        for (List<String> stringRow : rawRowValues) {
             List<Object> rowValues = new ArrayList<>();
-            for (int j = 0; j < values.length; j++) {
+            for (int j = 0; j < stringRow.size(); j++) {
                 String typeStr = columnTypes.size() > j ? columnTypes.get(j).name() : "STRING";
-                rowValues.add(TableParsingUtils.parseValue(values[j].trim(), typeStr));
+                rowValues.add(TableParsingUtils.parseValue(stringRow.get(j), typeStr));
             }
             expectedRows.add(rowValues);
         }
@@ -178,6 +206,26 @@ public class ExpectedTable {
             return true;
         }
 
+        // Handle string representation of arrays (when expected is a string that looks like an array)
+        if (expected instanceof String expectedStr && actual instanceof CellValue.ArrayValue arrayValue) {
+            // Try to parse the expected string as an array
+            if (expectedStr.startsWith("[") && expectedStr.endsWith("]")) {
+                try {
+                    Object parsedExpected = me.bechberger.jfr.extended.engine.framework.TableParsingUtils.parseArrayValue(expectedStr);
+                    if (parsedExpected instanceof List<?> expectedList) {
+                        return compareArrays(expectedList, arrayValue);
+                    }
+                } catch (Exception e) {
+                    // Failed to parse, continue with other comparisons
+                }
+            }
+        }
+
+        // Handle array comparisons
+        if (expected instanceof List<?> expectedList && actual instanceof CellValue.ArrayValue arrayValue) {
+            return compareArrays(expectedList, arrayValue);
+        }
+
         // Handle numeric comparisons with tolerance
         if (expected instanceof Number && actualValue instanceof Number) {
             double expectedDouble = ((Number) expected).doubleValue();
@@ -186,5 +234,21 @@ public class ExpectedTable {
         }
 
         return false;
+    }
+    
+    private boolean compareArrays(List<?> expectedList, CellValue.ArrayValue arrayValue) {
+        List<CellValue> actualElements = arrayValue.elements();
+        if (expectedList.size() != actualElements.size()) {
+            return false;
+        }
+        
+        for (int i = 0; i < expectedList.size(); i++) {
+            Object expectedElement = expectedList.get(i);
+            CellValue actualElement = actualElements.get(i);
+            if (!valuesEqual(expectedElement, actualElement)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

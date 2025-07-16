@@ -1,5 +1,7 @@
 package me.bechberger.jfr.extended.evaluator;
 
+import me.bechberger.jfr.extended.engine.exception.FunctionArgumentException;
+import me.bechberger.jfr.extended.engine.exception.QueryEvaluationException;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.ast.ASTNodes;
 import java.util.List;
@@ -109,6 +111,18 @@ public class AggregateFunctions {
         public void setGlobalVariable(String name, Object value) {
             globalVariables.put(name, value);
         }
+
+        /**
+         * Remove a variable from the current scope
+         */
+        public void removeVariable(String name) {
+            // Remove from current scope first
+            if (!variableStack.isEmpty()) {
+                variableStack.peek().remove(name);
+            }
+            // Also remove from global scope if present
+            globalVariables.remove(name);
+        }
         
         public CellValue getFieldValue(String fieldName) {
             throw new UnsupportedOperationException("Subclasses must implement getFieldValue");
@@ -177,6 +191,27 @@ public class AggregateFunctions {
         public List<List<CellValue>> query(String queryString) {
             throw new UnsupportedOperationException("Query parsing requires external parser - use QueryEvaluator.query() instead");
         }
+        
+        /**
+         * Evaluate an expression argument to get all values for aggregate functions.
+         * This method should handle qualified field references like "i.innerValue" properly.
+         * 
+         * @param argument The function argument (could be field reference, expression, etc.)
+         * @return List of values to be aggregated
+         */
+        public List<CellValue> evaluateExpressionForAggregation(CellValue argument) {
+            if (argument instanceof CellValue.ArrayValue arrayValue) {
+                // Already processed by QueryEvaluator - contains all values from the group
+                return arrayValue.elements();
+            } else if (argument instanceof CellValue.StringValue stringValue) {
+                // Legacy fallback: simple field name lookup
+                String fieldName = stringValue.getValue().toString();
+                return getAllValues(fieldName);
+            } else {
+                // Single value case
+                return List.of(argument);
+            }
+        }
     }
     
     /**
@@ -185,50 +220,59 @@ public class AggregateFunctions {
     public static record GcEvent(Object id, long timestamp) {
     }
     
+    /**
+     * Helper method to extract values from function arguments.
+     * Delegates to EvaluationContext to properly handle qualified field references and table aliases.
+     */
+    private static List<CellValue> extractValuesFromArguments(EvaluationContext context, List<CellValue> arguments) {
+        if (arguments.isEmpty()) {
+            return List.of();
+        }
+        
+        // Delegate to the context to handle the complexity of expression evaluation
+        return context.evaluateExpressionForAggregation(arguments.get(0));
+    }
+    
     static CellValue evaluateCount(EvaluationContext context, List<CellValue> arguments) {
         if (arguments.isEmpty()) {
-            // COUNT(*) - count all rows
-            return new CellValue.NumberValue(context.getAllValues("*").size());
-        } else {
-            // COUNT(field) - count non-null values
-            String fieldName = arguments.get(0).getValue().toString();
-            return new CellValue.NumberValue(context.getAllValues(fieldName).stream()
+            // COUNT(*) - should not happen as QueryEvaluator passes row count
+            return new CellValue.NumberValue(0L);
+        } else if (arguments.get(0) instanceof CellValue.NumberValue numberValue) {
+            // COUNT(*) - QueryEvaluator passes the row count directly
+            return numberValue;
+        } else if (arguments.get(0) instanceof CellValue.ArrayValue arrayValue) {
+            // COUNT(field) - count non-null values in the array
+            return new CellValue.NumberValue(arrayValue.elements().stream()
                     .filter(v -> !(v instanceof CellValue.NullValue))
                     .count());
+        } else {
+            // Single field value - treat as count of 1 if not null
+            return new CellValue.NumberValue(arguments.get(0) instanceof CellValue.NullValue ? 0L : 1L);
         }
     }
     
     static CellValue evaluateAvg(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("AVG requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("AVG", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = extractValuesFromArguments(context, arguments);
         
         return CellValue.mapDouble(values, doubles -> 
             doubles.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
     }
     
     static CellValue evaluateSum(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("SUM requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("SUM", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = extractValuesFromArguments(context, arguments);
         
         return CellValue.mapDouble(values, doubles -> 
             doubles.stream().mapToDouble(Double::doubleValue).sum());
     }
     
     static CellValue evaluateMin(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("MIN requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("MIN", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = extractValuesFromArguments(context, arguments);
         
         CellValue min = null;
         
@@ -244,12 +288,9 @@ public class AggregateFunctions {
     }
     
     static CellValue evaluateMax(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("MAX requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("MAX", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = extractValuesFromArguments(context, arguments);
         
         CellValue max = null;
         
@@ -265,68 +306,53 @@ public class AggregateFunctions {
     }
     
     static CellValue evaluatePercentile(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new RuntimeException("PERCENTILE requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("PERCENTILE", arguments, 2);
         
         double percentile = arguments.get(0).extractNumericValue();
-        String fieldName = arguments.get(1).getValue().toString();
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(1));
         
-        return calculatePercentile(context.getAllValues(fieldName), percentile);
+        return calculatePercentile(values, percentile);
     }
     
     static CellValue evaluateP99(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("P99 requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("P99", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        return calculatePercentile(context.getAllValues(fieldName), 99.0);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return calculatePercentile(values, 99.0);
     }
     
     static CellValue evaluateP95(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("P95 requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("P95", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        return calculatePercentile(context.getAllValues(fieldName), 95.0);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return calculatePercentile(values, 95.0);
     }
     
     static CellValue evaluateP90(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("P90 requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("P90", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        return calculatePercentile(context.getAllValues(fieldName), 90.0);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return calculatePercentile(values, 90.0);
     }
     
     static CellValue evaluateP50(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("P50 requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("P50", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        return calculatePercentile(context.getAllValues(fieldName), 50.0);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return calculatePercentile(values, 50.0);
     }
     
     static CellValue evaluateP999(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("P999 requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("P999", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        return calculatePercentile(context.getAllValues(fieldName), 99.9);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return calculatePercentile(values, 99.9);
     }
     
     static CellValue evaluateStddev(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("STDDEV requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("STDDEV", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
         
         // First calculate mean
         double sum = 0.0;
@@ -356,12 +382,9 @@ public class AggregateFunctions {
     }
     
     static CellValue evaluateVariance(EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("VARIANCE requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("VARIANCE", arguments, 1);
         
-        String fieldName = arguments.get(0).getValue().toString();
-        List<CellValue> values = context.getAllValues(fieldName);
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
         
         return CellValue.mapDouble(values, doubles -> {
             if (doubles.isEmpty()) return 0.0;
@@ -418,5 +441,19 @@ public class AggregateFunctions {
         
         // For non-numeric values, return the lower value
         return lowerValue;
+    }
+    
+    /**
+     * COLLECT aggregate function - collect all values of an expression in the group into an array
+     * 
+     * @param context The evaluation context containing grouped data
+     * @param arguments List containing the field name to collect
+     * @return CellValue.ArrayValue containing all values from the group
+     */
+    static CellValue evaluateCollect(EvaluationContext context, List<CellValue> arguments) {
+        FunctionUtils.assertArgumentRange("COLLECT", arguments, 1, 2);
+        
+        List<CellValue> values = context.evaluateExpressionForAggregation(arguments.get(0));
+        return new CellValue.ArrayValue(values);
     }
 }

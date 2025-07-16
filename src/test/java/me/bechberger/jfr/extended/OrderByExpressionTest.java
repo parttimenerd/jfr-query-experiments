@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class OrderByExpressionTest {
 
-    private Parser createParser(String query) throws Lexer.LexerException {
+    private Parser createParser(String query) throws LexerException {
         Lexer lexer = new Lexer(query);
         return new Parser(lexer.tokenize());
     }

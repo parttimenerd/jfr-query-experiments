@@ -2,6 +2,7 @@ package me.bechberger.jfr.extended.evaluator;
 
 import java.util.List;
 import me.bechberger.jfr.extended.table.CellValue;
+import me.bechberger.jfr.extended.engine.exception.QueryEvaluationException;
 
 /**
  * Static methods for evaluating mathematical functions.
@@ -10,190 +11,154 @@ import me.bechberger.jfr.extended.table.CellValue;
 public class MathematicalFunctions {
     
     static CellValue evaluateAbs(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("ABS function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("ABS", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("ABS", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("ABS function requires a numeric argument");
-        }
-        
-        return arg.mapNumeric(Math::abs);
+        return numberValue.mapNumeric(Math::abs);
     }
     
     static CellValue evaluateCeil(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("CEIL function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("CEIL", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("CEIL", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("CEIL function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.ceil(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::ceil);
     }
     
     static CellValue evaluateFloor(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("FLOOR function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("FLOOR", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("FLOOR", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("FLOOR function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.floor(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::floor);
     }
     
     static CellValue evaluateRound(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("ROUND function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentRange("ROUND", arguments, 1, 2);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("ROUND", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("ROUND function requires a numeric argument");
+        if (arguments.size() == 1) {
+            // Single argument: round to nearest integer
+            return numberValue.mapNumeric(value -> (double) Math.round(value));
+        } else {
+            // Two arguments: round to specified decimal places
+            CellValue.NumberValue placesValue = FunctionUtils.getNumberArgument("ROUND", arguments, 1);
+            
+            int decimalPlaces = (int) placesValue.extractNumericValue();
+            double multiplier = Math.pow(10, decimalPlaces);
+            return numberValue.mapNumeric(value -> Math.round(value * multiplier) / multiplier);
         }
-        
-        return new CellValue.NumberValue(Math.round(arg.extractNumericValue()));
     }
     
     static CellValue evaluateSqrt(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("SQRT function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("SQRT", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("SQRT", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("SQRT function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.sqrt(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::sqrt);
     }
     
     static CellValue evaluatePow(List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new IllegalArgumentException("POW function requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("POW", arguments, 2);
+        CellValue.NumberValue baseValue = FunctionUtils.getNumberArgument("POW", arguments, 0);
+        CellValue.NumberValue exponentValue = FunctionUtils.getNumberArgument("POW", arguments, 1);
         
-        CellValue base = arguments.get(0);
-        CellValue exponent = arguments.get(1);
-        
-        if (!base.isNumeric() || !exponent.isNumeric()) {
-            throw new IllegalArgumentException("POW function requires numeric arguments");
-        }
-        
-        return new CellValue.NumberValue(Math.pow(base.extractNumericValue(), exponent.extractNumericValue()));
+        return baseValue.mapNumeric(base -> Math.pow(base, exponentValue.extractNumericValue()));
     }
     
     static CellValue evaluateMod(List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new IllegalArgumentException("MOD function requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("MOD", arguments, 2);
+        CellValue.NumberValue dividendValue = FunctionUtils.getNumberArgument("MOD", arguments, 0);
+        CellValue.NumberValue divisorValue = FunctionUtils.getNumberArgument("MOD", arguments, 1);
         
-        CellValue dividend = arguments.get(0);
-        CellValue divisor = arguments.get(1);
-        
-        if (!dividend.isNumeric() || !divisor.isNumeric()) {
-            throw new IllegalArgumentException("MOD function requires numeric arguments");
-        }
-        
-        return new CellValue.NumberValue(dividend.extractNumericValue() % divisor.extractNumericValue());
+        return dividendValue.mapNumeric(dividend -> dividend % divisorValue.extractNumericValue());
     }
     
     static CellValue evaluateLog(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("LOG function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("LOG", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("LOG", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("LOG function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.log(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::log);
     }
     
     static CellValue evaluateLog10(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("LOG10 function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("LOG10", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("LOG10", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("LOG10 function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.log10(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::log10);
     }
     
     static CellValue evaluateExp(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("EXP function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("EXP", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("EXP", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("EXP function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.exp(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::exp);
     }
     
     static CellValue evaluateSin(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("SIN function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("SIN", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("SIN", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("SIN function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.sin(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::sin);
     }
     
     static CellValue evaluateCos(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("COS function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("COS", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("COS", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("COS function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.cos(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::cos);
     }
     
     static CellValue evaluateTan(List<CellValue> arguments) {
-        if (arguments.size() != 1) {
-            throw new IllegalArgumentException("TAN function requires exactly 1 argument");
-        }
+        FunctionUtils.assertArgumentCount("TAN", arguments, 1);
+        CellValue.NumberValue numberValue = FunctionUtils.getNumberArgument("TAN", arguments, 0);
         
-        CellValue arg = arguments.get(0);
-        if (!arg.isNumeric()) {
-            throw new IllegalArgumentException("TAN function requires a numeric argument");
-        }
-        
-        return new CellValue.NumberValue(Math.tan(arg.extractNumericValue()));
+        return numberValue.mapNumeric(Math::tan);
     }
     
     // Mathematical functions for multiple values/arrays
     static CellValue evaluateMinMultiple(List<CellValue> arguments) {
-        if (arguments.isEmpty()) throw new IllegalArgumentException("MIN requires at least one argument");
+        FunctionUtils.assertAtLeastArguments("MIN", arguments, 1);
         
         return CellValue.mapDouble(arguments, doubles -> 
             doubles.stream().mapToDouble(Double::doubleValue).min().orElse(0.0));
     }
     
     static CellValue evaluateMaxMultiple(List<CellValue> arguments) {
-        if (arguments.isEmpty()) throw new IllegalArgumentException("MAX requires at least one argument");
+        FunctionUtils.assertAtLeastArguments("MAX", arguments, 1);
         
         return CellValue.mapDouble(arguments, doubles -> 
             doubles.stream().mapToDouble(Double::doubleValue).max().orElse(0.0));
+    }
+    
+    /**
+     * CLAMP function constrains a value between a minimum and maximum.
+     * Usage: CLAMP(min, max, value)
+     * Returns: min if value < min, max if value > max, otherwise value
+     */
+    static CellValue evaluateClamp(List<CellValue> arguments) {
+        FunctionUtils.assertArgumentCount("CLAMP", arguments, 3);
+        CellValue.NumberValue minValue = FunctionUtils.getNumberArgument("CLAMP", arguments, 0);
+        CellValue.NumberValue maxValue = FunctionUtils.getNumberArgument("CLAMP", arguments, 1);
+        CellValue.NumberValue valueValue = FunctionUtils.getNumberArgument("CLAMP", arguments, 2);
+        
+        double min = minValue.extractNumericValue();
+        double max = maxValue.extractNumericValue();
+        double value = valueValue.extractNumericValue();
+        
+        if (min > max) {
+            throw new QueryEvaluationException("CLAMP function validation", 
+                String.format("min=%f, max=%f", min, max), 
+                QueryEvaluationException.EvaluationErrorType.INVALID_STATE, null);
+        }
+        
+        double clampedValue;
+        if (value < min) {
+            clampedValue = min;
+        } else if (value > max) {
+            clampedValue = max;
+        } else {
+            clampedValue = value;
+        }
+        
+        // Preserve the original value's type while applying the clamping
+        return valueValue.mapNumeric(x -> clampedValue);
     }
 }

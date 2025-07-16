@@ -115,7 +115,7 @@ public class FunctionRegistryTest {
         
         // Test that mathematical functions are registered
         String[] mathFunctions = {"ABS", "CEIL", "FLOOR", "ROUND", "SQRT", "POW", "MOD", 
-                                  "LOG", "LOG10", "EXP", "SIN", "COS", "TAN"};
+                                  "LOG", "LOG10", "EXP", "SIN", "COS", "TAN", "CLAMP"};
         
         for (String funcName : mathFunctions) {
             assertTrue(registry.isFunction(funcName), funcName + " should be registered");
@@ -165,10 +165,10 @@ public class FunctionRegistryTest {
         
         // Test that mathematical functions are correctly categorized
         var mathFunctions = registry.getFunctionsByType(FunctionRegistry.FunctionType.MATHEMATICAL);
-        assertTrue(mathFunctions.size() >= 13, "Should have mathematical functions");
+        assertTrue(mathFunctions.size() >= 14, "Should have mathematical functions");
         
         String[] expectedMathFunctions = {"ABS", "CEIL", "FLOOR", "ROUND", "SQRT", "POW", "MOD", 
-                                          "LOG", "LOG10", "EXP", "SIN", "COS", "TAN"};
+                                          "LOG", "LOG10", "EXP", "SIN", "COS", "TAN", "CLAMP"};
         
         for (String funcName : expectedMathFunctions) {
             boolean hasFunction = mathFunctions.stream().anyMatch(f -> f.name().equals(funcName));
@@ -208,7 +208,8 @@ public class FunctionRegistryTest {
         "EXP, MATHEMATICAL",
         "SIN, MATHEMATICAL",
         "COS, MATHEMATICAL",
-        "TAN, MATHEMATICAL"
+        "TAN, MATHEMATICAL",
+        "CLAMP, MATHEMATICAL"
     })
     void testFunctionTypeAndRegistration(String functionName, String typeName) {
         FunctionRegistry registry = FunctionRegistry.getInstance();
@@ -238,5 +239,26 @@ public class FunctionRegistryTest {
         FunctionRegistry.FunctionDefinition def = registry.getFunction(token);
         assertNotNull(def, token + " function definition should exist");
         assertEquals(FunctionRegistry.FunctionType.valueOf(typeName), def.type());
+    }
+    
+    @Test
+    void testClampFunction() {
+        FunctionRegistry registry = FunctionRegistry.getInstance();
+        
+        // Test basic CLAMP functionality
+        assertTrue(registry.isFunction("CLAMP"), "CLAMP should be registered");
+        assertTrue(registry.isFunction("clamp"), "clamp should be registered (case insensitive)");
+        
+        // Test function definition
+        FunctionRegistry.FunctionDefinition def = registry.getFunction("CLAMP");
+        assertNotNull(def, "CLAMP definition should exist");
+        assertEquals("CLAMP", def.name());
+        assertEquals(FunctionRegistry.FunctionType.MATHEMATICAL, def.type());
+        
+        // Test that parameters are correctly defined
+        assertEquals(3, def.parameters().size(), "CLAMP should have 3 parameters");
+        assertEquals("min", def.parameters().get(0).name());
+        assertEquals("max", def.parameters().get(1).name());
+        assertEquals("value", def.parameters().get(2).name());
     }
 }

@@ -6,6 +6,7 @@ import me.bechberger.jfr.extended.Token;
 import me.bechberger.jfr.extended.ast.ASTNodes.*;
 import me.bechberger.jfr.extended.table.JfrTable;
 import me.bechberger.jfr.extended.table.CellType;
+import me.bechberger.jfr.extended.table.SingleCellTable;
 
 import java.util.*;
 
@@ -25,18 +26,14 @@ import java.util.*;
  */
 public class QueryTestFramework {
     
-    private final QueryEvaluator evaluator;
+    private final me.bechberger.jfr.extended.engine.QueryEvaluator evaluator;
     private final MockRawJfrQueryExecutor mockExecutor;
     private final Map<String, JfrTable> mockTables = new HashMap<>();
     private final Map<String, Object> sessionVariables = new HashMap<>();
     
     public QueryTestFramework() {
         this.mockExecutor = new MockRawJfrQueryExecutor();
-        this.evaluator = new QueryEvaluator(mockExecutor);
-        
-        // Set up execution context with debug mode enabled for cache testing
-        ExecutionContext context = new ExecutionContext(true);
-        evaluator.setContext(context);
+        this.evaluator = new me.bechberger.jfr.extended.engine.QueryEvaluator(mockExecutor);
         
         setupDefaultMockTables();
     }
@@ -159,42 +156,54 @@ public class QueryTestFramework {
         return new TableBuilder(tableName, this);
     }
     
+    // ================= SINGLE CELL TABLE UTILITIES =================
+    
     /**
-     * Unified mock table creation method that automatically detects the format.
-     * 
-     * Supports multiple formats:
-     * 1. Multi-line with pipe separators (auto type inference):
-     *    "name | age | score\nAlice | 25 | 95.5\nBob | 30 | 87.2"
-     * 
-     * 2. Multi-line with explicit types:
-     *    "name STRING | age NUMBER | score FLOAT\nAlice | 25 | 95.5\nBob | 30 | 87.2"
-     * 
-     * 3. Single-line with semicolon separators:
-     *    "name age score; Alice 25 95.5; Bob 30 87.2"
-     * 
-     * 4. Single-line with explicit types (prefixed with table name):
-     *    "TableName: name STRING age NUMBER; Alice 25; Bob 30"
+     * Create an optimized single-cell table with a default column name.
+     * This is more efficient than creating a full JfrTable for single values.
      */
-    public QueryTestFramework createTable(String tableName, String tableSpec) {
-        tableSpec = tableSpec.trim();
-        
-        // Check if it's a single-line format with explicit types (contains colon)
-        if (tableSpec.contains(":") && !tableSpec.contains("\n")) {
-            return mockTableWithTypes(tableSpec);
-        }
-        
-        // Check if it's a single-line format with semicolons
-        if (tableSpec.contains(";") && !tableSpec.contains("\n")) {
-            return mockTableSingleLine(tableName, tableSpec);
-        }
-        
-        // Check if it's multi-line format with explicit types
-        if (tableSpec.contains("\n") && containsExplicitTypes(tableSpec)) {
-            return mockTableMultiLine(tableName, tableSpec);
-        }
-        
-        // Default: multi-line format with automatic type inference
-        return mockTable(tableName, tableSpec);
+    public QueryTestFramework createSingleCellTable(String tableName, Object value) {
+        SingleCellTable table = SingleCellTable.of(value);
+        registerTable(tableName, table);
+        return this;
+    }
+    
+    /**
+     * Create a single-cell table with a specified column name and value.
+     * This replaces the manual pattern:
+     *   JfrTable singleRowTable = new StandardJfrTable(List.of(new JfrTable.Column("temp", CellType.STRING)));
+     *   singleRowTable.addRow(row);
+     * 
+     * With the optimized:
+     *   createSingleCellTable("MyTable", "temp", value);
+     */
+    public QueryTestFramework createSingleCellTable(String tableName, String columnName, Object value) {
+        SingleCellTable table = SingleCellTable.of(columnName, value);
+        registerTable(tableName, table);
+        return this;
+    }
+    
+
+    
+    /**
+     * Create a temporary single-cell table with "temp" column name - commonly used in tests.
+     */
+    public QueryTestFramework createTempSingleCell(Object value) {
+        return createSingleCellTable("temp", "temp", value);
+    }
+    
+    /**
+     * Create a single-cell table for testing default/empty results.
+     */
+    public QueryTestFramework createDefaultResult(String tableName) {
+        return createSingleCellTable(tableName, "default", "");
+    }
+    
+    /**
+     * Create a single-cell table for testing empty results.
+     */
+    public QueryTestFramework createEmptyResult(String tableName) {
+        return createSingleCellTable(tableName, "empty", "");
     }
     
     /**
@@ -429,6 +438,46 @@ public class QueryTestFramework {
         return builder.build();
     }
     
+    // ================= UNIFIED TABLE CREATION =================
+    
+    /**
+     * Unified mock table creation method that automatically detects the format.
+     * 
+     * Supports multiple formats:
+     * 1. Multi-line with pipe separators (auto type inference):
+     *    "name | age | score\nAlice | 25 | 95.5\nBob | 30 | 87.2"
+     * 
+     * 2. Multi-line with explicit types:
+     *    "name STRING | age NUMBER | score FLOAT\nAlice | 25 | 95.5\nBob | 30 | 87.2"
+     * 
+     * 3. Single-line with semicolon separators:
+     *    "name age score; Alice 25 95.5; Bob 30 87.2"
+     * 
+     * 4. Single-line with explicit types (prefixed with table name):
+     *    "TableName: name STRING age NUMBER; Alice 25; Bob 30"
+     */
+    public QueryTestFramework createTable(String tableName, String tableSpec) {
+        tableSpec = tableSpec.trim();
+        
+        // Check if it's a single-line format with explicit types (contains colon)
+        if (tableSpec.contains(":") && !tableSpec.contains("\n")) {
+            return mockTableWithTypes(tableSpec);
+        }
+        
+        // Check if it's a single-line format with semicolons
+        if (tableSpec.contains(";") && !tableSpec.contains("\n")) {
+            return mockTableSingleLine(tableName, tableSpec);
+        }
+        
+        // Check if it's multi-line format with explicit types
+        if (tableSpec.contains("\n") && containsExplicitTypes(tableSpec)) {
+            return mockTableMultiLine(tableName, tableSpec);
+        }
+        
+        // Default: multi-line format with automatic type inference
+        return mockTable(tableName, tableSpec);
+    }
+    
     /**
      * Simple expression parser for testing (just parses literals)
      */
@@ -513,6 +562,102 @@ public class QueryTestFramework {
     }
     
     // ================= HELPER METHODS FOR TESTING =================
+    
+    /**
+     * Create a single-value result table for testing aggregation results.
+     * This is optimized for cases where you need to test queries that return a single value.
+     * 
+     * Example: createSingleValueResult("count", 42) creates a table with one column "count" and value 42
+     */
+    public QueryTestFramework createSingleValueResult(String tableName, String columnName, Object value) {
+        return createSingleCellTable(tableName, columnName, value);
+    }
+    
+    /**
+     * Create a single numeric result for testing mathematical operations.
+     */
+    public QueryTestFramework createNumericResult(String tableName, double value) {
+        return createSingleCellTable(tableName, "result", value);
+    }
+    
+    /**
+     * Create a single string result for testing string operations.
+     */
+    public QueryTestFramework createStringResult(String tableName, String value) {
+        return createSingleCellTable(tableName, "result", value);
+    }
+    
+    /**
+     * Create a single boolean result for testing boolean operations.
+     */
+    public QueryTestFramework createBooleanResult(String tableName, boolean value) {
+        return createSingleCellTable(tableName, "result", value);
+    }
+    
+    // ================= OPTIMIZED SINGLE-CELL TABLE FACTORY =================
+    
+    /**
+     * Factory for creating optimized single-cell tables with commonly used patterns.
+     * This replaces manual JfrTable creation for single values:
+     * 
+     * Instead of:
+     *   JfrTable singleRowTable = new StandardJfrTable(List.of(new JfrTable.Column("temp", CellType.STRING)));
+     *   singleRowTable.addRow(row);
+     * 
+     * Use:
+     *   SingleCellFactory.temp(value);
+     */
+    public static class SingleCellFactory {
+        
+        /**
+         * Create a single-cell table with "temp" column name - commonly used for temporary results.
+         */
+        public static SingleCellTable temp(Object value) {
+            return SingleCellTable.of("temp", value);
+        }
+        
+        /**
+         * Create a single-cell table with "value" column name - commonly used for expression results.
+         */
+        public static SingleCellTable value(Object value) {
+            return SingleCellTable.of("value", value);
+        }
+        
+        /**
+         * Create a single-cell table with "result" column name - commonly used for function results.
+         */
+        public static SingleCellTable result(Object value) {
+            return SingleCellTable.of("result", value);
+        }
+        
+        /**
+         * Create a single-cell table with "count" column name - commonly used for count aggregations.
+         */
+        public static SingleCellTable count(long value) {
+            return SingleCellTable.of("count", value);
+        }
+        
+        /**
+         * Create a single-cell table with "sum" column name - commonly used for sum aggregations.
+         */
+        public static SingleCellTable sum(double value) {
+            return SingleCellTable.of("sum", value);
+        }
+        
+        /**
+         * Create a single-cell table with "avg" column name - commonly used for average aggregations.
+         */
+        public static SingleCellTable avg(double value) {
+            return SingleCellTable.of("avg", value);
+        }
+        
+        /**
+         * Create a single-cell table with custom column name.
+         */
+        public static SingleCellTable custom(String columnName, Object value) {
+            return SingleCellTable.of(columnName, value);
+        }
+    }
     
     /**
      * Helper method to execute a query and validate it succeeded

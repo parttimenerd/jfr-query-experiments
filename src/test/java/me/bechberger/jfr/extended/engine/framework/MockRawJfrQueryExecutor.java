@@ -3,6 +3,7 @@ package me.bechberger.jfr.extended.engine.framework;
 import me.bechberger.jfr.extended.engine.RawJfrQueryExecutor;
 import me.bechberger.jfr.extended.ast.ASTNodes.RawJfrQueryNode;
 import me.bechberger.jfr.extended.table.JfrTable;
+import me.bechberger.jfr.extended.table.StandardJfrTable;
 import me.bechberger.jfr.extended.table.CellValue;
 
 import java.util.*;
@@ -89,7 +90,7 @@ public class MockRawJfrQueryExecutor implements RawJfrQueryExecutor {
             return table; // Fallback to all columns if none found
         }
         
-        JfrTable result = new JfrTable(selectedColumns);
+        JfrTable result = new StandardJfrTable(selectedColumns);
         for (JfrTable.Row row : table.getRows()) {
             List<CellValue> selectedCells = new ArrayList<>();
             for (int index : columnIndices) {
@@ -128,7 +129,7 @@ public class MockRawJfrQueryExecutor implements RawJfrQueryExecutor {
         });
         
         // Build new table with sorted rows
-        JfrTable result = new JfrTable(table.getColumns());
+        JfrTable result = new StandardJfrTable(table.getColumns());
         for (JfrTable.Row row : sortedRows) {
             result.addRow(row);
         }
@@ -229,7 +230,7 @@ public class MockRawJfrQueryExecutor implements RawJfrQueryExecutor {
         }
         
         // Create a new table with limited rows
-        JfrTable result = new JfrTable(table.getColumns());
+        JfrTable result = new StandardJfrTable(table.getColumns());
         for (int i = 0; i < limit && i < table.getRows().size(); i++) {
             result.addRow(table.getRows().get(i));
         }

@@ -535,7 +535,7 @@ class SquareBracketSyntaxTest {
         }, "Should throw an exception for " + description);
         
         // Verify the exception type is either ParserException or LexerException
-        assertTrue(thrown instanceof me.bechberger.jfr.extended.ParserException || thrown instanceof Lexer.LexerException,
+        assertTrue(thrown instanceof me.bechberger.jfr.extended.ParserException || thrown instanceof LexerException,
             "Expected ParserException or LexerException, but got: " + thrown.getClass().getName());
     }
 

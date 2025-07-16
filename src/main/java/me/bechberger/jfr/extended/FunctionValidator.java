@@ -1,5 +1,6 @@
 package me.bechberger.jfr.extended;
 
+import me.bechberger.jfr.extended.engine.util.StringSimilarity;
 import me.bechberger.jfr.extended.evaluator.FunctionRegistry;
 
 import java.util.Set;
@@ -52,18 +53,7 @@ public class FunctionValidator {
         Set<String> functionNames = registry.getFunctionNames();
         
         // Simple suggestion logic - find closest match by name similarity
-        String bestMatch = null;
-        int bestDistance = Integer.MAX_VALUE;
-        
-        for (String availableFunction : functionNames) {
-            int distance = levenshteinDistance(funcName.toUpperCase(), availableFunction.toUpperCase());
-            if (distance < bestDistance && distance <= 3) { // Allow up to 3 character differences
-                bestDistance = distance;
-                bestMatch = availableFunction;
-            }
-        }
-        
-        return bestMatch;
+        return StringSimilarity.findClosestMatch(funcName, functionNames, 3, true);
     }
     
     /**
@@ -111,28 +101,5 @@ public class FunctionValidator {
         } else {
             return "Function '" + funcName + "' does not exist.";
         }
-    }
-    
-    /**
-     * Calculate Levenshtein distance between two strings for function name suggestions
-     */
-    private int levenshteinDistance(String a, String b) {
-        int[][] dp = new int[a.length() + 1][b.length() + 1];
-        
-        for (int i = 0; i <= a.length(); i++) {
-            for (int j = 0; j <= b.length(); j++) {
-                if (i == 0) {
-                    dp[i][j] = j;
-                } else if (j == 0) {
-                    dp[i][j] = i;
-                } else if (a.charAt(i - 1) == b.charAt(j - 1)) {
-                    dp[i][j] = dp[i - 1][j - 1];
-                } else {
-                    dp[i][j] = 1 + Math.min(dp[i - 1][j - 1], Math.min(dp[i - 1][j], dp[i][j - 1]));
-                }
-            }
-        }
-        
-        return dp[a.length()][b.length()];
     }
 }

@@ -333,6 +333,11 @@ public sealed interface CellValue permits
      * Duration cell value
      */
     record DurationValue(Duration value) implements CellValue {
+
+        public DurationValue(long millis) {
+            this(Duration.ofMillis(millis));
+        }
+
         @Override
         public Object getValue() { return value; }
         
@@ -701,6 +706,7 @@ public sealed interface CellValue permits
      */
     static CellValue of(Object value) {
         if (value == null) return new NullValue();
+        if (value instanceof CellValue cv) return cv; // Return CellValue as-is
         if (value instanceof String s) return new StringValue(s);
         if (value instanceof Integer i) return new NumberValue(i.longValue());
         if (value instanceof Long l) return new NumberValue(l);

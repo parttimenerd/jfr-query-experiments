@@ -6,8 +6,12 @@ import jdk.jfr.consumer.RecordingFile;
 import jdk.jfr.consumer.EventStream;
 import me.bechberger.jfr.extended.ast.ASTNodes.RawJfrQueryNode;
 import me.bechberger.jfr.extended.table.JfrTable;
+import me.bechberger.jfr.extended.table.StandardJfrTable;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.table.CellType;
+import me.bechberger.jfr.extended.table.SingleCellTable;
+import me.bechberger.jfr.extended.engine.exception.QueryExecutorException;
+import me.bechberger.jfr.extended.engine.exception.SourceTableException;
 import me.bechberger.jfr.query.Configuration;
 import me.bechberger.jfr.query.QueryPrinter;
 import me.bechberger.jfr.util.Output;
@@ -55,37 +59,66 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
     public JfrTable execute(RawJfrQueryNode queryNode) throws Exception {
         String query = queryNode.rawQuery();
         
-        // Ensure we have cached the events
-        ensureCachedEventStream();
-        
-        // Execute query using AsyncBuffer for streaming results
-        AsyncBuffer buffer = new AsyncBuffer();
-        CompletableFuture<JfrTable> resultFuture = new CompletableFuture<>();
-        
-        // Start async parsing of results
-        buffer.setLineConsumer(line -> {
-            try {
-                lineProcessor.processLine(line);
-            } catch (Exception e) {
-                resultFuture.completeExceptionally(e);
+        try {
+            // Ensure we have cached the events
+            ensureCachedEventStream();
+            
+            // Execute query using AsyncBuffer for streaming results
+            AsyncBuffer buffer = new AsyncBuffer();
+            CompletableFuture<JfrTable> resultFuture = new CompletableFuture<>();
+            
+            // Start async parsing of results
+            buffer.setLineConsumer(line -> {
+                try {
+                    lineProcessor.processLine(line);
+                } catch (Exception e) {
+                    resultFuture.completeExceptionally(
+                        SourceTableException.initializationFailure(
+                            "JFR query results", 
+                            "Error processing query result line: " + e.getMessage(), 
+                            queryNode
+                        )
+                    );
+                }
+            });
+            
+            // When parsing is complete, build the final table
+            lineProcessor.setCompletionHandler(() -> {
+                try {
+                    JfrTable result = lineProcessor.buildTable();
+                    resultFuture.complete(result);
+                } catch (Exception e) {
+                    resultFuture.completeExceptionally(
+                        SourceTableException.initializationFailure(
+                            "JFR query results", 
+                            "Error building result table: " + e.getMessage(), 
+                            queryNode
+                        )
+                    );
+                }
+            });
+            
+            // Execute the JFR query using our cached event stream
+            executeJfrQuery(query, buffer);
+            
+            // Wait for parsing to complete and return result
+            return resultFuture.get();
+        } catch (IOException e) {
+            throw SourceTableException.dataSourceFailure(
+                "JFR file: " + jfrFilePath, 
+                "Cannot access JFR file: " + e.getMessage(), 
+                queryNode
+            );
+        } catch (Exception e) {
+            if (e instanceof SourceTableException) {
+                throw e; // Re-throw our specific exceptions
             }
-        });
-        
-        // When parsing is complete, build the final table
-        lineProcessor.setCompletionHandler(() -> {
-            try {
-                JfrTable result = lineProcessor.buildTable();
-                resultFuture.complete(result);
-            } catch (Exception e) {
-                resultFuture.completeExceptionally(e);
-            }
-        });
-        
-        // Execute the JFR query using our cached event stream
-        executeJfrQuery(query, buffer);
-        
-        // Wait for parsing to complete and return result
-        return resultFuture.get();
+            throw QueryExecutorException.forExecutionFailure(
+                "RawJfrQueryExecutor", 
+                "Failed to execute JFR query: " + e.getMessage(), 
+                queryNode, e
+            );
+        }
     }
     
     /**
@@ -103,6 +136,18 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                     allEvents.add(event);
                     eventTypeSet.add(event.getEventType());
                 }
+            } catch (IOException e) {
+                throw SourceTableException.dataSourceFailure(
+                    jfrFilePath.toString(), 
+                    "Cannot read JFR file: " + e.getMessage(), 
+                    null
+                );
+            } catch (Exception e) {
+                throw SourceTableException.initializationFailure(
+                    jfrFilePath.toString(), 
+                    "Failed to process JFR events: " + e.getMessage(), 
+                    null
+                );
             }
             
             // Store event types for later use
@@ -132,7 +177,11 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
             buffer.close(); // Signal completion
         } catch (Exception e) {
             buffer.close();
-            throw e;
+            throw QueryExecutorException.forExecutionFailure(
+                "QueryPrinter", 
+                "Failed to execute raw JFR query: " + e.getMessage(), 
+                null, e
+            );
         }
     }
     
@@ -155,7 +204,11 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
         @Override
         public void onEvent(Consumer<RecordedEvent> action) {
             if (started) {
-                throw new IllegalStateException("Event stream has already started");
+                throw QueryExecutorException.forConfigurationError(
+                    "EventStream", 
+                    "Cannot register event handler after stream has started", 
+                    null, null
+                );
             }
             // Register action for all events
             eventActions.put("*", action);
@@ -164,7 +217,11 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
         @Override
         public void onEvent(String eventName, Consumer<RecordedEvent> action) {
             if (started) {
-                throw new IllegalStateException("Event stream has already started");
+                throw QueryExecutorException.forConfigurationError(
+                    "EventStream", 
+                    "Cannot register event handler after stream has started", 
+                    null, null
+                );
             }
             eventActions.put(eventName, action);
         }
@@ -185,7 +242,11 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                 return;
             }
             if (closed) {
-                throw new IllegalStateException("Event stream is closed");
+                throw QueryExecutorException.forConfigurationError(
+                    "EventStream", 
+                    "Cannot start event stream that has been closed", 
+                    null, null
+                );
             }
             
             started = true;
@@ -218,7 +279,11 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                 if (errorHandler != null) {
                     errorHandler.accept(e);
                 } else {
-                    throw new RuntimeException("Error processing cached events", e);
+                    throw QueryExecutorException.forExecutionFailure(
+                        "EventStream", 
+                        "Error processing cached events: " + e.getMessage(), 
+                        null, e
+                    );
                 }
             }
         }
@@ -401,8 +466,8 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
             List<String> allLines = new ArrayList<>(lines);
             
             if (allLines.isEmpty()) {
-                // Return empty table
-                return new JfrTable(List.of(new JfrTable.Column("result", CellType.STRING)));
+                // Return empty table using optimized SingleCellTable
+                return SingleCellTable.of("result", "");
             }
             
             // Parse table structure like main.js does
@@ -440,7 +505,7 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
             if (separatorIndex == -1 || headerLine.isEmpty()) {
                 // No valid table format, create simple single-column result
                 List<JfrTable.Column> columns = List.of(new JfrTable.Column("output", CellType.STRING));
-                JfrTable result = new JfrTable(columns);
+                JfrTable result = new StandardJfrTable(columns);
                 for (String line : lines) {
                     if (!line.trim().isEmpty()) {
                         result.addRow(new JfrTable.Row(List.of(new CellValue.StringValue(line.trim()))));
@@ -471,7 +536,7 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                 columns.add(new JfrTable.Column(headers.get(i), columnTypes.get(i)));
             }
             
-            JfrTable result = new JfrTable(columns);
+            JfrTable result = new StandardJfrTable(columns);
             
             // Parse data rows with proper type conversion
             for (String line : dataLines) {
@@ -664,7 +729,7 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
         }
         
         private boolean isMemorySize(String value) {
-            return value.matches("^\\d+(?:[.,]\\d+)?\\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$");
+            return value.matches("^\\d+(?:[.,]\\d+)?\\s*(B|KB|MB|GB|TB|CiB|MiB|GiB|TiB)$");
         }
         
         private boolean isTimestamp(String value) {
@@ -710,7 +775,7 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
         }
         
         private CellValue parseMemorySizeValue(String value) {
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("^(\\d+(?:[.,]\\d+)?)\\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$");
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("^(\\d+(?:[.,]\\d+)?)\\s*(B|KB|MB|GB|TB|CiB|MiB|GiB|TiB)$");
             java.util.regex.Matcher matcher = pattern.matcher(value);
             
             if (!matcher.matches()) {
@@ -727,7 +792,7 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                 case "MB" -> (long) (amount * 1_000_000);
                 case "GB" -> (long) (amount * 1_000_000_000);
                 case "TB" -> (long) (amount * 1_000_000_000_000L);
-                case "KiB" -> (long) (amount * 1_024);
+                case "CiB" -> (long) (amount * 1_024);
                 case "MiB" -> (long) (amount * 1_048_576);
                 case "GiB" -> (long) (amount * 1_073_741_824);
                 case "TiB" -> (long) (amount * 1_099_511_627_776L);

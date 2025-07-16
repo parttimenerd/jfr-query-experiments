@@ -390,6 +390,8 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
             case GREATER_THAN -> ">";
             case GREATER_EQUAL -> ">=";
             case LIKE -> "LIKE";
+            case NOT_LIKE -> "NOT LIKE";
+            case BETWEEN -> "BETWEEN";
             case IN -> "IN";
             case AND -> "AND";
             case OR -> "OR";
@@ -517,12 +519,6 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
     }
     
     @Override
-    public String visitGCCorrelation(GCCorrelationNode node) {
-        return node.field() + "_" + node.type().name().toLowerCase() + 
-               "(" + node.value().accept(this) + ")";
-    }
-    
-    @Override
     public String visitArrayLiteral(ArrayLiteralNode node) {
         String elements = node.elements().stream()
                 .map(element -> element.accept(this))
@@ -532,7 +528,37 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
     }
     
     @Override
+    public String visitStar(StarNode node) {
+        return "*";
+    }
+    
+    @Override
     public String visitWithinCondition(WithinConditionNode node) {
         return node.value().accept(this) + " WITHIN " + node.timeWindow().accept(this) + " OF " + node.referenceTime().accept(this);
+    }
+    
+    @Override
+    public String visitCaseExpression(CaseExpressionNode node) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("CASE");
+        
+        // Add the expression for simple CASE (CASE expression WHEN ...)
+        if (node.expression() != null) {
+            sb.append(" ").append(node.expression().accept(this));
+        }
+        
+        // Add WHEN clauses
+        for (WhenClauseNode whenClause : node.whenClauses()) {
+            sb.append(" WHEN ").append(whenClause.condition().accept(this));
+            sb.append(" THEN ").append(whenClause.result().accept(this));
+        }
+        
+        // Add ELSE clause if present
+        if (node.elseExpression() != null) {
+            sb.append(" ELSE ").append(node.elseExpression().accept(this));
+        }
+        
+        sb.append(" END");
+        return sb.toString();
     }
 }

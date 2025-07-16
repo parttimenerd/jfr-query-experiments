@@ -673,22 +673,27 @@ public class ParserErrorHandlingTest {
         String query = "@SELECT * FROM GarbageCollection WHERE AVG(duration) > 10ms AND COUNT(*) > 5";
         
         try {
+            // Parsing should succeed - aggregate functions in WHERE is a semantic error, not syntax error
             Lexer lexer = new Lexer(query);
             List<Token> tokens = lexer.tokenize();
             Parser parser = new Parser(tokens, query);
-            parser.parse();
-            fail("Expected ParserException for aggregate functions in WHERE clause");
-        } catch (me.bechberger.jfr.extended.ParserException e) {
-            String errorMessage = e.getMessage();
-            System.out.println("=== Multiple Aggregates in WHERE Clause Error ===");
-            System.out.println(errorMessage);
-            System.out.println();
+            parser.parse(); // This should succeed
             
-            // Verify the error message explains that aggregate functions can't be used in WHERE clause
-            assertTrue((errorMessage.contains("AVG") || errorMessage.contains("COUNT")) && 
-                      errorMessage.contains("WHERE") && 
-                      (errorMessage.contains("HAVING") || errorMessage.contains("SELECT")), 
-                      "Error should explain that aggregate functions are not allowed in WHERE clause");
+            // Now test semantic validation - this should fail
+            try {
+                Parser.parseAndValidate(query); // This should fail
+                fail("Expected QuerySemanticException for aggregate functions in WHERE clause");
+            } catch (me.bechberger.jfr.extended.engine.QuerySemanticValidator.QuerySemanticException e) {
+                String errorMessage = e.getMessage();
+                System.out.println("=== Multiple Aggregates in WHERE Clause Semantic Error ===");
+                System.out.println(errorMessage);
+                System.out.println();
+                
+                // Verify the error message explains that aggregate functions can't be used in WHERE clause
+                assertTrue(errorMessage.contains("WHERE") && 
+                          (errorMessage.contains("HAVING") || errorMessage.contains("SELECT")), 
+                          "Error should explain that aggregate functions are not allowed in WHERE clause");
+            }
         } catch (Exception e) {
             System.out.println("Unexpected error: " + e.getMessage());
             fail("Unexpected exception: " + e.getClass().getSimpleName());

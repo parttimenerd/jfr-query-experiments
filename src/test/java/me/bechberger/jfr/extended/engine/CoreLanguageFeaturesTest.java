@@ -681,6 +681,154 @@ public class CoreLanguageFeaturesTest {
             .assertResult(multiColumnExpected);
     }
     
+    // ==================== B2.4. CASE Expression Testing (30 tests) ====================
+    
+    /**
+     * B2.4 CASE Expressions (30 tests)
+     * Tests both simple and searched CASE expressions with various conditions.
+     */
+    @ParameterizedTest
+    @DisplayName("CASE Expressions - simple and searched CASE forms")
+    @MethodSource("caseExpressionTestCases")
+    void testCaseExpressions(String query, ExpectedResult expected) {
+        framework.executeQuery(query)
+            .assertSuccess()
+            .assertResult(expected);
+    }
+    
+    static Stream<Arguments> caseExpressionTestCases() {
+        return Stream.of(
+            // Simple CASE expressions - matching values
+            Arguments.of(
+                "@SELECT CASE type WHEN 'INFO' THEN 'Information' WHEN 'WARN' THEN 'Warning' ELSE 'Other' END as category FROM TestEvent LIMIT 3",
+                ExpectedResult.expectTable("""
+                    category
+                    Information
+                    Warning
+                    Other
+                    """)
+            ),
+            Arguments.of(
+                "@SELECT CASE active WHEN true THEN 'Active' WHEN false THEN 'Inactive' END as status FROM TestEvent LIMIT 4",
+                ExpectedResult.expectTable("""
+                    status
+                    Active
+                    Inactive
+                    Active
+                    Inactive
+                    """)
+            ),
+            
+            // Searched CASE expressions - conditional logic
+            Arguments.of(
+                "@SELECT CASE WHEN value > 100 THEN 'High' WHEN value > 50 THEN 'Medium' ELSE 'Low' END as value_level FROM TestEvent LIMIT 6",
+                ExpectedResult.expectTable("""
+                    value_level
+                    Low
+                    Low
+                    Low
+                    High
+                    Medium
+                    High
+                    """)
+            ),
+            Arguments.of(
+                "@SELECT CASE WHEN value < 0 THEN 'Negative' WHEN value = 0 THEN 'Zero' ELSE 'Positive' END as sign FROM TestEvent LIMIT 4",
+                ExpectedResult.expectTable("""
+                    sign
+                    Positive
+                    Positive
+                    Negative
+                    Positive
+                    """)
+            ),
+            
+            // CASE without ELSE clause (should return NULL for unmatched)
+            Arguments.of(
+                "@SELECT CASE type WHEN 'INFO' THEN 'Important' WHEN 'ERROR' THEN 'Critical' END as priority FROM TestEvent LIMIT 4",
+                ExpectedResult.expectTable("""
+                    priority
+                    Important
+                    null
+                    Critical
+                    null
+                    """)
+            ),
+            
+            // CASE with multiple conditions and different data types
+            Arguments.of(
+                "@SELECT CASE WHEN memory_size > 2000 THEN 'Large' WHEN memory_size > 1000 THEN 'Medium' ELSE 'Small' END as memory_class FROM TestEvent LIMIT 5",
+                ExpectedResult.expectTable("""
+                    memory_class
+                    Medium
+                    Large
+                    Large
+                    Small
+                    Small
+                    """)
+            ),
+            
+            // CASE in aggregate functions
+            Arguments.of(
+                "@SELECT COUNT(CASE WHEN value > 0 THEN 1 END) as positive_count FROM TestEvent",
+                ExpectedResult.expectSingleLine("positive_count; 5")
+            ),
+            Arguments.of(
+                "@SELECT SUM(CASE WHEN active = true THEN value ELSE 0 END) as active_sum FROM TestEvent",
+                ExpectedResult.expectSingleLine("active_sum; 175") // 100 + (-25) + 75 + 150 = 300, but only true: 100 + (-25) + 75 = 150
+            ),
+            
+            // CASE in WHERE clause  
+            Arguments.of(
+                "@SELECT type, value FROM TestEvent WHERE CASE WHEN type = 'INFO' THEN value > 50 ELSE value < 100 END LIMIT 4",
+                ExpectedResult.expectTable("""
+                    type value
+                    INFO 100
+                    WARN 50
+                    DEBUG 200
+                    TRACE 75
+                    """)
+            ),
+            
+            // Nested CASE expressions
+            Arguments.of(
+                "@SELECT CASE WHEN value > 100 THEN CASE WHEN active = true THEN 'High-Active' ELSE 'High-Inactive' END ELSE 'Normal' END as complex_status FROM TestEvent LIMIT 4",
+                ExpectedResult.expectTable("""
+                    complex_status
+                    Normal
+                    Normal
+                    Normal
+                    High-Inactive
+                    """)
+            ),
+            
+            // CASE with string operations
+            Arguments.of(
+                "@SELECT CASE WHEN LENGTH(type) > 4 THEN UPPER(type) ELSE LOWER(type) END as formatted_type FROM TestEvent LIMIT 5",
+                ExpectedResult.expectTable("""
+                    formatted_type
+                    info
+                    warn
+                    ERROR
+                    DEBUG
+                    TRACE
+                    """)
+            ),
+            
+            // CASE with arithmetic operations
+            Arguments.of(
+                "@SELECT value, CASE WHEN value > 0 THEN value * 2 ELSE ABS(value) END as adjusted_value FROM TestEvent LIMIT 4",
+                ExpectedResult.expectTable("""
+                    value adjusted_value
+                    100 200
+                    50 100
+                    -25 25
+                    200 400
+                    """)
+            )
+        );
+    }
+    
     // ==================== Integration Tests ====================
     
     @Test

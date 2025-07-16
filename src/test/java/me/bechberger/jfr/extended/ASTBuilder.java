@@ -398,7 +398,7 @@ public class ASTBuilder {
     }
     
     public static FunctionCallNode function(String name, ExpressionNode... args) {
-        return new FunctionCallNode(name, Arrays.asList(args), location(1, 1));
+        return new FunctionCallNode(name, Arrays.asList(args), false, location(1, 1));
     }
     
     public static PercentileFunctionNode percentile(double percentile, ExpressionNode field) {
@@ -466,10 +466,6 @@ public class ASTBuilder {
                 return decl.format();
             }
         };
-    }
-    
-    public static GCCorrelationNode gcCorrelation(String field, GCCorrelationType type, ExpressionNode value) {
-        return new GCCorrelationNode(field, type, value, location(1, 1));
     }
     
     // Operator shortcuts

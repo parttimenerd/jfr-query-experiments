@@ -1,10 +1,10 @@
 package me.bechberger.jfr.extended;
 
 import me.bechberger.jfr.extended.ast.ASTNodes.*;
-import me.bechberger.jfr.extended.Lexer.LexerException;
 import me.bechberger.jfr.extended.ast.Location;
 import me.bechberger.jfr.extended.ast.ASTNodes.ExpressionNode;
 import me.bechberger.jfr.extended.ast.ASTNodes.ArrayLiteralNode;
+import me.bechberger.jfr.extended.engine.QuerySemanticValidator;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.util.Utils;
 
@@ -55,8 +55,8 @@ public class Parser {
         this(tokens, null);
     }
     
-    public Parser(String query) throws LexerException {
-        this(new Lexer(query).tokenize());
+    public Parser(String query) throws QuerySyntaxException, LexerException {
+        this(new Lexer(query).tokenize(), query);
     }
 
     public Parser(List<Token> tokens, String originalQuery) {
@@ -83,12 +83,18 @@ public class Parser {
     /**
      * Parse the tokens into an AST
      */
-    public ProgramNode parse() throws ParserException {
+    public ProgramNode parse() throws QuerySyntaxException, ParserException {
         List<StatementNode> statements = new ArrayList<>();
         
         // Check for empty input first
         if (tokens.isAtEnd()) {
-            throw new ParserException("Empty query. Please provide a valid JFR query or statement.");
+            QuerySyntaxError error = new QuerySyntaxError.Builder(QuerySyntaxError.ErrorOrigin.PARSER)
+                .category(QuerySyntaxError.ErrorCategory.INVALID_SYNTAX)
+                .problemDescription("Empty query. Please provide a valid JFR query or statement.")
+                .suggestion("Try: SELECT * FROM [event_type] or SHOW EVENTS")
+                .examples("SELECT * FROM GarbageCollection\nSHOW EVENTS\nSHOW FIELDS jdk.GarbageCollection")
+                .build();
+            throw new QuerySyntaxException(error, errorHandler.getOriginalQuery());
         }
         
         while (!tokens.isAtEnd()) {
@@ -156,6 +162,52 @@ public class Parser {
         return new ProgramNode(statements, location(1, 1));
     }
     
+    /**
+     * Parse and semantically validate a query string.
+     * 
+     * * @param query The query string to parse and validate
+     * @return ProgramNode representing the parsed and validated program
+     * @throws QuerySyntaxException if lexical analysis or parsing fails
+     * @throws LexerException if lexical analysis fails
+     * @throws ParserException if parsing fails
+     * @throws QuerySemanticValidator.QuerySemanticException if semantic validation fails
+     */
+    public static ProgramNode parseAndValidate(String query) throws QuerySyntaxException, LexerException, ParserException, QuerySemanticValidator.QuerySemanticException {
+        Parser parser = new Parser(query);
+        return parser.parseAndValidate();       
+    }
+
+    /**
+     * Parse and semantically validate the current parser's tokens.
+     * 
+     * This instance method provides a convenient way to both parse and validate
+     * the tokens already loaded in this parser instance. It will catch both 
+     * parsing errors and semantic validation errors.
+     * 
+     * @return ProgramNode representing the parsed and validated program
+     * @throws QuerySyntaxException if syntax errors occur during parsing
+     * @throws ParserException if parsing fails
+     * @throws QuerySemanticValidator.QuerySemanticException if semantic validation fails
+     */
+    public ProgramNode parseAndValidate() throws QuerySyntaxException, ParserException, QuerySemanticValidator.QuerySemanticException {
+        // Parse the query using existing parse method
+        ProgramNode program = parse();
+        
+        // Validate semantics for all query statements in the program
+        QuerySemanticValidator validator = new QuerySemanticValidator();
+        for (StatementNode statement : program.statements()) {
+            if (statement instanceof QueryNode queryNode) {
+                validator.validate(queryNode);
+            } else if (statement instanceof AssignmentNode assignmentNode) {
+                validator.validate(assignmentNode.query());
+            } else if (statement instanceof ViewDefinitionNode viewDefNode) {
+                validator.validate(viewDefNode.query());
+            }
+        }
+        
+        return program;
+    }
+
     /**
      * Parse a single statement (entry point for individual statement parsing).
      * 
@@ -664,7 +716,7 @@ public class Parser {
                     // Check for AS alias
                     if (tokens.match(TokenType.AS)) {
                         try {
-                            Token aliasToken = tokens.consume(TokenType.IDENTIFIER, "Expected alias after AS");
+                            Token aliasToken = tokens.consumeIdentifierOrKeyword("Expected alias after AS");
                             alias = aliasToken.value();
                         } catch (ParserException e) {
                             // Error in alias - add error and continue without alias
@@ -724,7 +776,7 @@ public class Parser {
      * fuzzy_join ::= FUZZY JOIN IDENTIFIER ( AS IDENTIFIER )? ON IDENTIFIER 
      *                ( WITH ( NEAREST | PREVIOUS | AFTER ) )? 
      *                ( TOLERANCE expression )? ( threshold expression )?
-     * standard_join ::= ( INNER | LEFT | RIGHT | FULL )? JOIN IDENTIFIER ( AS IDENTIFIER )?
+     * standard_join ::= ( INNER | ( LEFT | RIGHT | FULL ) OUTER? ) JOIN IDENTIFIER ( AS IDENTIFIER )?
      *                   ON field_reference EQUALS field_reference
      * </pre>
      * 
@@ -774,12 +826,34 @@ public class Parser {
                 // Check for fuzzy join after the source
                 if (tokens.match(TokenType.FUZZY)) {
                     tokens.consume(TokenType.JOIN, "Expected JOIN after FUZZY");
-                    Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after FUZZY JOIN");
+                    
+                    // Parse optional fuzzy join type before table name (NEAREST/PREVIOUS/AFTER)
+                    FuzzyJoinType joinType = FuzzyJoinType.NEAREST; // default
+                    if (tokens.check(TokenType.NEAREST)) {
+                        tokens.advance();
+                        joinType = FuzzyJoinType.NEAREST;
+                    } else if (tokens.check(TokenType.PREVIOUS)) {
+                        tokens.advance();
+                        joinType = FuzzyJoinType.PREVIOUS;
+                    } else if (tokens.check(TokenType.AFTER)) {
+                        tokens.advance();
+                        joinType = FuzzyJoinType.AFTER;
+                    }
+                    
+                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after FUZZY JOIN");
                     
                     // Parse alias for the joined source (before ON clause)
                     String rightAlias = null;
                     if (tokens.match(TokenType.AS)) {
                         Token aliasToken = parseAlias("Expected alias after AS");
+                        rightAlias = aliasToken.value();
+                        // Add alias to valid aliases set
+                        if (rightAlias != null) {
+                            validAliases.add(rightAlias);
+                        }
+                    } else if (tokens.check(TokenType.IDENTIFIER)) {
+                        // Handle alias without AS keyword
+                        Token aliasToken = tokens.advance();
                         rightAlias = aliasToken.value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
@@ -791,8 +865,7 @@ public class Parser {
                     tokens.consume(TokenType.ON, "Expected ON clause after FUZZY JOIN");
                     Token joinField = tokens.consume(TokenType.IDENTIFIER, "Expected field name in ON clause");
                     
-                    // Parse fuzzy join type (WITH NEAREST/PREVIOUS/AFTER)
-                    FuzzyJoinType joinType = FuzzyJoinType.NEAREST; // default
+                    // Parse alternative fuzzy join type (WITH NEAREST/PREVIOUS/AFTER) - for backward compatibility
                     if (tokens.match(TokenType.WITH)) {
                         if (tokens.match(TokenType.NEAREST)) {
                             joinType = FuzzyJoinType.NEAREST;
@@ -840,7 +913,8 @@ public class Parser {
                 
                 // Check for standard join after the source
                 else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL)) {
-                    StandardJoinType joinType = switch (tokens.previous().type()) {
+                    TokenType joinTokenType = tokens.previous().type();
+                    StandardJoinType joinType = switch (joinTokenType) {
                         case INNER -> StandardJoinType.INNER;
                         case LEFT -> StandardJoinType.LEFT;
                         case RIGHT -> StandardJoinType.RIGHT;
@@ -848,19 +922,24 @@ public class Parser {
                         default -> throw new ParserException("Unexpected join type: " + tokens.previous().value());
                     };
                     
+                    // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER)
+                    if (joinTokenType != TokenType.INNER && tokens.check(TokenType.OUTER)) {
+                        tokens.match(TokenType.OUTER);  // Optional OUTER keyword
+                    }
+                    
                     tokens.consume(TokenType.JOIN, "Expected JOIN after join type");
-                    Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after JOIN");
+                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                     
                     String rightAlias = null;
                     if (tokens.match(TokenType.AS)) {
-                        rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias after AS").value();
+                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
                         }
-                    } else if (tokens.check(TokenType.IDENTIFIER) && !tokens.check(TokenType.ON)) {
+                    } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
                         // Handle alias without AS keyword (like "ExecutionSample e")
-                        rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias").value();
+                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
@@ -886,18 +965,18 @@ public class Parser {
                 
                 // Check for standalone JOIN (defaults to INNER)
                 else if (tokens.match(TokenType.JOIN)) {
-                    Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after JOIN");
+                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                     
                     String rightAlias = null;
                     if (tokens.match(TokenType.AS)) {
-                        rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias after AS").value();
+                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
                         }
-                    } else if (tokens.check(TokenType.IDENTIFIER) && !tokens.check(TokenType.ON)) {
+                    } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
                         // Handle alias without AS keyword (like "ExecutionSample e")
-                        rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias").value();
+                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
@@ -948,7 +1027,21 @@ public class Parser {
             // Parse FUZZY JOIN
             if (tokens.match(TokenType.FUZZY)) {
                 tokens.consume(TokenType.JOIN, "Expected JOIN after FUZZY");
-                Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after FUZZY JOIN");
+                
+                // Parse optional fuzzy join type before table name (NEAREST/PREVIOUS/AFTER)
+                FuzzyJoinType joinType = FuzzyJoinType.NEAREST; // default
+                if (tokens.check(TokenType.NEAREST)) {
+                    tokens.advance();
+                    joinType = FuzzyJoinType.NEAREST;
+                } else if (tokens.check(TokenType.PREVIOUS)) {
+                    tokens.advance();
+                    joinType = FuzzyJoinType.PREVIOUS;
+                } else if (tokens.check(TokenType.AFTER)) {
+                    tokens.advance();
+                    joinType = FuzzyJoinType.AFTER;
+                }
+                
+                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after FUZZY JOIN");
                 
                 // Parse alias for the joined source (before ON clause)
                 String rightAlias = null;
@@ -959,14 +1052,21 @@ public class Parser {
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
                         }
+                } else if (tokens.check(TokenType.IDENTIFIER)) {
+                    // Handle alias without AS keyword
+                    Token aliasToken = tokens.advance();
+                    rightAlias = aliasToken.value();
+                    // Add alias to valid aliases set
+                    if (rightAlias != null) {
+                        validAliases.add(rightAlias);
+                    }
                 }
                 
                 // Parse join condition
                 tokens.consume(TokenType.ON, "Expected ON clause after FUZZY JOIN");
                 Token joinField = tokens.consume(TokenType.IDENTIFIER, "Expected field name in ON clause");
                 
-                // Parse fuzzy join type (WITH NEAREST/PREVIOUS/AFTER)
-                FuzzyJoinType joinType = FuzzyJoinType.NEAREST; // default
+                // Parse alternative fuzzy join type (WITH NEAREST/PREVIOUS/AFTER) - for backward compatibility
                 if (tokens.match(TokenType.WITH)) {
                     if (tokens.match(TokenType.NEAREST)) {
                         joinType = FuzzyJoinType.NEAREST;
@@ -1014,7 +1114,8 @@ public class Parser {
             
             // Parse standard join (INNER, LEFT, RIGHT, FULL)
             else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL)) {
-                StandardJoinType joinType = switch (tokens.previous().type()) {
+                TokenType joinTokenType = tokens.previous().type();
+                StandardJoinType joinType = switch (joinTokenType) {
                     case INNER -> StandardJoinType.INNER;
                     case LEFT -> StandardJoinType.LEFT;
                     case RIGHT -> StandardJoinType.RIGHT;
@@ -1022,12 +1123,17 @@ public class Parser {
                     default -> throw new ParserException("Unexpected join type: " + tokens.previous().value());
                 };
                 
+                // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER)
+                if (joinTokenType != TokenType.INNER && tokens.check(TokenType.OUTER)) {
+                    tokens.match(TokenType.OUTER);  // Optional OUTER keyword
+                }
+                
                 tokens.consume(TokenType.JOIN, "Expected JOIN after join type");
-                Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after JOIN");
+                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                 
                 String rightAlias = null;
                 if (tokens.match(TokenType.AS)) {
-                    rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias after AS").value();
+                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
@@ -1053,18 +1159,18 @@ public class Parser {
             
             // Parse standalone JOIN (defaults to INNER)
             else if (tokens.match(TokenType.JOIN)) {
-                Token rightSourceToken = tokens.consume(TokenType.IDENTIFIER, "Expected source name after JOIN");
+                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                 
                 String rightAlias = null;
                 if (tokens.match(TokenType.AS)) {
-                    rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias after AS").value();
+                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
                         // Add alias to valid aliases set
                         if (rightAlias != null) {
                             validAliases.add(rightAlias);
                         }
-                } else if (tokens.check(TokenType.IDENTIFIER) && !tokens.check(TokenType.ON)) {
+                } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
                     // Handle alias without AS keyword (like "ExecutionSample e")
-                    rightAlias = tokens.consume(TokenType.IDENTIFIER, "Expected alias").value();
+                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
                     // Add alias to valid aliases set
                     if (rightAlias != null) {
                         validAliases.add(rightAlias);
@@ -1845,6 +1951,7 @@ public class Parser {
                 referenceTime = parseArithmetic();
             } catch (ParserException e) {
                 // Error in WITHIN clause - add error and create synthetic expressions
+
                 ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
                     tokens.current(), "Invalid WITHIN clause: " + e.getMessage());
                 errorHandler.addError(error);
@@ -1854,6 +1961,7 @@ public class Parser {
             
             // We'll just create a binary expression with WITHIN and OF operators
             // The ASTPrettyPrinter will format it correctly
+           
             return new BinaryExpressionNode(
                 expr,
                 BinaryOperator.WITHIN,
@@ -1864,38 +1972,87 @@ public class Parser {
         
         while (tokens.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.LESS_THAN, 
                     TokenType.GREATER_THAN, TokenType.LESS_EQUAL, TokenType.GREATER_EQUAL,
-                    TokenType.LIKE, TokenType.IN)) {
+                    TokenType.LIKE, TokenType.IN, TokenType.NOT, TokenType.BETWEEN)) {
             Token operator = tokens.previous();
             
-            // Check for double equals (==) error - if we just consumed an EQUALS and the next token is also EQUALS
-            if (operator.type() == TokenType.EQUALS && tokens.check(TokenType.EQUALS)) {
-                throw new ParserException("Unexpected token: EQUALS. " +
-                    "Use single '=' for comparison, not '==' (double equals is not supported in this query language)");
-            }
-            
+            // Handle compound operators (NOT LIKE, NOT IN)
+            BinaryOperator op;
             ExpressionNode right;
             
-            try {
-                right = parseArithmetic();
-            } catch (ParserException e) {
-                // Error in right side of comparison - add error and create synthetic expression
-                ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
-                    tokens.current(), "Invalid expression in comparison: " + e.getMessage());
-                errorHandler.addError(error);
-                right = new LiteralNode(new CellValue.NumberValue(0), location(operator));
+            if (operator.type() == TokenType.NOT) {
+                // Handle NOT LIKE and NOT IN
+                if (tokens.match(TokenType.LIKE)) {
+                    try {
+                        right = parseArithmetic();
+                    } catch (ParserException e) {
+                        ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                            tokens.current(), "Invalid expression in NOT LIKE comparison: " + e.getMessage());
+                        errorHandler.addError(error);
+                        right = new LiteralNode(new CellValue.StringValue(""), location(operator));
+                    }
+                    op = BinaryOperator.NOT_LIKE;
+                } else if (tokens.match(TokenType.IN)) {
+                    try {
+                        right = parseArithmetic();
+                    } catch (ParserException e) {
+                        ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                            tokens.current(), "Invalid expression in NOT IN comparison: " + e.getMessage());
+                        errorHandler.addError(error);
+                        right = new LiteralNode(new CellValue.NumberValue(0), location(operator));
+                    }
+                    // For now, we'll use NOT_EQUALS as NOT IN isn't defined in BinaryOperator
+                    op = BinaryOperator.NOT_EQUALS;
+                } else {
+                    throw new ParserException("Expected LIKE or IN after NOT in comparison operator");
+                }
+            } else if (operator.type() == TokenType.BETWEEN) {
+                // Handle BETWEEN operator: expr BETWEEN low AND high
+                try {
+                    ExpressionNode low = parseArithmetic();
+                    tokens.consume(TokenType.AND, "Expected 'AND' in BETWEEN expression");
+                    ExpressionNode high = parseArithmetic();
+                    
+                    // Create a compound expression: expr >= low AND expr <= high
+                    BinaryExpressionNode lowerBound = new BinaryExpressionNode(expr, BinaryOperator.GREATER_EQUAL, low, location(operator));
+                    BinaryExpressionNode upperBound = new BinaryExpressionNode(expr, BinaryOperator.LESS_EQUAL, high, location(operator));
+                    expr = new BinaryExpressionNode(lowerBound, BinaryOperator.AND, upperBound, location(operator));
+                    continue; // Don't create another binary expression below
+                } catch (ParserException e) {
+                    ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                        tokens.current(), "Invalid BETWEEN expression: " + e.getMessage());
+                    errorHandler.addError(error);
+                    right = new LiteralNode(new CellValue.NumberValue(0), location(operator));
+                    op = BinaryOperator.EQUALS; // fallback
+                }
+            } else {
+                // Check for double equals (==) error - if we just consumed an EQUALS and the next token is also EQUALS
+                if (operator.type() == TokenType.EQUALS && tokens.check(TokenType.EQUALS)) {
+                    throw new ParserException("Unexpected token: EQUALS. " +
+                        "Use single '=' for comparison, not '==' (double equals is not supported in this query language)");
+                }
+                
+                try {
+                    right = parseArithmetic();
+                } catch (ParserException e) {
+                    // Error in right side of comparison - add error and create synthetic expression
+                    ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                        tokens.current(), "Invalid expression in comparison: " + e.getMessage());
+                    errorHandler.addError(error);
+                    right = new LiteralNode(new CellValue.NumberValue(0), location(operator));
+                }
+                
+                op = switch (operator.type()) {
+                    case EQUALS -> BinaryOperator.EQUALS;
+                    case NOT_EQUALS -> BinaryOperator.NOT_EQUALS;
+                    case LESS_THAN -> BinaryOperator.LESS_THAN;
+                    case GREATER_THAN -> BinaryOperator.GREATER_THAN;
+                    case LESS_EQUAL -> BinaryOperator.LESS_EQUAL;
+                    case GREATER_EQUAL -> BinaryOperator.GREATER_EQUAL;
+                    case LIKE -> BinaryOperator.LIKE;
+                    case IN -> BinaryOperator.IN;
+                    default -> throw new ParserException("Unexpected operator: " + operator.type());
+                };
             }
-            
-            BinaryOperator op = switch (operator.type()) {
-                case EQUALS -> BinaryOperator.EQUALS;
-                case NOT_EQUALS -> BinaryOperator.NOT_EQUALS;
-                case LESS_THAN -> BinaryOperator.LESS_THAN;
-                case GREATER_THAN -> BinaryOperator.GREATER_THAN;
-                case LESS_EQUAL -> BinaryOperator.LESS_EQUAL;
-                case GREATER_EQUAL -> BinaryOperator.GREATER_EQUAL;
-                case LIKE -> BinaryOperator.LIKE;
-                case IN -> BinaryOperator.IN;
-                default -> throw new ParserException("Unexpected operator: " + operator.type());
-            };
             
             expr = new BinaryExpressionNode(expr, op, right, location(operator));
         }
@@ -2046,6 +2203,12 @@ public class Parser {
      * @throws ParserException if unrecoverable syntax errors occur
      */
     private ExpressionNode parsePrimary() throws ParserException {
+        // CASE expression
+        if (tokens.match(TokenType.CASE)) {
+            Token caseToken = tokens.previous();
+            return parseCaseExpression(caseToken);
+        }
+        
         // Parenthesized expression
         if (tokens.match(TokenType.LPAREN)) {
             try {
@@ -2108,14 +2271,17 @@ public class Parser {
             ParserUtils.validateIdentifierLength(identifier.value(), "identifier");
             
             // Check for common duration units used without a value (common mistake)
-            String[] durationUnits = {"ms", "us", "ns", "s", "m", "h", "d", "min", "hour", "hours", "day", "days"};
-            for (String unit : durationUnits) {
-                if (identifier.value().equals(unit)) {
-                    ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
-                        identifier, "Duration unit '" + unit + "' without a value. Use a number before the unit (e.g., '5" + unit + "')");
-                    errorHandler.addError(error);
-                    // Return a synthetic duration literal with value 0
-                    return new LiteralNode(new me.bechberger.jfr.extended.table.CellValue.DurationValue(java.time.Duration.ZERO), location(identifier));
+            // But only if this isn't followed by a dot (table alias) or function call
+            if (!tokens.check(TokenType.DOT) && !tokens.check(TokenType.LPAREN)) {
+                String[] durationUnits = {"ms", "us", "ns", "s", "m", "h", "d", "min", "hour", "hours", "day", "days"};
+                for (String unit : durationUnits) {
+                    if (identifier.value().equals(unit)) {
+                        ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                            identifier, "Duration unit '" + unit + "' without a value. Use a number before the unit (e.g., '5" + unit + "')");
+                        errorHandler.addError(error);
+                        // Return a synthetic duration literal with value 0
+                        return new LiteralNode(new me.bechberger.jfr.extended.table.CellValue.DurationValue(java.time.Duration.ZERO), location(identifier));
+                    }
                 }
             }
             
@@ -2246,9 +2412,10 @@ public class Parser {
                 java.time.Instant instant = java.time.Instant.parse(value);
                 return new LiteralNode(new CellValue.TimestampValue(instant), location(literal));
             } catch (Exception e) {
-                // Add error to error handler for invalid timestamp
+                // Create a more helpful error message by analyzing the timestamp
+                String helpfulMessage = createTimestampErrorMessage(literal.value(), e);
                 ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
-                    literal, "Invalid timestamp format: " + literal.value() + ". " + e.getMessage() + ". Use format: YYYY-MM-DDTHH:MM:SSZ");
+                    literal, helpfulMessage);
                 errorHandler.addError(error);
                 return new LiteralNode(new CellValue.TimestampValue(java.time.Instant.EPOCH), location(literal));
             }
@@ -2316,6 +2483,7 @@ public class Parser {
         
         try {
             List<ExpressionNode> arguments = new ArrayList<>();
+            boolean isDistinct = false;
             boolean usesParentheses = tokens.check(TokenType.LPAREN);
             
             if (usesParentheses) {
@@ -2330,7 +2498,9 @@ public class Parser {
                 }
                 
                 if (!tokens.check(TokenType.RPAREN)) {
-                    arguments = parseFunctionArguments();
+                    DistinctFunctionArgs distinctArgs = parseFunctionArgumentsWithDistinct();
+                    arguments = distinctArgs.arguments;
+                    isDistinct = distinctArgs.distinct;
                 }
                 
                 try {
@@ -2381,7 +2551,7 @@ public class Parser {
             }
             
             // For non-percentile functions, create a regular FunctionCallNode
-            return new FunctionCallNode(functionName.value(), arguments, location(functionName));
+            return new FunctionCallNode(functionName.value(), arguments, isDistinct, location(functionName));
         } finally {
             // Restore previous context
             currentContext = previousContext;
@@ -2458,6 +2628,7 @@ public class Parser {
             
             // Check for empty line separator (more than 1 line gap)
             // This handles raw queries separated by empty lines
+            // without requiring explicit semicolons
             if (!first && token.line() > lastTokenLine + 1) {
                 // We found an empty line gap - this should split the raw query
                 // But only if we have some content already
@@ -2580,7 +2751,7 @@ public class Parser {
      * Parse an alias with error message (for backward compatibility)
      */
     private Token parseAlias(String errorMessage) throws ParserException {
-        if (tokens.check(TokenType.IDENTIFIER) && !ParserUtils.isReservedKeyword(tokens.current().value())) {
+        if (ParserUtils.canUseAsIdentifier(tokens)) {
             return tokens.advance();
         }
         throw new ParserException(errorMessage + " at " + tokens.current().getPositionString());
@@ -2590,7 +2761,7 @@ public class Parser {
      * Create a synthetic function call for aggregations without explicit parentheses
      */
     private FunctionCallNode createSyntheticFunctionCall(String functionName, List<ExpressionNode> arguments, Location location) {
-        return new FunctionCallNode(functionName, arguments, location);
+        return new FunctionCallNode(functionName, arguments, false, location);
     }
     
     /**
@@ -2654,6 +2825,83 @@ public class Parser {
     }
     
     /**
+     * Helper class to return both arguments and distinct flag
+     */
+    private static class DistinctFunctionArgs {
+        final List<ExpressionNode> arguments;
+        final boolean distinct;
+        
+        DistinctFunctionArgs(List<ExpressionNode> arguments, boolean distinct) {
+            this.arguments = arguments;
+            this.distinct = distinct;
+        }
+    }
+    
+    /**
+     * Parse function arguments with DISTINCT support
+     */
+    private DistinctFunctionArgs parseFunctionArgumentsWithDistinct() throws ParserException {
+        List<ExpressionNode> arguments = new ArrayList<>();
+        boolean distinct = false;
+        
+        if (!tokens.check(TokenType.RPAREN)) {
+            // Check for DISTINCT keyword at the start of arguments
+            if (tokens.check(TokenType.DISTINCT)) {
+                distinct = true;
+                tokens.advance(); // consume DISTINCT
+            }
+            
+            do {
+                // Check for double parentheses pattern like ((expression))
+                // This happens when the first token in arguments is a LPAREN
+                if (tokens.check(TokenType.LPAREN)) {
+                    // Look ahead to see if this creates a double parentheses pattern
+                    // We need to check if after parsing this parenthesized expression,
+                    // we would have another RPAREN that would create double closing parens
+                    int parenDepth = 0;
+                    int currentPos = tokens.getCurrentPosition();
+                    
+                    // Count parentheses to find the matching closing paren
+                    while (!tokens.isAtEnd()) {
+                        if (tokens.current().type() == TokenType.LPAREN) {
+                            parenDepth++;
+                        } else if (tokens.current().type() == TokenType.RPAREN) {
+                            parenDepth--;
+                            if (parenDepth == 0) {
+                                // Found matching closing paren, check if next token is also RPAREN
+                                tokens.advance();
+                                if (tokens.check(TokenType.RPAREN)) {
+                                    // Reset position and add error
+                                    tokens.setPosition(currentPos);
+                                    
+                                    // Find the function name and extract argument text for suggestion
+                                    String functionName = getCurrentFunctionName();
+                                    String argumentText = extractArgumentTextForSuggestion(currentPos);
+                                    String suggestion = ParserSuggestionHelper.createDoubleParenthesesSuggestion(functionName, argumentText);
+                                    
+                                    ParserErrorHandler.ParserError error = errorHandler.createFunctionCallError(
+                                        tokens.current(), "Invalid double parentheses in function call. " +
+                                        "Found '((' which creates unnecessary nesting. " + suggestion);
+                                    errorHandler.addError(error);
+                                    break;
+                                }
+                                break;
+                            }
+                        }
+                        tokens.advance();
+                    }
+                    
+                    // Reset position for normal parsing
+                    tokens.setPosition(currentPos);
+                }
+                arguments.add(parseExpression());
+            } while (tokens.match(TokenType.COMMA));
+        }
+        
+        return new DistinctFunctionArgs(arguments, distinct);
+    }
+    
+    /**
      * Validate function calls and provide suggestions for common errors using FunctionValidator utility
      */
     private void validateAndSuggestFunction(String funcName, List<ExpressionNode> arguments, 
@@ -2668,14 +2916,15 @@ public class Parser {
             return; // Exit early if function doesn't exist
         }
         
-        // Check if aggregate function is used in WHERE clause (not allowed)
-        if (functionValidator.isAggregateFunction(funcName) && 
-            context == QueryErrorMessageGenerator.QueryContext.WHERE_CLAUSE) {
-            ParserErrorHandler.ParserError error = errorHandler.createFunctionCallError(
-                functionToken, "Aggregate function '" + funcName + "' cannot be used in WHERE clause. " +
-                             "Use aggregate functions in SELECT or HAVING clauses instead.");
-            errorHandler.addError(error);
-        }
+        // NOTE: Aggregate function validation in WHERE clause moved to semantic validation
+        // This allows parsing to succeed and validation to happen during semantic analysis
+        // if (functionValidator.isAggregateFunction(funcName) && 
+        //     context == QueryErrorMessageGenerator.QueryContext.WHERE_CLAUSE) {
+        //     ParserErrorHandler.ParserError error = errorHandler.createFunctionCallError(
+        //         functionToken, "Aggregate function '" + funcName + "' cannot be used in WHERE clause. " +
+        //                      "Use aggregate functions in SELECT or HAVING clauses instead.");
+        //     errorHandler.addError(error);
+        // }
         
         // Stricter argument validation for specific functions using FunctionValidator
         try {
@@ -2847,4 +3096,222 @@ public class Parser {
         return "function"; // fallback
     }
     
+    /**
+     * Creates a helpful error message for invalid timestamp formats by analyzing
+     * the timestamp value and providing specific guidance about what's wrong.
+     * 
+     * @param timestampValue The original timestamp value that failed parsing
+     * @param parseException The exception thrown during parsing
+     * @return A helpful error message with specific guidance
+     */
+    private String createTimestampErrorMessage(String timestampValue, Exception parseException) {
+        StringBuilder message = new StringBuilder();
+        message.append("Invalid timestamp '").append(timestampValue).append("': ");
+        
+        try {
+            // Extract components from the timestamp for analysis
+            String[] parts = timestampValue.split("T");
+            if (parts.length != 2) {
+                message.append("Missing 'T' separator between date and time. ");
+                message.append("Use format: YYYY-MM-DDTHH:MM:SS[.sss]Z");
+                return message.toString();
+            }
+            
+            String datePart = parts[0];
+            String timePart = parts[1].replace("Z", ""); // Remove Z for analysis
+            
+            // Analyze date part (YYYY-MM-DD)
+            String[] dateComponents = datePart.split("-");
+            if (dateComponents.length == 3) {
+                try {
+                    int year = Integer.parseInt(dateComponents[0]);
+                    int month = Integer.parseInt(dateComponents[1]);
+                    int day = Integer.parseInt(dateComponents[2]);
+                    
+                    if (month < 1 || month > 12) {
+                        message.append("Invalid month ").append(month).append(" (must be 1-12). ");
+                    } else if (day < 1) {
+                        message.append("Invalid day ").append(day).append(" (must be 1 or greater). ");
+                    } else if (day > 31) {
+                        message.append("Invalid day ").append(day).append(" (must be 31 or less). ");
+                    } else if (month == 2 && day > 29) {
+                        message.append("Invalid day ").append(day).append(" for February (max 29 in leap years, 28 otherwise). ");
+                    } else if (month == 2 && day == 29 && !isLeapYear(year)) {
+                        message.append("February 29th is only valid in leap years. ").append(year).append(" is not a leap year. ");
+                    } else if ((month == 4 || month == 6 || month == 9 || month == 11) && day > 30) {
+                        String monthName = getMonthName(month);
+                        message.append("Invalid day ").append(day).append(" for ").append(monthName).append(" (max 30 days). ");
+                    } else if ((month == 1 || month == 3 || month == 5 || month == 7 || month == 8 || month == 10 || month == 12) && day > 31) {
+                        String monthName = getMonthName(month);
+                        message.append("Invalid day ").append(day).append(" for ").append(monthName).append(" (max 31 days). ");
+                    }
+                } catch (NumberFormatException e) {
+                    message.append("Invalid date format. ");
+                }
+            }
+            
+            // Analyze time part (HH:MM:SS[.sss])
+            String[] timeWithMillis = timePart.split("\\.");
+            String timeOnly = timeWithMillis[0];
+            String[] timeComponents = timeOnly.split(":");
+            
+            if (timeComponents.length == 3) {
+                try {
+                    int hour = Integer.parseInt(timeComponents[0]);
+                    int minute = Integer.parseInt(timeComponents[1]);
+                    int second = Integer.parseInt(timeComponents[2]);
+                    
+                    if (hour < 0 || hour > 23) {
+                        message.append("Invalid hour ").append(hour).append(" (must be 0-23). ");
+                    }
+                    if (minute < 0 || minute > 59) {
+                        message.append("Invalid minute ").append(minute).append(" (must be 0-59). ");
+                    }
+                    if (second < 0 || second > 59) {
+                        message.append("Invalid second ").append(second).append(" (must be 0-59). ");
+                    }
+                } catch (NumberFormatException e) {
+                    message.append("Invalid time format. ");
+                }
+            }
+            
+            // Check milliseconds if present
+            if (timeWithMillis.length > 1) {
+                String millisPart = timeWithMillis[1];
+                if (millisPart.length() > 3) {
+                    message.append("Milliseconds can have at most 3 digits, found ").append(millisPart.length()).append(". ");
+                }
+                try {
+                    int millis = Integer.parseInt(millisPart);
+                    if (millis < 0) {
+                        message.append("Milliseconds cannot be negative. ");
+                    }
+                } catch (NumberFormatException e) {
+                    message.append("Invalid milliseconds format. ");
+                }
+            }
+            
+            // Check for missing Z suffix or timezone
+            if (!timestampValue.endsWith("Z") && !timestampValue.contains("+") && timestampValue.lastIndexOf("-") <= 10) {
+                message.append("Missing timezone indicator. Add 'Z' for UTC or timezone offset like '+01:00'. ");
+            }
+            
+        } catch (Exception e) {
+            // If analysis fails, provide general guidance
+            message.append("Unable to parse timestamp format. ");
+        }
+        
+        // Add general format guidance
+        if (message.length() > ("Invalid timestamp '" + timestampValue + "': ").length()) {
+            message.append("Use format: YYYY-MM-DDTHH:MM:SS[.sss]Z");
+        } else {
+            message.append("Use format: YYYY-MM-DDTHH:MM:SS[.sss]Z (e.g., 2024-07-15T10:30:00Z)");
+        }
+        
+        return message.toString();
+    }
+    
+    /**
+     * Checks if a year is a leap year.
+     */
+    private boolean isLeapYear(int year) {
+        return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    }
+    
+    /**
+     * Gets the name of a month from its number.
+     */
+    private String getMonthName(int month) {
+        String[] months = {"", "January", "February", "March", "April", "May", "June",
+                          "July", "August", "September", "October", "November", "December"};
+        return month >= 1 && month <= 12 ? months[month] : "Invalid";
+    }
+    
+    /**
+     * Parse CASE expression.
+     * 
+     * <p><strong>Grammar Rule:</strong></p>
+     * <pre>
+     * case_expression ::= CASE [ expression ] 
+     *                     ( WHEN expression THEN expression )+
+     *                     [ ELSE expression ] 
+     *                     END
+     * </pre>
+     * 
+     * <p><strong>Special Cases:</strong></p>
+     * <ul>
+     *   <li>Simple CASE: CASE expression WHEN value THEN result ...</li>
+     *   <li>Searched CASE: CASE WHEN condition THEN result ...</li>
+     *   <li>ELSE clause is optional</li>
+     * </ul>
+     * 
+     * @param caseToken Token representing the CASE keyword
+     * @return CaseExpressionNode representing the parsed CASE expression
+     * @throws ParserException if CASE syntax is invalid
+     */
+    private ExpressionNode parseCaseExpression(Token caseToken) throws ParserException {
+        ExpressionNode expression = null;
+        List<WhenClauseNode> whenClauses = new ArrayList<>();
+        ExpressionNode elseExpression = null;
+        
+        try {
+            // Check if this is a simple CASE (CASE expression WHEN ...) 
+            // or searched CASE (CASE WHEN ...)
+            if (!tokens.check(TokenType.WHEN)) {
+                // Simple CASE - parse the expression to match against
+                expression = parseExpression();
+            }
+            
+            // Parse WHEN clauses - at least one is required
+            if (!tokens.check(TokenType.WHEN)) {
+                throw new ParserException("Expected WHEN clause after CASE");
+            }
+            
+            while (tokens.match(TokenType.WHEN)) {
+                Token whenToken = tokens.previous();
+                ExpressionNode condition = parseExpression();
+                
+                if (!tokens.match(TokenType.THEN)) {
+                    throw new ParserException("Expected THEN after WHEN condition");
+                }
+                
+                ExpressionNode result = parseExpression();
+                whenClauses.add(new WhenClauseNode(condition, result, location(whenToken)));
+            }
+            
+            // Parse optional ELSE clause
+            if (tokens.match(TokenType.ELSE)) {
+                elseExpression = parseExpression();
+            }
+            
+            // Consume END keyword
+            if (!tokens.match(TokenType.END)) {
+                throw new ParserException("Expected END to close CASE expression");
+            }
+            
+            return new CaseExpressionNode(expression, whenClauses, elseExpression, location(caseToken));
+            
+        } catch (ParserException e) {
+            // Error in CASE expression - add error and create synthetic expression
+            ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                tokens.current(), "Invalid CASE expression: " + e.getMessage());
+            errorHandler.addError(error);
+            
+            // Skip to END or recovery point
+            tokens.skipToRecoveryPoint(TokenType.END, TokenType.SEMICOLON, TokenType.COMMA);
+            if (tokens.check(TokenType.END)) {
+                tokens.advance(); // consume END
+            }
+            
+            // Return synthetic CASE expression
+            List<WhenClauseNode> syntheticWhen = List.of(
+                new WhenClauseNode(
+                    new LiteralNode(new CellValue.BooleanValue(true), location(caseToken)),
+                    new LiteralNode(new CellValue.NullValue(), location(caseToken)),
+                    location(caseToken)
+                )
+            );
+            return new CaseExpressionNode(null, syntheticWhen, null, location(caseToken));
+        }
+    }
 }

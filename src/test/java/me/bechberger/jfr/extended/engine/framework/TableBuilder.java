@@ -1,6 +1,7 @@
 package me.bechberger.jfr.extended.engine.framework;
 
 import me.bechberger.jfr.extended.table.JfrTable;
+import me.bechberger.jfr.extended.table.StandardJfrTable;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.table.CellType;
 
@@ -64,7 +65,7 @@ public class TableBuilder {
     }
     
     public QueryTestFramework build() {
-        JfrTable table = new JfrTable(columns);
+        JfrTable table = new StandardJfrTable(columns);
         for (List<Object> row : rows) {
             List<CellValue> cellValues = new ArrayList<>();
             for (int i = 0; i < row.size() && i < columns.size(); i++) {
@@ -85,11 +86,23 @@ public class TableBuilder {
         
         return switch (type) {
             case STRING -> new CellValue.StringValue(value.toString());
-            case NUMBER -> new CellValue.NumberValue(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()));
+            case NUMBER -> new CellValue.NumberValue(value instanceof Number n ? n.doubleValue() : Double.parseDouble(value.toString()));
             case FLOAT -> new CellValue.FloatValue(value instanceof Number n ? n.doubleValue() : Double.parseDouble(value.toString()));
             case BOOLEAN -> new CellValue.BooleanValue(value instanceof Boolean b ? b : Boolean.parseBoolean(value.toString()));
-            case TIMESTAMP -> new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
-            case DURATION -> new CellValue.DurationValue(java.time.Duration.ofMillis(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
+            case TIMESTAMP -> {
+                if (value instanceof java.time.Instant instant) {
+                    yield new CellValue.TimestampValue(instant);
+                } else {
+                    yield new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
+                }
+            }
+            case DURATION -> {
+                if (value instanceof java.time.Duration duration) {
+                    yield new CellValue.DurationValue(duration);
+                } else {
+                    yield new CellValue.DurationValue(java.time.Duration.ofMillis(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
+                }
+            }
             case MEMORY_SIZE -> new CellValue.MemorySizeValue(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()));
             default -> new CellValue.StringValue(value.toString());
         };

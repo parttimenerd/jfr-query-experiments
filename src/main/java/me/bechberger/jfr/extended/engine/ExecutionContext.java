@@ -20,14 +20,12 @@ public class ExecutionContext {
     private boolean debugMode = false;
     
     // QueryEngine functionality - global state
-    private final Map<String, Object> variables = new HashMap<>();
-    private final Map<String, LazyQuery> lazyVariables = new HashMap<>();
-    private final Map<String, QueryNode> views = new HashMap<>();
-    private final Map<String, JfrTable> resultCache = new HashMap<>();
-    private final Map<String, Long> cacheTimestamps = new HashMap<>(); // For TTL
-    private final Map<String, Set<String>> cacheDependencies = new HashMap<>(); // For dependency tracking
-    private long cacheMaxSize = 1000; // Default max cache entries
-    private long cacheTtlMs = 5 * 60 * 1000; // 5 minutes default TTL
+    private final Map<String, Object> variables = new ConcurrentHashMap<>();
+    private final Map<String, LazyQuery> lazyVariables = new ConcurrentHashMap<>();
+    private final Map<String, QueryNode> views = new ConcurrentHashMap<>();
+    private final Map<String, JfrTable> resultCache = new ConcurrentHashMap<>();
+    private final Map<String, Set<String>> cacheDependencies = new ConcurrentHashMap<>(); // For dependency tracking
+    private long cacheMaxSize = 1_000_000; // Default max cache entries (increased to 1 million)
     private boolean eventTypeVariablesInitialized = false;
     
     // Cache statistics
@@ -186,39 +184,34 @@ public class ExecutionContext {
      * Cache a result with dependency tracking
      */
     public void cacheResult(String key, JfrTable result, Set<String> dependencies) {
+        if (key == null || result == null) {
+            return; // Don't cache null keys or results
+        }
+        
         // Enforce cache size limit by evicting oldest entries
         if (resultCache.size() >= cacheMaxSize) {
             evictOldestCacheEntries();
         }
         
         resultCache.put(key, result);
-        cacheTimestamps.put(key, System.currentTimeMillis());
         
         if (dependencies != null && !dependencies.isEmpty()) {
             cacheDependencies.put(key, new HashSet<>(dependencies));
         }
-        
-        cacheMisses++; // This was a miss that we're now caching
     }
     
     /**
-     * Get cached result with TTL and dependency checking
+     * Get cached result with dependency checking
+     * No TTL enforcement - cache persists between query invocations
      */
     public JfrTable getCachedResult(String key) {
-        JfrTable result = resultCache.get(key);
-        if (result == null) {
+        if (key == null) {
             cacheMisses++;
             return null;
         }
         
-        // Check TTL
-        Long timestamp = cacheTimestamps.get(key);
-        if (timestamp != null && System.currentTimeMillis() - timestamp > cacheTtlMs) {
-            // Entry has expired
-            resultCache.remove(key);
-            cacheTimestamps.remove(key);
-            cacheDependencies.remove(key);
-            cacheEvictions++;
+        JfrTable result = resultCache.get(key);
+        if (result == null) {
             cacheMisses++;
             return null;
         }
@@ -231,40 +224,43 @@ public class ExecutionContext {
      * Invalidate cache entries that depend on a specific resource
      */
     public void invalidateCacheDependencies(String dependency) {
+        if (dependency == null) {
+            return; // Nothing to invalidate
+        }
+        
         Set<String> toRemove = new HashSet<>();
         
         for (Map.Entry<String, Set<String>> entry : cacheDependencies.entrySet()) {
-            if (entry.getValue().contains(dependency)) {
+            Set<String> dependencies = entry.getValue();
+            if (dependencies != null && dependencies.contains(dependency)) {
                 toRemove.add(entry.getKey());
             }
         }
         
         for (String key : toRemove) {
             resultCache.remove(key);
-            cacheTimestamps.remove(key);
             cacheDependencies.remove(key);
             cacheEvictions++;
         }
     }
     
     /**
-     * Evict the oldest cache entries to make room for new ones
+     * Evict cache entries to make room for new ones
+     * Uses a simple random eviction strategy since we don't track access times
      */
     private void evictOldestCacheEntries() {
         if (resultCache.size() < cacheMaxSize) {
             return;
         }
         
-        // Remove 25% of the oldest entries
-        int toRemove = Math.max(1, (int) (cacheMaxSize * 0.25));
+        // Remove 10% of entries to make space
+        int toRemove = Math.max(1, (int) (cacheMaxSize * 0.10));
         
-        List<Map.Entry<String, Long>> timestampEntries = new ArrayList<>(cacheTimestamps.entrySet());
-        timestampEntries.sort(Map.Entry.comparingByValue());
-        
-        for (int i = 0; i < toRemove && i < timestampEntries.size(); i++) {
-            String key = timestampEntries.get(i).getKey();
+        // Simple eviction - remove the first entries we encounter
+        List<String> keys = new ArrayList<>(resultCache.keySet());
+        for (int i = 0; i < toRemove && i < keys.size(); i++) {
+            String key = keys.get(i);
             resultCache.remove(key);
-            cacheTimestamps.remove(key);
             cacheDependencies.remove(key);
             cacheEvictions++;
         }
@@ -280,9 +276,29 @@ public class ExecutionContext {
     /**
      * Set cache configuration
      */
-    public void setCacheConfig(long maxSize, long ttlMs) {
+    public void setCacheConfig(long maxSize) {
+        if (maxSize <= 0) {
+            throw new IllegalArgumentException("Cache max size must be positive, got: " + maxSize);
+        }
         this.cacheMaxSize = maxSize;
-        this.cacheTtlMs = ttlMs;
+    }
+    
+    /**
+     * Set cache configuration (legacy method for backward compatibility)
+     */
+    public void setCacheConfig(long maxSize, long ttlMs) {
+        if (maxSize <= 0) {
+            throw new IllegalArgumentException("Cache max size must be positive, got: " + maxSize);
+        }
+        this.cacheMaxSize = maxSize;
+        // TTL is ignored - no longer supported
+    }
+    
+    /**
+     * Get cache configuration
+     */
+    public CacheConfig getCacheConfig() {
+        return new CacheConfig(cacheMaxSize, 0); // TTL is always 0 (disabled)
     }
     
     /**
@@ -290,7 +306,6 @@ public class ExecutionContext {
      */
     public void clearCache() {
         resultCache.clear();
-        cacheTimestamps.clear();
         cacheDependencies.clear();
     }
     
@@ -319,7 +334,6 @@ public class ExecutionContext {
         lazyVariables.clear();
         views.clear();
         resultCache.clear();
-        cacheTimestamps.clear();
         cacheDependencies.clear();
         eventTypeVariablesInitialized = false;
         // Reset cache statistics
@@ -340,10 +354,8 @@ public class ExecutionContext {
         child.lazyVariables.putAll(this.lazyVariables);
         child.views.putAll(this.views);
         child.resultCache.putAll(this.resultCache);
-        child.cacheTimestamps.putAll(this.cacheTimestamps);
         child.cacheDependencies.putAll(this.cacheDependencies);
         child.cacheMaxSize = this.cacheMaxSize;
-        child.cacheTtlMs = this.cacheTtlMs;
         child.eventTypeVariablesInitialized = this.eventTypeVariablesInitialized;
         return child;
     }
@@ -382,5 +394,89 @@ public class ExecutionContext {
             return String.format("CacheStats{hits=%d, misses=%d, evictions=%d, size=%d, hitRate=%.2f%%}", 
                 hits, misses, evictions, size, getHitRate() * 100);
         }
+    }
+
+    /**
+     * Cache configuration for monitoring cache settings
+     */
+    public static class CacheConfig {
+        private final long maxSize;
+        private final long ttlMs;
+        
+        public CacheConfig(long maxSize, long ttlMs) {
+            this.maxSize = maxSize;
+            this.ttlMs = ttlMs;
+        }
+        
+        public long getMaxSize() { return maxSize; }
+        public long getTtlMs() { return ttlMs; }
+        
+        @Override
+        public String toString() {
+            return String.format("CacheConfig{maxSize=%d, ttlMs=%d}", maxSize, ttlMs);
+        }
+    }
+
+    /**
+     * Check if a variable exists
+     */
+    public boolean hasVariable(String name) {
+        return variables.containsKey(name);
+    }
+    
+    /**
+     * Check if a lazy variable exists
+     */
+    public boolean hasLazyVariable(String name) {
+        return lazyVariables.containsKey(name);
+    }
+    
+    /**
+     * Remove a variable
+     */
+    public void removeVariable(String name) {
+        variables.remove(name);
+    }
+    
+    /**
+     * Remove a lazy variable
+     */
+    public void removeLazyVariable(String name) {
+        lazyVariables.remove(name);
+    }
+    
+    /**
+     * Clear all variables
+     */
+    public void clearVariables() {
+        variables.clear();
+    }
+    
+    /**
+     * Clear all lazy variables
+     */
+    public void clearLazyVariables() {
+        lazyVariables.clear();
+    }
+    
+    /**
+     * Get cache hits count
+     */
+    public long getCacheHits() {
+        return cacheHits;
+    }
+    
+    /**
+     * Get cache misses count
+     */
+    public long getCacheMisses() {
+        return cacheMisses;
+    }
+    
+    /**
+     * Get executed queries count (approximated by cache operations)
+     */
+    public long getExecutedQueries() {
+        return cacheHits + cacheMisses;
     }
 }

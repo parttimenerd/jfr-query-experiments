@@ -42,10 +42,10 @@ public interface ASTVisitor<T> {
     T visitIdentifier(IdentifierNode node);
     T visitNestedQuery(NestedQueryNode node);
     T visitArrayLiteral(ArrayLiteralNode node);
+    T visitStar(StarNode node);
     
     // Conditions
     T visitCondition(ConditionNode node);
-    T visitGCCorrelation(GCCorrelationNode node);
     T visitVariableDeclaration(VariableDeclarationNode node);
     T visitExpressionCondition(ExpressionConditionNode node);
     
@@ -61,6 +61,9 @@ public interface ASTVisitor<T> {
     T visitStandardJoinSource(StandardJoinSourceNode node);
     T visitPercentileFunction(PercentileFunctionNode node);
     T visitPercentileSelection(PercentileSelectionNode node);
+    
+    // Case expression
+    T visitCaseExpression(CaseExpressionNode node);
     
     // Conditions
     T visitWithinCondition(WithinConditionNode node);

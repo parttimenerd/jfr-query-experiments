@@ -1,5 +1,7 @@
 package me.bechberger.jfr.extended.evaluator;
 
+import me.bechberger.jfr.extended.engine.exception.FunctionArgumentException;
+import me.bechberger.jfr.extended.engine.exception.QueryEvaluationException;
 import me.bechberger.jfr.extended.table.CellValue;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,9 +16,7 @@ import java.util.stream.Collectors;
 public class DataAccessFunctions {
     
     static CellValue evaluateFirst(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("FIRST requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("FIRST", arguments, 1);
         
         String fieldName = arguments.get(0).getValue().toString();
         List<CellValue> values = context.getAllValues(fieldName);
@@ -25,9 +25,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateLast(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("LAST requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("LAST", arguments, 1);
         
         String fieldName = arguments.get(0).getValue().toString();
         List<CellValue> values = context.getAllValues(fieldName);
@@ -36,9 +34,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateLastBatch(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new RuntimeException("LAST_BATCH requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("LAST_BATCH", arguments, 2);
         
         String fieldName = arguments.get(0).getValue().toString();
         int batchSize = ((Number) arguments.get(1).getValue()).intValue();
@@ -49,9 +45,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateUnique(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("UNIQUE requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("UNIQUE", arguments, 1);
         
         String fieldName = arguments.get(0).getValue().toString();
         List<CellValue> values = context.getAllValues(fieldName);
@@ -60,18 +54,14 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateList(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("LIST requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("LIST", arguments, 1);
         
         String fieldName = arguments.get(0).getValue().toString();
         return new CellValue.ArrayValue(context.getAllValues(fieldName));
     }
     
     static CellValue evaluateDiff(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("DIFF requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("DIFF", arguments, 1);
         
         String fieldName = arguments.get(0).getValue().toString();
         List<CellValue> values = context.getAllValues(fieldName);
@@ -98,9 +88,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateHead(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new RuntimeException("HEAD requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("HEAD", arguments, 2);
         
         String fieldName = arguments.get(0).getValue().toString();
         int count = ((Number) arguments.get(1).getValue()).intValue();
@@ -110,9 +98,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateTail(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.size() != 2) {
-            throw new RuntimeException("TAIL requires exactly 2 arguments");
-        }
+        FunctionUtils.assertArgumentCount("TAIL", arguments, 2);
         
         String fieldName = arguments.get(0).getValue().toString();
         int count = ((Number) arguments.get(1).getValue()).intValue();
@@ -123,9 +109,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateSlice(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.size() != 3) {
-            throw new RuntimeException("SLICE requires exactly 3 arguments");
-        }
+        FunctionUtils.assertArgumentCount("SLICE", arguments, 3);
         
         String fieldName = arguments.get(0).getValue().toString();
         int start = ((Number) arguments.get(1).getValue()).intValue();
@@ -139,9 +123,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateBeforeGc(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("BEFORE_GC requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("BEFORE_GC", arguments, 1);
         
         Object timeArg = arguments.get(0).getValue();
         long timestamp = convertToTimestamp(timeArg);
@@ -158,9 +140,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateAfterGc(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("AFTER_GC requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("AFTER_GC", arguments, 1);
         
         Object timeArg = arguments.get(0).getValue();
         long timestamp = convertToTimestamp(timeArg);
@@ -177,9 +157,7 @@ public class DataAccessFunctions {
     }
     
     static CellValue evaluateClosestGc(AggregateFunctions.EvaluationContext context, List<CellValue> arguments) {
-        if (arguments.isEmpty()) {
-            throw new RuntimeException("CLOSEST_GC requires at least one argument");
-        }
+        FunctionUtils.assertAtLeastArguments("CLOSEST_GC", arguments, 1);
         
         Object timeArg = arguments.get(0).getValue();
         long timestamp = convertToTimestamp(timeArg);
@@ -231,12 +209,13 @@ public class DataAccessFunctions {
                     // Try to parse as ISO timestamp
                     return java.time.Instant.parse(stringValue).toEpochMilli();
                 } catch (Exception ex) {
-                    throw new RuntimeException("Invalid timestamp format: " + stringValue, ex);
+                    throw QueryEvaluationException.forInvalidConversion("string", "timestamp", stringValue, null);
                 }
             }
         } else {
-            throw new RuntimeException("Timestamp must be a TimestampValue, Instant, number, or valid string, got: " + 
-                (timeArg != null ? timeArg.getClass().getSimpleName() : "null"));
+            throw QueryEvaluationException.forInvalidConversion(
+                timeArg != null ? timeArg.getClass().getSimpleName() : "null", 
+                "timestamp", timeArg, null);
         }
     }
 }

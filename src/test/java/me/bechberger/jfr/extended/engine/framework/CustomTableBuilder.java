@@ -1,6 +1,7 @@
 package me.bechberger.jfr.extended.engine.framework;
 
 import me.bechberger.jfr.extended.table.JfrTable;
+import me.bechberger.jfr.extended.table.StandardJfrTable;
 import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.table.CellType;
 
@@ -61,7 +62,7 @@ public class CustomTableBuilder {
     }
     
     public QueryTestFramework build() {
-        JfrTable table = new JfrTable(columns);
+        JfrTable table = new StandardJfrTable(columns);
         for (List<Object> row : rows) {
             List<CellValue> cellValues = new ArrayList<>();
             for (int i = 0; i < row.size() && i < columns.size(); i++) {

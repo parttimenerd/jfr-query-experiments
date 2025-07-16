@@ -286,7 +286,7 @@ public class TableParsingUtils {
     /**
      * Parse array values (e.g., "[1,2,3]", "[INFO,WARN,ERROR]")
      */
-    private static Object parseArrayValue(String value) {
+    public static Object parseArrayValue(String value) {
         if (!value.startsWith("[") || !value.endsWith("]")) {
             return value; // Not a proper array format
         }
