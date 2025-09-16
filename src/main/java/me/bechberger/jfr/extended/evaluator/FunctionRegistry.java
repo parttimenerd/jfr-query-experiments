@@ -2,6 +2,10 @@ package me.bechberger.jfr.extended.evaluator;
 
 import me.bechberger.jfr.extended.TokenType;
 import me.bechberger.jfr.extended.table.CellValue;
+import me.bechberger.jfr.extended.table.CellType;
+import me.bechberger.jfr.extended.engine.exception.UnknownFunctionException;
+import me.bechberger.jfr.extended.engine.exception.FunctionArgumentException;
+import me.bechberger.jfr.extended.engine.exception.FunctionArgumentException.ArgumentErrorType;
 import java.util.*;
 
 /**
@@ -36,7 +40,7 @@ public class FunctionRegistry {
     public CellValue evaluateFunction(String functionName, List<CellValue> arguments, AggregateFunctions.EvaluationContext context) {
         FunctionDefinition function = functions.get(functionName.toUpperCase());
         if (function == null) {
-            throw new IllegalArgumentException("Unknown function: " + functionName);
+            throw new UnknownFunctionException(functionName, functions.keySet(), null);
         }
         
         return switch (function) {
@@ -52,10 +56,12 @@ public class FunctionRegistry {
      */
     protected void validateArgumentCount(String functionName, List<CellValue> arguments, int expectedCount) {
         if (arguments.size() != expectedCount) {
-            throw new IllegalArgumentException(
-                functionName + " function requires exactly " + expectedCount + 
-                " argument" + (expectedCount == 1 ? "" : "s") + 
-                ", but got " + arguments.size()
+            throw new FunctionArgumentException(
+                functionName,
+                expectedCount,
+                arguments.size(),
+                ArgumentErrorType.WRONG_ARGUMENT_COUNT,
+                null
             );
         }
     }
@@ -65,10 +71,12 @@ public class FunctionRegistry {
      */
     protected void validateMinArgumentCount(String functionName, List<CellValue> arguments, int minCount) {
         if (arguments.size() < minCount) {
-            throw new IllegalArgumentException(
-                functionName + " function requires at least " + minCount + 
-                " argument" + (minCount == 1 ? "" : "s") + 
-                ", but got " + arguments.size()
+            throw new FunctionArgumentException(
+                functionName,
+                minCount,
+                arguments.size(),
+                ArgumentErrorType.WRONG_ARGUMENT_COUNT,
+                null
             );
         }
     }
@@ -153,6 +161,38 @@ public class FunctionRegistry {
     }
     
     /**
+     * Get the default return type for a function
+     * 
+     * @param functionName The name of the function
+     * @return The default return type as CellType, or null if function not found
+     */
+    public CellType getDefaultReturnType(String functionName) {
+        FunctionDefinition definition = functions.get(functionName.toUpperCase());
+        if (definition == null) {
+            return null;
+        }
+        
+        return returnTypeToCellType(definition.returnType());
+    }
+    
+    /**
+     * Convert ReturnType to CellType
+     */
+    private CellType returnTypeToCellType(ReturnType returnType) {
+        return switch (returnType) {
+            case NUMBER -> CellType.NUMBER;  // NUMBER should be NUMBER for numeric calculations like AVG
+            case STRING -> CellType.STRING;
+            case TIMESTAMP -> CellType.TIMESTAMP;
+            case BOOLEAN -> CellType.BOOLEAN;
+            case ARRAY -> CellType.ARRAY;
+            case FIELD -> CellType.STRING;
+            case ANY -> CellType.STRING;
+            case VOID -> CellType.STRING;
+            case SAME_AS_INPUT -> CellType.NUMBER; // For aggregates like AVG, SUM, MIN, MAX default to NUMBER
+        };
+    }
+    
+    /**
      * Generates a function signature string for documentation
      */
     private String generateSignature(String functionName, List<ParameterDefinition> parameters) {
@@ -196,6 +236,7 @@ public class FunctionRegistry {
         registerStringFunctions();
         registerDateTimeFunctions();
         registerConditionalFunctions();
+        registerConversionFunctions();
             }
     
     /**
@@ -206,7 +247,7 @@ public class FunctionRegistry {
         register(createAggregateFunction("AVG", null, FunctionType.AGGREGATE,
                 "Calculate average of numeric values",
                 List.of(new ParameterDefinition("field", ParameterType.FIELD, "Field to average")),
-                ReturnType.SAME_AS_INPUT,
+                ReturnType.NUMBER,  // AVG always returns a numeric value (could be float)
                 "AVG(duration), AVG(allocatedBytes)",
                 AggregateFunctions::evaluateAvg
         ));
@@ -244,7 +285,7 @@ public class FunctionRegistry {
         ));
         
         // Percentile functions
-        register(createAggregateFunction("PERCENTILE", TokenType.PERCENTILE, FunctionType.AGGREGATE,
+        register(createAggregateFunction("PERCENTILE", null, FunctionType.AGGREGATE,
                 "Calculate arbitrary percentile with custom expression",
                 List.of(
                     new ParameterDefinition("percentile", ParameterType.PERCENTILE, "Percentile value (0-100)"),
@@ -256,7 +297,7 @@ public class FunctionRegistry {
         ));
         
         // Add specific percentile functions
-        register(createAggregateFunction("P99", TokenType.P99, FunctionType.AGGREGATE,
+        register(createAggregateFunction("P99", null, FunctionType.AGGREGATE,
                 "Calculate 99th percentile",
                 List.of(new ParameterDefinition("field", ParameterType.FIELD, "Field to analyze")),
                 ReturnType.SAME_AS_INPUT,
@@ -264,7 +305,7 @@ public class FunctionRegistry {
                 AggregateFunctions::evaluateP99
         ));
         
-        register(createAggregateFunction("P95", TokenType.P95, FunctionType.AGGREGATE,
+        register(createAggregateFunction("P95", null, FunctionType.AGGREGATE,
                 "Calculate 95th percentile",
                 List.of(new ParameterDefinition("field", ParameterType.FIELD, "Field to analyze")),
                 ReturnType.SAME_AS_INPUT,
@@ -272,7 +313,7 @@ public class FunctionRegistry {
                 AggregateFunctions::evaluateP95
         ));
         
-        register(createAggregateFunction("P90", TokenType.P90, FunctionType.AGGREGATE,
+        register(createAggregateFunction("P90", null, FunctionType.AGGREGATE,
                 "Calculate 90th percentile",
                 List.of(new ParameterDefinition("field", ParameterType.FIELD, "Field to analyze")),
                 ReturnType.SAME_AS_INPUT,
@@ -288,7 +329,7 @@ public class FunctionRegistry {
                 AggregateFunctions::evaluateP50
         ));
         
-        register(createAggregateFunction("P999", TokenType.P999, FunctionType.AGGREGATE,
+        register(createAggregateFunction("P999", null, FunctionType.AGGREGATE,
                 "Calculate 99.9th percentile",
                 List.of(new ParameterDefinition("field", ParameterType.FIELD, "Field to analyze")),
                 ReturnType.SAME_AS_INPUT,
@@ -468,7 +509,7 @@ public class FunctionRegistry {
         ));
         
         // Percentile selection functions
-        register(createAggregateFunction("PERCENTILE_SELECT", TokenType.PERCENTILE_SELECT, FunctionType.DATA_ACCESS,
+        register(createAggregateFunction("PERCENTILE_SELECT", null, FunctionType.DATA_ACCESS,
                 "Select values at specific percentile",
                 List.of(
                     new ParameterDefinition("percentile", ParameterType.NUMBER, "Percentile value (0-100)"),
@@ -482,7 +523,7 @@ public class FunctionRegistry {
         ));
         
         // Specific percentile selection functions
-        register(createAggregateFunction("P90SELECT", TokenType.P90SELECT, FunctionType.DATA_ACCESS,
+        register(createAggregateFunction("P90SELECT", null, FunctionType.DATA_ACCESS,
                 "Select values at 90th percentile",
                 List.of(
                     new ParameterDefinition("table", ParameterType.STRING, "Table name"),
@@ -494,7 +535,7 @@ public class FunctionRegistry {
                 (context, args) -> PercentileSelectionFunctions.evaluateP90Select(args, context)
         ));
         
-        register(createAggregateFunction("P95SELECT", TokenType.P95SELECT, FunctionType.DATA_ACCESS,
+        register(createAggregateFunction("P95SELECT", null, FunctionType.DATA_ACCESS,
                 "Select values at 95th percentile",
                 List.of(
                     new ParameterDefinition("table", ParameterType.STRING, "Table name"),
@@ -506,7 +547,7 @@ public class FunctionRegistry {
                 (context, args) -> PercentileSelectionFunctions.evaluateP95Select(args, context)
         ));
         
-        register(createAggregateFunction("P99SELECT", TokenType.P99SELECT, FunctionType.DATA_ACCESS,
+        register(createAggregateFunction("P99SELECT", null, FunctionType.DATA_ACCESS,
                 "Select values at 99th percentile",
                 List.of(
                     new ParameterDefinition("table", ParameterType.STRING, "Table name"),
@@ -518,7 +559,7 @@ public class FunctionRegistry {
                 (context, args) -> PercentileSelectionFunctions.evaluateP99Select(args, context)
         ));
         
-        register(createAggregateFunction("P999SELECT", TokenType.P999SELECT, FunctionType.DATA_ACCESS,
+        register(createAggregateFunction("P999SELECT", null, FunctionType.DATA_ACCESS,
                 "Select values at 99.9th percentile",
                 List.of(
                     new ParameterDefinition("table", ParameterType.STRING, "Table name"),
@@ -1052,7 +1093,37 @@ public class FunctionRegistry {
         MATHEMATICAL,   // Mathematical functions (ABS, SQRT, etc.)
         STRING,         // String manipulation functions
         DATE_TIME,      // Date/time functions
-        CONDITIONAL     // Conditional functions (IF, CASE, etc.)
+        CONDITIONAL,    // Conditional functions (IF, CASE, etc.)
+        CONVERSION      // Type conversion functions (BOOLEAN, STRING, NUMBER, etc.)
+    }
+    
+    /**
+     * Register conversion functions
+     */
+    private void registerConversionFunctions() {
+        register(createSimpleFunction("BOOLEAN", null, FunctionType.CONVERSION,
+                "Convert any value to boolean",
+                List.of(new ParameterDefinition("value", ParameterType.ANY, "Value to convert to boolean")),
+                ReturnType.BOOLEAN,
+                "BOOLEAN(1), BOOLEAN('true'), BOOLEAN(0)",
+                ConversionFunctions::evaluateBoolean
+        ));
+        
+        register(createSimpleFunction("STRING", null, FunctionType.CONVERSION,
+                "Convert any value to string",
+                List.of(new ParameterDefinition("value", ParameterType.ANY, "Value to convert to string")),
+                ReturnType.STRING,
+                "STRING(123), STRING(true), STRING(null)",
+                ConversionFunctions::evaluateString
+        ));
+        
+        register(createSimpleFunction("NUMBER", null, FunctionType.CONVERSION,
+                "Convert any value to number",
+                List.of(new ParameterDefinition("value", ParameterType.ANY, "Value to convert to number")),
+                ReturnType.NUMBER,
+                "NUMBER('123'), NUMBER(true), NUMBER(3.14)",
+                ConversionFunctions::evaluateNumber
+        ));
     }
     
     /**

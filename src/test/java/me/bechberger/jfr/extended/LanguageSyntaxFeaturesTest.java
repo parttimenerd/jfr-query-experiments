@@ -221,11 +221,11 @@ public class LanguageSyntaxFeaturesTest {
     @DisplayName("Standard JOIN syntax should parse correctly")
     public void testStandardJoins() {
         String[] joinQueries = {
-            "@SELECT * FROM Event e1 INNER JOIN GarbageCollection gc ON e1.startTime = gc.startTime",
-            "@SELECT * FROM Event e1 LEFT JOIN GarbageCollection gc ON e1.thread = gc.thread",
-            "@SELECT * FROM Event e1 RIGHT JOIN GarbageCollection gc ON e1.id = gc.eventId", 
-            "@SELECT * FROM Event e1 FULL JOIN GarbageCollection gc ON e1.startTime = gc.startTime",
-            "@SELECT * FROM Event e1 JOIN GarbageCollection gc ON e1.id = gc.id" // Default INNER
+            "@SELECT * FROM Event AS e1 INNER JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime",
+            "@SELECT * FROM Event AS e1 LEFT JOIN GarbageCollection AS gc ON e1.thread = gc.thread",
+            "@SELECT * FROM Event AS e1 RIGHT JOIN GarbageCollection AS gc ON e1.id = gc.eventId", 
+            "@SELECT * FROM Event AS e1 FULL JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime",
+            "@SELECT * FROM Event AS e1 JOIN GarbageCollection AS gc ON e1.id = gc.id" // Default INNER
         };
         
         for (String query : joinQueries) {
@@ -243,10 +243,10 @@ public class LanguageSyntaxFeaturesTest {
     @DisplayName("Fuzzy JOIN syntax should parse correctly")
     public void testFuzzyJoins() {
         String[] fuzzyJoinQueries = {
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime WITH NEAREST",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime WITH PREVIOUS TOLERANCE 1ms",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime WITH AFTER TOLERANCE 5ms threshold 0.9"
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime WITH NEAREST",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime WITH PREVIOUS TOLERANCE 1ms",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime WITH AFTER TOLERANCE 5ms threshold 0.9"
         };
         
         for (String query : fuzzyJoinQueries) {
@@ -324,10 +324,10 @@ public class LanguageSyntaxFeaturesTest {
     @DisplayName("Threshold and tolerance parameters should parse correctly")
     public void testThresholdTolerance() {
         String[] thresholdToleranceQueries = {
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime TOLERANCE 100ms",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime threshold 0.8",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime TOLERANCE 50ms threshold 0.9",
-            "@SELECT * FROM Event e1 FUZZY JOIN GarbageCollection gc ON e1.startTime = gc.startTime threshold 0.7 TOLERANCE 200ms"
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime TOLERANCE 100ms",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime threshold 0.8",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection AS gc ON e1.startTime = gc.startTime TOLERANCE 50ms threshold 0.9",
+            "@SELECT * FROM Event AS e1 FUZZY JOIN GarbageCollection ASgc ON e1.startTime = gc.startTime threshold 0.7 TOLERANCE 200ms"
         };
         
         for (String query : thresholdToleranceQueries) {

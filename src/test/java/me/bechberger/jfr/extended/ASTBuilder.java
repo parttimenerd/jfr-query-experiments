@@ -125,7 +125,12 @@ public class ASTBuilder {
     }
     
     public static SelectNode selectAll() {
-        return new SelectNode(List.of(), true, location(1, 1));
+        SelectItemNode starItem = new SelectItemNode(
+            new StarNode(location(1, 1)), 
+            null, 
+            location(1, 1)
+        );
+        return new SelectNode(List.of(starItem), true, location(1, 1));
     }
     
     public static SelectNode select(ExpressionNode... expressions) {
@@ -452,18 +457,13 @@ public class ASTBuilder {
             }
             
             @Override
-            public int getLine() {
-                return decl.getLine();
-            }
-            
-            @Override
-            public int getColumn() {
-                return decl.getColumn();
-            }
-            
-            @Override
             public String format() {
                 return decl.format();
+            }
+
+            @Override
+            public Location getLocation() {
+                return decl.location();
             }
         };
     }

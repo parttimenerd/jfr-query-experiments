@@ -1,9 +1,12 @@
 package me.bechberger.jfr.extended.table;
 
+import me.bechberger.jfr.extended.ast.ExpressionKey;
 import me.bechberger.jfr.extended.table.exception.CellAccessException;
 import me.bechberger.jfr.extended.table.exception.CellIndexOutOfBoundsException;
 import me.bechberger.jfr.extended.table.exception.ColumnIndexOutOfBoundsException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -28,13 +31,31 @@ public interface JfrTable {
      */
     class Row {
         private final List<CellValue> cells;
+        private Map<String, Object> variables; // Lazy initialization
+        private Map<ExpressionKey, CellValue> computedAggregates; // Lazy initialization for aggregate values
         
         public Row(List<CellValue> cells) {
             this.cells = List.copyOf(cells);
+            this.variables = null; // Don't create map until needed
+            this.computedAggregates = null; // Don't create map until needed
         }
         
         public Row(CellValue... cells) {
             this.cells = List.of(cells);
+            this.variables = null; // Don't create map until needed
+            this.computedAggregates = null; // Don't create map until needed
+        }
+        
+        public Row(List<CellValue> cells, Map<String, Object> variables) {
+            this.cells = List.copyOf(cells);
+            this.variables = variables != null && !variables.isEmpty() ? new HashMap<>(variables) : null;
+            this.computedAggregates = null; // Don't create map until needed
+        }
+        
+        public Row(List<CellValue> cells, Map<String, Object> variables, Map<ExpressionKey, CellValue> computedAggregates) {
+            this.cells = List.copyOf(cells);
+            this.variables = variables != null && !variables.isEmpty() ? new HashMap<>(variables) : null;
+            this.computedAggregates = computedAggregates != null && !computedAggregates.isEmpty() ? new HashMap<>(computedAggregates) : null;
         }
         
         public List<CellValue> getCells() {
@@ -102,7 +123,7 @@ public interface JfrTable {
             if (cell instanceof CellValue.NumberValue numberValue) {
                 return numberValue.value();
             }
-            if (cell instanceof CellValue.FloatValue floatValue) {
+            if (cell instanceof CellValue.NumberValue floatValue) {
                 return floatValue.value();
             }
             if (cell instanceof CellValue.NullValue) {
@@ -201,7 +222,7 @@ public interface JfrTable {
          */
         public double getFloat(int index) {
             CellValue cell = getCell(index);
-            if (cell instanceof CellValue.FloatValue floatValue) {
+            if (cell instanceof CellValue.NumberValue floatValue) {
                 return floatValue.value();
             }
             if (cell instanceof CellValue.NullValue) {
@@ -215,6 +236,86 @@ public interface JfrTable {
          */
         public boolean isNull(int index) {
             return getCell(index) instanceof CellValue.NullValue;
+        }
+        
+        // Variable management methods (lightweight, lazy initialization)
+        
+        /**
+         * Set a variable for this row
+         */
+        public void setVariable(String name, Object value) {
+            if (variables == null) {
+                variables = new HashMap<>();
+            }
+            variables.put(name, value);
+        }
+        
+        /**
+         * Get a variable for this row
+         */
+        public Object getVariable(String name) {
+            return variables != null ? variables.get(name) : null;
+        }
+        
+        /**
+         * Check if this row has a variable
+         */
+        public boolean hasVariable(String name) {
+            return variables != null && variables.containsKey(name);
+        }
+        
+        /**
+         * Get all variables for this row (returns unmodifiable view if variables exist, empty map if none)
+         */
+        public Map<String, Object> getVariables() {
+            return variables != null ? Map.copyOf(variables) : Map.of();
+        }
+        
+        /**
+         * Create a new row with the same cells but potentially different variables
+         */
+        public Row withVariables(Map<String, Object> newVariables) {
+            return new Row(this.cells, newVariables, this.computedAggregates);
+        }
+        
+        // ===== COMPUTED AGGREGATE METHODS =====
+        
+        /**
+         * Set a computed aggregate value for this row
+         */
+        public void setComputedAggregate(ExpressionKey key, CellValue value) {
+            if (computedAggregates == null) {
+                computedAggregates = new HashMap<>();
+            }
+            computedAggregates.put(key, value);
+        }
+        
+        /**
+         * Get a computed aggregate value for this row
+         */
+        public CellValue getComputedAggregate(ExpressionKey key) {
+            return computedAggregates != null ? computedAggregates.get(key) : null;
+        }
+        
+        /**
+         * Check if this row has a computed aggregate value
+         */
+        public boolean hasComputedAggregate(ExpressionKey key) {
+            return computedAggregates != null && computedAggregates.containsKey(key);
+        }
+        
+        /**
+         * Get all computed aggregates for this row (returns unmodifiable view if aggregates exist, empty map if none)
+         */
+        public Map<ExpressionKey, CellValue> getComputedAggregates() {
+            return computedAggregates != null ? Map.copyOf(computedAggregates) : Map.of();
+        }
+        
+        /**
+         * Create a new row with the same cells and variables but potentially different computed aggregates
+         */
+        public Row withComputedAggregates(Map<ExpressionKey, CellValue> newComputedAggregates) {
+            return new Row(this.cells, this.variables, newComputedAggregates);
         }
         
         @Override
@@ -247,6 +348,13 @@ public interface JfrTable {
      * Get column by name
      */
     Optional<Column> getColumn(String name);
+
+    default Optional<Column> getColumn(int index) {
+        if (index < 0 || index >= getColumns().size()) {
+            return Optional.empty();
+        }
+        return Optional.of(getColumns().get(index));
+    }
     
     /**
      * Get column index by name
@@ -368,7 +476,7 @@ public interface JfrTable {
         if (cell instanceof CellValue.NumberValue numberValue) {
             return numberValue.value();
         }
-        if (cell instanceof CellValue.FloatValue floatValue) {
+        if (cell instanceof CellValue.NumberValue floatValue) {
             return floatValue.value();
         }
         if (cell instanceof CellValue.NullValue) {
@@ -385,7 +493,7 @@ public interface JfrTable {
         if (cell instanceof CellValue.NumberValue numberValue) {
             return numberValue.value();
         }
-        if (cell instanceof CellValue.FloatValue floatValue) {
+        if (cell instanceof CellValue.NumberValue floatValue) {
             return floatValue.value();
         }
         if (cell instanceof CellValue.NullValue) {
@@ -569,7 +677,7 @@ public interface JfrTable {
      */
     default double getFloat(int rowIndex, String columnName) {
         CellValue cell = getCell(rowIndex, columnName);
-        if (cell instanceof CellValue.FloatValue floatValue) {
+        if (cell instanceof CellValue.NumberValue floatValue) {
             return floatValue.value();
         }
         if (cell instanceof CellValue.NullValue) {
@@ -583,7 +691,7 @@ public interface JfrTable {
      */
     default double getFloat(int rowIndex, int columnIndex) {
         CellValue cell = getCell(rowIndex, columnIndex);
-        if (cell instanceof CellValue.FloatValue floatValue) {
+        if (cell instanceof CellValue.NumberValue floatValue) {
             return floatValue.value();
         }
         if (cell instanceof CellValue.NullValue) {

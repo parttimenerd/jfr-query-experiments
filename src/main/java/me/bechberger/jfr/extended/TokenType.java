@@ -24,8 +24,9 @@ public enum TokenType {
     DURATION_LITERAL("\\d+(\\.\\d+)?(hours|hour|days|day|min|ns|us|ms|s|m|h|d)(\\d+(\\.\\d+)?(hours|hour|days|day|min|ns|us|ms|s|m|h|d))*", TokenAttribute.LITERAL),
     TIME_LITERAL("\\d{1,2}:\\d{2}(:\\d{2})?", TokenAttribute.LITERAL),
     TIMESTAMP_LITERAL("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z?", TokenAttribute.LITERAL),
+    DATE_LITERAL("\\d{4}-\\d{2}-\\d{2}", TokenAttribute.LITERAL),
     NUMBER("\\d+(\\.\\d+)?", TokenAttribute.LITERAL),
-    STRING("'([^'\\\\]|\\\\.)*'", TokenAttribute.LITERAL),
+    STRING("'([^'\\\\]|\\\\.)*'|\"([^\"\\\\]|\\\\.)*\"", TokenAttribute.LITERAL),
     SYNTHETIC_FIELD("\\$[a-zA-Z][a-zA-Z0-9_]*"),
     IDENTIFIER("[a-zA-Z_][a-zA-Z0-9_]*"),
     BOOLEAN("\\b(true|false)\\b", TokenAttribute.LITERAL),
@@ -77,11 +78,17 @@ public enum TokenType {
     ORDER_BY("ORDER BY", TokenAttribute.KEYWORD),
     LIMIT("LIMIT", TokenAttribute.KEYWORD),
     AS("AS", TokenAttribute.KEYWORD),
+    
+    // Logical operators (both symbolic and keyword forms)
+    LOGICAL_AND("&&", TokenAttribute.OPERATOR),
+    LOGICAL_OR("\\|\\|", TokenAttribute.OPERATOR),
     AND("AND", TokenAttribute.OPERATOR, TokenAttribute.KEYWORD),
     OR("OR", TokenAttribute.OPERATOR, TokenAttribute.KEYWORD),
+    
     ASC("ASC", TokenAttribute.KEYWORD),
     DESC("DESC", TokenAttribute.KEYWORD),
     SHOW("SHOW", TokenAttribute.KEYWORD),
+    EXPLAIN("EXPLAIN", TokenAttribute.KEYWORD),
     HELP("HELP", TokenAttribute.KEYWORD),
     VIEW("VIEW", TokenAttribute.KEYWORD),
     
@@ -96,27 +103,15 @@ public enum TokenType {
     LEFT("LEFT", TokenAttribute.KEYWORD),
     RIGHT("RIGHT", TokenAttribute.KEYWORD),
     FULL("FULL", TokenAttribute.KEYWORD),
+    CROSS("CROSS", TokenAttribute.KEYWORD),
     OUTER("OUTER", TokenAttribute.KEYWORD),
     
     // Context-sensitive keywords (can be identifiers in other contexts)
     TOLERANCE("TOLERANCE", TokenAttribute.KEYWORD),
+    THRESHOLD("THRESHOLD", TokenAttribute.KEYWORD),
     NEAREST("NEAREST", TokenAttribute.KEYWORD),
     PREVIOUS("PREVIOUS", TokenAttribute.KEYWORD),
     AFTER("AFTER", TokenAttribute.KEYWORD),
-    
-    // Percentile functions (these need to be reserved for parsing)
-    PERCENTILE("PERCENTILE", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P90("P90", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P95("P95", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P99("P99", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P999("P999", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    
-    // Advanced percentile selection functions
-    P90SELECT("P90SELECT", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P95SELECT("P95SELECT", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P99SELECT("P99SELECT", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    P999SELECT("P999SELECT", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
-    PERCENTILE_SELECT("PERCENTILE_SELECT", TokenAttribute.KEYWORD, TokenAttribute.FUNCTION),
     
     // Temporal window keywords
     WITHIN("WITHIN", TokenAttribute.KEYWORD),

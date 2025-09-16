@@ -23,10 +23,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -53,14 +50,30 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
             return variable + " := " + query.format();
+        }
+    }
+    
+    /**
+     * Global variable assignment statement (var := expression)
+     * For direct expression evaluation like "x := 3m" that can be used everywhere in queries
+     */
+    public record GlobalVariableAssignmentNode(String variable, ExpressionNode expression, Location location) implements StatementNode {
+        @Override
+        public <T> T accept(ASTVisitor<T> visitor) {
+            return visitor.visitGlobalVariableAssignment(this);
+        }
+        
+        @Override
+        public Location getLocation() { return location; }
+        
+        @Override
+        public String format() {
+            return variable + " := " + expression.format();
         }
     }
     
@@ -74,10 +87,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -107,10 +117,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -170,10 +177,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -195,10 +199,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -216,10 +217,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -245,10 +243,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -270,10 +265,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -310,10 +302,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -335,10 +324,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -360,10 +346,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -381,10 +364,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -406,10 +386,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -427,10 +404,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -452,10 +426,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -486,10 +457,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -518,10 +486,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -590,10 +555,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -622,10 +584,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -648,10 +607,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -674,17 +630,13 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
             return switch (value.getType()) {
                 case STRING -> "'" + value.toString().replace("'", "''") + "'";
                 case NUMBER -> value.toString(); // Use NumberValue's toString() for proper formatting
-                case FLOAT -> value.toString(); // Use FloatValue's toString() for proper formatting
                 case DURATION, MEMORY_SIZE, RATE -> value.toString();
                 case BOOLEAN -> value.toString().toUpperCase();
                 case NULL -> "NULL"; // Explicitly format NULL 
@@ -703,10 +655,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -714,6 +663,24 @@ public class ASTNodes {
         }
     }
     
+    /**
+     * Variable assignment expression (x := value)
+     */
+    public record VariableAssignmentExpressionNode(String variable, ExpressionNode value, Location location) implements ExpressionNode {
+        @Override
+        public <T> T accept(ASTVisitor<T> visitor) {
+            return visitor.visitVariableAssignmentExpression(this);
+        }
+        
+        @Override
+        public Location getLocation() { return location; }
+        
+        @Override
+        public String format() {
+            return variable + " := " + value.format();
+        }
+    }
+
     /**
      * Nested JFR query [original JFR query]
      */
@@ -724,10 +691,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -752,10 +716,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -786,11 +747,18 @@ public class ASTNodes {
         ExpressionNode condition,
         ExpressionNode result,
         Location location
-    ) {
-        public int getLine() { return location.line(); }
+    ) implements ExpressionNode {
+        @Override
+        public <T> T accept(ASTVisitor<T> visitor) {
+            // WhenClauseNode is typically handled within CaseExpressionNode
+            // but we provide a default implementation for completeness
+            throw new UnsupportedOperationException("WhenClauseNode should be handled within CaseExpressionNode");
+        }
         
-        public int getColumn() { return location.column(); }
+        @Override
+        public Location getLocation() { return location; }
         
+        @Override
         public String format() {
             return "WHEN " + condition.format() + " THEN " + result.format();
         }
@@ -816,10 +784,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -837,10 +802,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -858,10 +820,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -879,10 +838,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -900,10 +856,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -921,10 +874,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -942,14 +892,64 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
             return "HELP GRAMMAR";
+        }
+    }
+
+    /**
+     * SHOW PLAN query - displays query execution plan with optional format
+     * Supports: SHOW PLAN [FORMAT] <query>
+     * Where FORMAT can be: SIMPLE, VERBOSE, ASCII, PERFORMANCE
+     */
+    public record ShowPlanNode(QueryNode query, PlanFormat planFormat, Location location) implements StatementNode {
+        @Override
+        public <T> T accept(ASTVisitor<T> visitor) {
+            return visitor.visitShowPlan(this);
+        }
+        
+        @Override
+        public Location getLocation() { return location; }
+        
+        @Override
+        public String format() {
+            StringBuilder sb = new StringBuilder("SHOW PLAN");
+            if (planFormat != null && planFormat != PlanFormat.SIMPLE) {
+                sb.append(" ").append(planFormat.name());
+            }
+            sb.append(" ").append(query.format());
+            return sb.toString();
+        }
+    }
+
+    /**
+     * Plan visualization formats for SHOW PLAN command
+     */
+    public enum PlanFormat {
+        SIMPLE,      // Basic plan structure
+        VERBOSE,     // Detailed plan with statistics
+        ASCII,       // ASCII art visualization
+        PERFORMANCE  // Performance-focused view
+    }
+
+    /**
+     * EXPLAIN query - provides detailed query execution information
+     */
+    public record ExplainNode(QueryNode query, Location location) implements StatementNode {
+        @Override
+        public <T> T accept(ASTVisitor<T> visitor) {
+            return visitor.visitExplain(this);
+        }
+        
+        @Override
+        public Location getLocation() { return location; }
+        
+        @Override
+        public String format() {
+            return "EXPLAIN " + query.format();
         }
     }
 
@@ -971,10 +971,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1038,10 +1035,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1079,10 +1073,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1108,10 +1099,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1129,10 +1117,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1147,7 +1132,8 @@ public class ASTNodes {
         INNER,      // Inner join
         LEFT,       // Left outer join
         RIGHT,      // Right outer join
-        FULL        // Full outer join
+        FULL,       // Full outer join
+        CROSS       // Cross join
     }
     
     /**
@@ -1167,10 +1153,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {
@@ -1202,12 +1185,9 @@ public class ASTNodes {
         public <T> T accept(ASTVisitor<T> visitor) {
             return visitor.visitArrayLiteral(this);
         }
-
+        
         @Override
-        public int getLine() { return location.line(); }
-
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
 
         @Override
         public String format() {
@@ -1231,10 +1211,7 @@ public class ASTNodes {
         }
         
         @Override
-        public int getLine() { return location.line(); }
-        
-        @Override
-        public int getColumn() { return location.column(); }
+        public Location getLocation() { return location; }
         
         @Override
         public String format() {

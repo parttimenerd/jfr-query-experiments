@@ -5,13 +5,13 @@ package me.bechberger.jfr.extended.table;
  */
 public enum CellType {
     STRING,
-    NUMBER,
+    NUMBER,     // Unified numeric type (integers and floats)
     DURATION,
     TIMESTAMP,
     MEMORY_SIZE,
     RATE,
     BOOLEAN,
-    FLOAT,
     ARRAY,
-    NULL
+    NULL,
+    STAR        // Represents the * symbol in SQL contexts
 }

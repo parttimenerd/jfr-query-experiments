@@ -28,11 +28,13 @@ public final class Grammar {
             GRAMMAR DEFINITION:
             
             program         ::= statement*
-            statement       ::= assignment | query | viewDefinition | showQuery | rawJfrQuery
+            statement       ::= assignment | query | viewDefinition | showQuery | explainQuery | rawJfrQuery
             assignment      ::= IDENTIFIER ':=' query
             viewDefinition  ::= 'VIEW' IDENTIFIER 'AS' query
-            showQuery       ::= 'SHOW' ('EVENTS' | 'FIELDS' IDENTIFIER)
-            rawJfrQuery     ::= <any sequence of tokens that doesn't start with '@', VIEW, SHOW, or assignment>
+            showQuery       ::= 'SHOW' ('EVENTS' | 'FIELDS' IDENTIFIER | 'PLAN' [planFormat] query)
+            explainQuery    ::= 'EXPLAIN' query
+            planFormat      ::= 'SIMPLE' | 'VERBOSE' | 'ASCII' | 'PERFORMANCE'
+            rawJfrQuery     ::= <any sequence of tokens that doesn't start with '@', VIEW, SHOW, EXPLAIN, or assignment>
             
             query           ::= ['@'] [column] [format] select from [join*] [where] [groupBy] [having] [orderBy] [limit]
             column          ::= 'COLUMN' STRING (',' STRING)*
@@ -45,7 +47,7 @@ public final class Grammar {
             alias           ::= IDENTIFIER | keyword | functionName
             
             from            ::= 'FROM' source (',' source)*
-            source          ::= (IDENTIFIER | subquery) ['AS' alias] [join*]
+            source          ::= (IDENTIFIER | subquery) ['AS' alias] [join*]  // AS keyword required for aliases
             subquery        ::= '(' query ')'
             
             join            ::= [joinType] 'JOIN' source ['AS' alias] 'ON' joinCondition |
@@ -89,6 +91,7 @@ public final class Grammar {
             SELECT, FROM, WHERE, GROUP, BY, HAVING, ORDER, ASC, DESC, LIMIT,
             INNER, LEFT, RIGHT, FULL, JOIN, FUZZY, ON, WITH, TOLERANCE,
             NEAREST, PREVIOUS, AFTER, AS, VIEW, SHOW, EVENTS, FIELDS,
+            EXPLAIN, SIMPLE, VERBOSE, ASCII, PERFORMANCE, PLAN,
             COLUMN, FORMAT, AND, OR, LIKE, IN, NOT
             
             // Operators
@@ -164,8 +167,18 @@ public final class Grammar {
             9. Special queries:
                - SHOW EVENTS - list available event types
                - SHOW FIELDS eventType - list fields for an event type
+               - SHOW PLAN [format] query - display query execution plan
+               - EXPLAIN query - provide detailed query execution information
             
-            10. ORDER BY clause:
+            10. Query plan visualization:
+                - SHOW PLAN query - basic execution plan display
+                - SHOW PLAN SIMPLE query - simplified plan format (default)
+                - SHOW PLAN VERBOSE query - detailed plan with statistics
+                - SHOW PLAN ASCII query - ASCII art visualization
+                - SHOW PLAN PERFORMANCE query - performance-focused view
+                - EXPLAIN query - comprehensive execution analysis
+            
+            11. ORDER BY clause:
                 - Supports single and multi-field sorting
                 - ASC (ascending) and DESC (descending) sort directions
                 - ASC is default if direction not specified
@@ -183,28 +196,28 @@ public final class Grammar {
             EXAMPLES:
             
             Basic extended query:
-            @ SELECT * FROM ExecutionSample WHERE duration > 10ms
+            @SELECT * FROM ExecutionSample WHERE duration > 10ms
             
             Standard join:
-            @ SELECT * FROM ExecutionSample es 
+            @SELECT * FROM ExecutionSample es 
               INNER JOIN ThreadStart ts ON es.threadId = ts.threadId
             
             Fuzzy join with tolerance:
-            @ SELECT * FROM ExecutionSample es 
+            @SELECT * FROM ExecutionSample es 
               FUZZY JOIN GarbageCollection gc ON startTime WITH NEAREST TOLERANCE 100ms
             
             Percentile function:
-            @ SELECT P99(duration) FROM ExecutionSample GROUP BY stackTrace
+            @SELECT P99(duration) FROM ExecutionSample GROUP BY stackTrace
             
             Percentile selection:
-            @ SELECT * FROM P99SELECT(ExecutionSample, id, duration)
+            @SELECT * FROM P99SELECT(ExecutionSample, id, duration)
             
             Variable assignment and view:
-            slowMethods := @ SELECT * FROM ExecutionSample WHERE duration > 1s
-            VIEW TopMethods AS @ SELECT stackTrace, COUNT(*) FROM slowMethods GROUP BY stackTrace
+            slowMethods := @SELECT * FROM ExecutionSample WHERE duration > 1s
+            VIEW TopMethods AS @SELECT stackTrace, COUNT(*) FROM slowMethods GROUP BY stackTrace
             
             Subquery in FROM clause:
-            @ SELECT * FROM (@ SELECT * FROM ExecutionSample WHERE duration > 100ms) AS slow
+            @SELECT * FROM (@SELECT * FROM ExecutionSample WHERE duration > 100ms) AS slow
             
             Raw JFR query (no @ prefix):
             SELECT * FROM jdk.ExecutionSample WHERE duration > "100 ms"
@@ -212,41 +225,44 @@ public final class Grammar {
             Special queries:
             SHOW EVENTS
             SHOW FIELDS ExecutionSample
+            SHOW PLAN @SELECT * FROM ExecutionSample WHERE duration > 10ms
+            SHOW PLAN ASCII @SELECT COUNT(*) FROM ExecutionSample GROUP BY stackTrace
+            EXPLAIN @SELECT * FROM ExecutionSample WHERE duration > 10ms
             
             ORDER BY examples:
             
             Basic field sorting:
-            @ SELECT * FROM ExecutionSample ORDER BY duration DESC
-            @ SELECT name, age FROM Users ORDER BY name ASC, age DESC
+            @SELECT * FROM ExecutionSample ORDER BY duration DESC
+            @SELECT name, age FROM Users ORDER BY name ASC, age DESC
             
             Sorting with expressions:
-            @ SELECT * FROM Users ORDER BY (age * 2) DESC
-            @ SELECT * FROM ExecutionSample ORDER BY ABS(duration - 100ms) ASC
+            @SELECT * FROM Users ORDER BY (age * 2) DESC
+            @SELECT * FROM ExecutionSample ORDER BY ABS(duration - 100ms) ASC
             
             GROUP BY with ORDER BY (aggregate functions):
-            @ SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId ORDER BY COUNT(*) DESC
-            @ SELECT stackTrace, AVG(duration) FROM ExecutionSample GROUP BY stackTrace ORDER BY AVG(duration)
-            @ SELECT threadId, P99(duration) as p99 FROM ExecutionSample GROUP BY threadId ORDER BY P99(duration) DESC
+            @SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId ORDER BY COUNT(*) DESC
+            @SELECT stackTrace, AVG(duration) FROM ExecutionSample GROUP BY stackTrace ORDER BY AVG(duration)
+            @SELECT threadId, P99(duration) as p99 FROM ExecutionSample GROUP BY threadId ORDER BY P99(duration) DESC
             
             GROUP BY with ORDER BY (grouped fields):
-            @ SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId ORDER BY threadId
-            @ SELECT stackTrace, SUM(duration) FROM ExecutionSample GROUP BY stackTrace ORDER BY stackTrace ASC
+            @SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId ORDER BY threadId
+            @SELECT stackTrace, SUM(duration) FROM ExecutionSample GROUP BY stackTrace ORDER BY stackTrace ASC
             
             Complex multi-field ORDER BY with GROUP BY:
-            @ SELECT threadId, COUNT(*) as count, AVG(duration) as avg_dur 
+            @SELECT threadId, COUNT(*) as count, AVG(duration) as avg_dur 
               FROM ExecutionSample GROUP BY threadId 
               ORDER BY COUNT(*) DESC, threadId ASC, AVG(duration) DESC
             
             ORDER BY with aliases:
-            @ SELECT threadId, COUNT(*) as sample_count FROM ExecutionSample 
+            @SELECT threadId, COUNT(*) as sample_count FROM ExecutionSample 
               GROUP BY threadId ORDER BY sample_count DESC
             
             ORDER BY with complex expressions in GROUP BY context:
-            @ SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId 
+            @SELECT threadId, COUNT(*) FROM ExecutionSample GROUP BY threadId 
               ORDER BY (COUNT(*) * 2 + 1) DESC
             
             ORDER BY with HAVING and LIMIT:
-            @ SELECT stackTrace, COUNT(*) FROM ExecutionSample 
+            @SELECT stackTrace, COUNT(*) FROM ExecutionSample 
               GROUP BY stackTrace 
               HAVING COUNT(*) > 10 
               ORDER BY COUNT(*) DESC 

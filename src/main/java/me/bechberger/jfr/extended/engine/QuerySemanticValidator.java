@@ -68,6 +68,9 @@ public class QuerySemanticValidator {
         validateOrderByWithGroupBy(query);
         validateOrderByWithoutGroupBy(query);
         validateSelectWithGroupBy(query);
+        validateSelectWithoutGroupBy(query);
+        validateStarMixingInSelect(query);
+        validateHavingWithGroupBy(query);
         validateFunctionCalls(query);
         
         // Validate nested subqueries
@@ -170,6 +173,10 @@ public class QuerySemanticValidator {
         @Override public T visitProperty(PropertyNode node) { return null; }
         @Override public T visitExpression(ExpressionNode node) { return null; }
         @Override public T visitIdentifier(IdentifierNode node) { return null; }
+        @Override public T visitVariableAssignmentExpression(VariableAssignmentExpressionNode node) {
+            node.value().accept(this);
+            return null;
+        }
         @Override public T visitFieldAccess(FieldAccessNode node) { return null; }
         @Override public T visitFunctionCall(FunctionCallNode node) {
             for (ExpressionNode arg : node.arguments()) arg.accept(this);
@@ -203,9 +210,21 @@ public class QuerySemanticValidator {
         @Override public T visitHelp(HelpNode node) { return null; }
         @Override public T visitHelpFunction(HelpFunctionNode node) { return null; }
         @Override public T visitHelpGrammar(HelpGrammarNode node) { return null; }
+        @Override public T visitShowPlan(ShowPlanNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
+        @Override public T visitExplain(ExplainNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
         @Override public T visitFuzzyJoinSource(FuzzyJoinSourceNode node) { return null; }
         @Override public T visitVariableDeclaration(VariableDeclarationNode node) { return null; }
         @Override public T visitAssignment(AssignmentNode node) { return null; }
+        @Override public T visitGlobalVariableAssignment(GlobalVariableAssignmentNode node) { 
+            node.expression().accept(this);
+            return null; 
+        }
         @Override public T visitViewDefinition(ViewDefinitionNode node) { return null; }
         @Override public T visitPercentileFunction(PercentileFunctionNode node) {
             node.valueExpression().accept(this);
@@ -423,6 +442,243 @@ public class QuerySemanticValidator {
             }
         }
     }
+
+    /**
+     * Validates that SELECT clauses without GROUP BY don't mix aggregate and non-aggregate expressions.
+     * Rule: If there's no GROUP BY, either ALL expressions are aggregates OR ALL expressions are non-aggregates.
+     */
+    private void validateSelectWithoutGroupBy(QueryNode query) {
+        // If there's no SELECT clause, nothing to validate
+        if (query.select() == null) {
+            return;
+        }
+        
+        // If there's a GROUP BY clause, this validation doesn't apply
+        if (query.groupBy() != null) {
+            return;
+        }
+        
+        List<SelectItemNode> items = query.select().items();
+        if (items.isEmpty()) {
+            return;
+        }
+        
+        boolean hasAggregates = false;
+        boolean hasNonAggregates = false;
+        List<String> aggregateExpressions = new ArrayList<>();
+        List<String> nonAggregateExpressions = new ArrayList<>();
+        
+        // Analyze each SELECT expression
+        for (SelectItemNode item : items) {
+            FunctionAnalysisResult result = analyzeAggregateFunctions(item.expression());
+            boolean isAggregate = !result.aggregateFunctions.isEmpty() || !result.percentileFunctions.isEmpty();
+            
+            if (isAggregate) {
+                hasAggregates = true;
+                aggregateExpressions.add(formatExpression(item.expression()));
+            } else {
+                hasNonAggregates = true;
+                nonAggregateExpressions.add(formatExpression(item.expression()));
+            }
+        }
+        
+        // If we have both aggregates and non-aggregates, that's an error
+        if (hasAggregates && hasNonAggregates) {
+            String aggregateList = String.join(", ", aggregateExpressions);
+            String nonAggregateList = String.join(", ", nonAggregateExpressions);
+            
+            // Use the first SELECT item's expression as the error node
+            ExpressionNode errorNode = items.get(0).expression();
+            
+            errors.add(new SemanticError(
+                "Cannot mix aggregate functions (" + aggregateList + ") with non-aggregate expressions (" + nonAggregateList + ") in SELECT clause without GROUP BY",
+                "Either use only aggregate functions (e.g., SELECT COUNT(*), SUM(field) FROM table) or add a GROUP BY clause (e.g., SELECT field, COUNT(*) FROM table GROUP BY field)",
+                errorNode,
+                "SELECT clause without GROUP BY must contain either all aggregate functions or all non-aggregate expressions",
+                SemanticErrorType.AGGREGATE_WITHOUT_GROUP_BY,
+                "Examples: SELECT COUNT(*) FROM table; or SELECT field1, field2 FROM table; or SELECT field1, COUNT(*) FROM table GROUP BY field1"
+            ));
+        }
+    }
+    
+    /**
+     * Helper method to format an expression for error messages.
+     */
+    private String formatExpression(ExpressionNode expression) {
+        if (expression instanceof FunctionCallNode functionCall) {
+            return functionCall.functionName() + "(" + 
+                   functionCall.arguments().stream()
+                       .map(this::formatExpression)
+                       .collect(java.util.stream.Collectors.joining(", ")) + ")";
+        } else if (expression instanceof IdentifierNode identifier) {
+            return identifier.name();
+        } else if (expression instanceof FieldAccessNode fieldAccess) {
+            return (fieldAccess.qualifier() != null ? fieldAccess.qualifier() + "." : "") + fieldAccess.field();
+        } else if (expression instanceof StarNode) {
+            return "*";
+        } else {
+            // For other expression types, use a generic representation
+            return expression.getClass().getSimpleName().replace("Node", "").toLowerCase();
+        }
+    }
+    
+    /**
+     * Validates that star (*) is not mixed with aggregate functions in SELECT clause.
+     * Rule: Cannot mix * with aggregate functions in SELECT clause.
+     */
+    private void validateStarMixingInSelect(QueryNode query) {
+        SelectNode select = query.select();
+        
+        // Skip validation for SELECT * queries (isSelectAll = true)
+        if (select.isSelectAll()) {
+            return;
+        }
+        
+        // Check for mixed * and aggregate expressions
+        boolean hasStarNode = false;
+        boolean hasAggregateFunction = false;
+        List<String> starItems = new ArrayList<>();
+        List<String> aggregateItems = new ArrayList<>();
+        
+        for (SelectItemNode item : select.items()) {
+            ExpressionNode expression = item.expression();
+            
+            // Check if this item contains a StarNode
+            StarNodeDetector starDetector = new StarNodeDetector();
+            expression.accept(starDetector);
+            if (starDetector.hasStarNode()) {
+                hasStarNode = true;
+                starItems.add(formatExpression(expression));
+            }
+            
+            // Check if this item contains aggregate functions
+            FunctionAnalysisResult analysis = analyzeAggregateFunctions(expression);
+            if (analysis.hasAggregates()) {
+                hasAggregateFunction = true;
+                aggregateItems.add(formatExpression(expression));
+            }
+        }
+        
+        // Report error if both star and aggregate functions are present
+        if (hasStarNode && hasAggregateFunction) {
+            String errorMsg = String.format(
+                "Cannot mix star (*) with aggregate functions in SELECT clause. " +
+                "Found star expressions: %s and aggregate expressions: %s",
+                String.join(", ", starItems),
+                String.join(", ", aggregateItems)
+            );
+            
+            String suggestion = "Use either SELECT * alone, or SELECT with specific fields and aggregate functions, but not both.";
+            String examples = "Valid: SELECT * FROM table; SELECT name, COUNT(*) FROM table GROUP BY name; " +
+                            "Invalid: SELECT *, COUNT(*) FROM table";
+            
+            // Find the first expression that contains a star for error reporting
+            ExpressionNode errorNode = null;
+            for (SelectItemNode item : select.items()) {
+                StarNodeDetector detector = new StarNodeDetector();
+                item.expression().accept(detector);
+                if (detector.hasStarNode()) {
+                    errorNode = item.expression();
+                    break;
+                }
+            }
+            
+            errors.add(new SemanticError(
+                errorMsg,
+                suggestion,
+                errorNode != null ? errorNode : select.items().get(0).expression(),
+                "Mixed star and aggregate expressions in SELECT clause",
+                SemanticErrorType.AGGREGATE_WITHOUT_GROUP_BY, // Reusing similar error type
+                examples
+            ));
+        }
+    }
+    
+    /**
+     * Detector for StarNode in expressions.
+     */
+    private static class StarNodeDetector extends BaseASTVisitor<Void> {
+        private boolean hasStarNode = false;
+        
+        public boolean hasStarNode() {
+            return hasStarNode;
+        }
+        
+        @Override
+        public Void visitStar(StarNode node) {
+            hasStarNode = true;
+            return null;
+        }
+        
+        @Override
+        public Void visitFunctionCall(FunctionCallNode node) {
+            // Don't visit function arguments - we don't want to detect * inside COUNT(*)
+            // Only the function name itself matters, not the arguments
+            return null;
+        }
+    }
+    
+    /**
+     * Validates that HAVING clauses with GROUP BY only reference grouped fields or aggregate functions.
+     * Rule: In HAVING clause with GROUP BY, only grouped fields or aggregate functions are allowed.
+     */
+    private void validateHavingWithGroupBy(QueryNode query) {
+        // If there's no HAVING clause, nothing to validate
+        if (query.having() == null) {
+            return;
+        }
+        
+        // If there's no GROUP BY clause, this validation doesn't apply
+        if (query.groupBy() == null) {
+            return;
+        }
+        
+        // Collect grouped fields
+        Set<String> groupedFields = collectFieldsFromExpressions(query.groupBy().fields());
+        
+        // Validate the HAVING condition
+        validateHavingCondition(query.having().condition(), groupedFields);
+    }
+    
+    /**
+     * Validates a HAVING condition against grouped fields.
+     */
+    private void validateHavingCondition(ConditionNode condition, Set<String> groupedFields) {
+        // Convert ConditionNode to ExpressionNode if possible
+        if (condition instanceof ExpressionConditionNode exprCondition) {
+            validateHavingExpression(exprCondition.expression(), groupedFields);
+        }
+        // For other condition types, we might need to add more specific handling
+        // but ExpressionConditionNode covers most HAVING clauses
+    }
+    
+    /**
+     * Validates a HAVING expression against grouped fields.
+     */
+    private void validateHavingExpression(ExpressionNode expression, Set<String> groupedFields) {
+        // Check if expression contains aggregate functions - if so, it's valid
+        FunctionAnalysisResult aggregateResult = analyzeAggregateFunctions(expression);
+        if (!aggregateResult.aggregateFunctions.isEmpty() || !aggregateResult.percentileFunctions.isEmpty()) {
+            return; // Aggregate functions are allowed in HAVING
+        }
+        
+        // Collect all field references in the HAVING expression
+        Set<String> havingFields = collectFieldsFromExpression(expression);
+        
+        // Check if all fields in HAVING are present in GROUP BY
+        for (String field : havingFields) {
+            if (!groupedFields.contains(field)) {
+                errors.add(new SemanticError(
+                    "Field '" + field + "' in HAVING expression must appear in GROUP BY clause or be an aggregate function",
+                    "Add '" + field + "' to the GROUP BY clause, or use an aggregate function like COUNT(), SUM(), etc.",
+                    expression,
+                    "When GROUP BY is present, HAVING can only reference grouped fields or aggregate functions",
+                    SemanticErrorType.ORDER_BY_NON_GROUPED_FIELD, // Reusing error type for consistency
+                    "Examples: SELECT field1, COUNT(*) FROM table GROUP BY field1 HAVING COUNT(*) > 5; or SELECT field1 FROM table GROUP BY field1 HAVING field1 = 'value'"
+                ));
+            }
+        }
+    }
     
     /**
      * Builds a mapping of aliases to their underlying expressions for validation purposes.
@@ -635,6 +891,10 @@ public class QuerySemanticValidator {
             this.aggregateFunctions = aggregateFunctions;
             this.percentileFunctions = percentileFunctions;
         }
+        
+        public boolean hasAggregates() {
+            return !aggregateFunctions.isEmpty() || !percentileFunctions.isEmpty();
+        }
     }
     
     /**
@@ -787,6 +1047,15 @@ public class QuerySemanticValidator {
             this.functionRegistry = functionRegistry;
         }
         
+        @Override public Void visitShowPlan(ShowPlanNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
+        @Override public Void visitExplain(ExplainNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
+        
         @Override
         public Void visitFunctionCall(FunctionCallNode node) {
             String funcName = node.functionName().toUpperCase();
@@ -870,6 +1139,7 @@ public class QuerySemanticValidator {
         @Override public Void visitProgram(ProgramNode node) { return null; }
         @Override public Void visitStatement(StatementNode node) { return null; }
         @Override public Void visitAssignment(AssignmentNode node) { return null; }
+        @Override public Void visitGlobalVariableAssignment(GlobalVariableAssignmentNode node) { return null; }
         @Override public Void visitViewDefinition(ViewDefinitionNode node) { return null; }
         @Override public Void visitRawJfrQuery(RawJfrQueryNode node) { return null; }
         @Override public Void visitQuery(QueryNode node) { return null; }
@@ -938,6 +1208,10 @@ public class QuerySemanticValidator {
         }
         @Override public Void visitLiteral(LiteralNode node) { return null; }
         @Override public Void visitIdentifier(IdentifierNode node) { return null; }
+        @Override public Void visitVariableAssignmentExpression(VariableAssignmentExpressionNode node) {
+            node.value().accept(this);
+            return null;
+        }
         @Override public Void visitNestedQuery(NestedQueryNode node) { return null; }
         
         @Override
@@ -1090,6 +1364,12 @@ public class QuerySemanticValidator {
         }
         
         @Override
+        public Void visitGlobalVariableAssignment(GlobalVariableAssignmentNode node) {
+            node.expression().accept(this);
+            return null;
+        }
+        
+        @Override
         public Void visitViewDefinition(ViewDefinitionNode node) {
             node.query().accept(this);
             return null;
@@ -1231,6 +1511,10 @@ public class QuerySemanticValidator {
         
         @Override public Void visitLiteral(LiteralNode node) { return null; }
         @Override public Void visitIdentifier(IdentifierNode node) { return null; }
+        @Override public Void visitVariableAssignmentExpression(VariableAssignmentExpressionNode node) {
+            node.value().accept(this);
+            return null;
+        }
         
         @Override
         public Void visitNestedQuery(NestedQueryNode node) {
@@ -1267,6 +1551,14 @@ public class QuerySemanticValidator {
         @Override public Void visitHelp(HelpNode node) { return null; }
         @Override public Void visitHelpFunction(HelpFunctionNode node) { return null; }
         @Override public Void visitHelpGrammar(HelpGrammarNode node) { return null; }
+        @Override public Void visitShowPlan(ShowPlanNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
+        @Override public Void visitExplain(ExplainNode node) { 
+            node.query().accept(this);
+            return null; 
+        }
         @Override public Void visitFuzzyJoinSource(FuzzyJoinSourceNode node) { return null; }
         @Override public Void visitStandardJoinSource(StandardJoinSourceNode node) { return null; }
         

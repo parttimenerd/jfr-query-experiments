@@ -74,10 +74,6 @@ public class FunctionRegistryTest {
     public void testTokenTypeLookup() {
         FunctionRegistry registry = FunctionRegistry.getInstance();
         
-        // Test token type lookup for percentile functions that still have tokens
-        assertTrue(registry.isFunction(TokenType.P90), "P90 token should be a function");
-        assertTrue(registry.isFunction(TokenType.P95), "P95 token should be a function");
-        
         // Test non-function token
         assertFalse(registry.isFunction(TokenType.SELECT), "SELECT token should not be a function");
     }
@@ -135,28 +131,28 @@ public class FunctionRegistryTest {
     public void testMathematicalFunctionTokenTypes() {
         FunctionRegistry registry = FunctionRegistry.getInstance();
         
-        // Test that basic percentile function tokens are properly mapped as AGGREGATE
-        TokenType[] aggregatePercentileTokens = {TokenType.P90, TokenType.P95, TokenType.P99, TokenType.P999};
+        // Test that percentile functions are available by name (no longer as special tokens)
+        assertTrue(registry.isFunction("P90"), "P90 should be available as a function");
+        assertTrue(registry.isFunction("P95"), "P95 should be available as a function");
+        assertTrue(registry.isFunction("P99"), "P99 should be available as a function");
+        assertTrue(registry.isFunction("P999"), "P999 should be available as a function");
         
-        for (TokenType token : aggregatePercentileTokens) {
-            assertTrue(registry.isFunction(token), token + " should be recognized as a function token");
-            
-            FunctionRegistry.FunctionDefinition funcDef = registry.getFunction(token);
-            assertNotNull(funcDef, token + " function definition should exist");
-            assertEquals(FunctionRegistry.FunctionType.AGGREGATE, funcDef.type());
-        }
+        // Test function types for percentile functions
+        assertEquals(FunctionRegistry.FunctionType.AGGREGATE, 
+            registry.getFunction("P90").type(), "P90 should be an aggregate function");
+        assertEquals(FunctionRegistry.FunctionType.AGGREGATE, 
+            registry.getFunction("P95").type(), "P95 should be an aggregate function");
         
-        // Test that percentile SELECT function tokens are properly mapped as DATA_ACCESS
-        TokenType[] dataAccessPercentileTokens = {TokenType.P90SELECT, TokenType.P95SELECT, TokenType.P99SELECT, 
-                                                  TokenType.P999SELECT, TokenType.PERCENTILE_SELECT};
+        // Test percentile selection functions
+        assertTrue(registry.isFunction("P90SELECT"), "P90SELECT should be available as a function");
+        assertTrue(registry.isFunction("P95SELECT"), "P95SELECT should be available as a function");
+        assertTrue(registry.isFunction("P99SELECT"), "P99SELECT should be available as a function");
+        assertTrue(registry.isFunction("P999SELECT"), "P999SELECT should be available as a function");
+        assertTrue(registry.isFunction("PERCENTILE_SELECT"), "PERCENTILE_SELECT should be available as a function");
         
-        for (TokenType token : dataAccessPercentileTokens) {
-            assertTrue(registry.isFunction(token), token + " should be recognized as a function token");
-            
-            FunctionRegistry.FunctionDefinition funcDef = registry.getFunction(token);
-            assertNotNull(funcDef, token + " function definition should exist");
-            assertEquals(FunctionRegistry.FunctionType.DATA_ACCESS, funcDef.type());
-        }
+        // Test that SELECT functions are DATA_ACCESS type
+        assertEquals(FunctionRegistry.FunctionType.DATA_ACCESS, 
+            registry.getFunction("P90SELECT").type(), "P90SELECT should be a data access function");
     }
     
     @Test
@@ -232,12 +228,11 @@ public class FunctionRegistryTest {
         "P999SELECT, DATA_ACCESS",
         "PERCENTILE_SELECT, DATA_ACCESS"
     })
-    void testPercentileFunctionTokens(String tokenName, String typeName) {
+    void testPercentileFunctionTokens(String functionName, String typeName) {
         FunctionRegistry registry = FunctionRegistry.getInstance();
-        TokenType token = TokenType.valueOf(tokenName);
-        assertTrue(registry.isFunction(token), token + " should be recognized as a function token");
-        FunctionRegistry.FunctionDefinition def = registry.getFunction(token);
-        assertNotNull(def, token + " function definition should exist");
+        assertTrue(registry.isFunction(functionName), functionName + " should be recognized as a function");
+        FunctionRegistry.FunctionDefinition def = registry.getFunction(functionName);
+        assertNotNull(def, functionName + " function definition should exist");
         assertEquals(FunctionRegistry.FunctionType.valueOf(typeName), def.type());
     }
     

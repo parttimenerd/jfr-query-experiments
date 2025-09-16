@@ -331,7 +331,7 @@ public class ParserErrorHandlingComprehensiveTest {
             
             // Invalid FROM syntax
             Arguments.of("@SELECT * FROM FROM GarbageCollection", "Double FROM keyword"),
-            Arguments.of("@SELECT * FROM GarbageCollection GarbageCollection", "Duplicate table name without alias"),
+            Arguments.of("@SELECT * FROM GarbageCollection GarbageCollection", "Table aliases must use explicit AS keyword"),
             Arguments.of("@SELECT * FROM GarbageCollection AS", "Missing alias after AS"),
             Arguments.of("@SELECT * FROM AS GarbageCollection", "AS without table name"),
             Arguments.of("@SELECT * FROM 123InvalidTable", "Table name starting with number"),
@@ -463,8 +463,7 @@ public class ParserErrorHandlingComprehensiveTest {
             Arguments.of("@SELECT * FROM Garbage™Collection", "Unicode character in table name"),
             Arguments.of("@SELECT field© FROM GarbageCollection", "Copyright symbol in field name"),
             Arguments.of("@SELECT * FROM GarbageCollection WHERE duration > 5µs", "Micro symbol in duration"),
-            Arguments.of("@SELECT 'text with\ttab' FROM GarbageCollection", "Tab character in string"),
-            Arguments.of("@SELECT 'text with\nnewline' FROM GarbageCollection", "Newline in string"),
+            // Note: Tab and newline characters in strings are now ALLOWED, so these tests are removed
                               
             // Operator precedence edge cases
             Arguments.of("@SELECT * FROM GarbageCollection WHERE duration > 5 AND", "Incomplete AND at end"),

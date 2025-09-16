@@ -4,6 +4,7 @@ import me.bechberger.jfr.extended.table.CellType;
 import me.bechberger.jfr.extended.Lexer;
 import me.bechberger.jfr.extended.Token;
 import me.bechberger.jfr.extended.TokenType;
+import me.bechberger.jfr.extended.engine.exception.TypeMismatchException;
 
 import java.util.*;
 import java.util.regex.Pattern;
@@ -87,7 +88,7 @@ public class TableParsingUtils {
                 case NUMBER:
                     // Check if it's a float or integer
                     if (value.contains(".")) {
-                        return CellType.FLOAT;
+                        return CellType.NUMBER;
                     } else {
                         return CellType.NUMBER;
                     }
@@ -140,16 +141,21 @@ public class TableParsingUtils {
             return CellType.MEMORY_SIZE;
         }
         
-        // Check for timestamp (ISO format)
+        // Check for timestamp (ISO format) or simple date format
         if (Pattern.matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z?", trimmed)) {
             return CellType.TIMESTAMP;
+        }
+        
+        // Check for simple date format (YYYY-MM-DD)
+        if (Pattern.matches("\\d{4}-\\d{2}-\\d{2}", trimmed)) {
+            return CellType.STRING; // Treat dates as strings for now
         }
         
         // Check for numbers
         try {
             if (trimmed.contains(".")) {
                 Double.parseDouble(trimmed);
-                return CellType.FLOAT;
+                return CellType.NUMBER;
             } else {
                 Long.parseLong(trimmed);
                 return CellType.NUMBER;
@@ -178,7 +184,7 @@ public class TableParsingUtils {
                 
             case BOOLEAN:
                 return Boolean.parseBoolean(trimmed);
-                
+            
             case NUMBER:
                 try {
                     return Long.parseLong(trimmed);
@@ -186,10 +192,7 @@ public class TableParsingUtils {
                     // Fallback to double for large numbers
                     return Double.parseDouble(trimmed);
                 }
-                
-            case FLOAT:
-                return Double.parseDouble(trimmed);
-                
+                                
             case DURATION:
                 return parseDurationValue(trimmed);
                 
@@ -338,11 +341,15 @@ public class TableParsingUtils {
                 try {
                     return Long.parseLong(valueStr);
                 } catch (NumberFormatException e) {
-                    return Double.parseDouble(valueStr);
+                    try {
+                        return Double.parseDouble(valueStr);
+                    } catch (NumberFormatException e2) {
+                        // For test framework, be more forgiving - treat as string if can't parse as number
+                        // This allows test tables to have mixed types which can then be caught during query execution
+                        System.out.println("WARNING: Value '" + valueStr + "' cannot be parsed as NUMBER, treating as STRING for test table creation");
+                        return valueStr; // Return as string
+                    }
                 }
-                
-            case "FLOAT":
-                return Double.parseDouble(valueStr);
                 
             case "BOOLEAN":
                 return Boolean.parseBoolean(valueStr);
@@ -381,7 +388,6 @@ public class TableParsingUtils {
         switch (typeStr.toUpperCase()) {
             case "STRING": return CellType.STRING;
             case "NUMBER": return CellType.NUMBER;
-            case "FLOAT": return CellType.FLOAT;
             case "BOOLEAN": return CellType.BOOLEAN;
             case "TIMESTAMP": return CellType.TIMESTAMP;
             case "DURATION": return CellType.DURATION;

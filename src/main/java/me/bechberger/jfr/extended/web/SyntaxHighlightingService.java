@@ -92,9 +92,6 @@ public class SyntaxHighlightingService {
             case SELECT, FROM, WHERE, GROUP_BY, ORDER_BY, LIMIT, AS, AND, OR, 
                  ASC, DESC, SHOW, VIEW -> "keyword";
             
-            case PERCENTILE, P90, P95, P99, P999, P90SELECT, P95SELECT, P99SELECT, P999SELECT,
-                 PERCENTILE_SELECT -> "function";
-            
             case NUMBER, BOOLEAN, TIME_LITERAL, TIMESTAMP_LITERAL -> "literal";
             case STRING -> "string";
             case IDENTIFIER -> getIdentifierCssClass(tokenType);

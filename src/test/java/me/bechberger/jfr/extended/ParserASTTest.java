@@ -690,7 +690,7 @@ public class ParserASTTest {
         assertTrue(tokens.size() >= 3, "Should have at least 3 tokens");
 
         Token token = tokens.get(0);
-        assertEquals(TokenType.P90, token.type(), "P90 should tokenize as P90 token");
+        assertEquals(TokenType.IDENTIFIER, token.type(), "P90 should tokenize as IDENTIFIER token");
         assertEquals("P90", token.value(), "P90 token value should be 'P90'");
 
         token = tokens.get(1);

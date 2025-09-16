@@ -48,6 +48,12 @@ public class BaseASTVisitor<T> implements ASTVisitor<T> {
     }
     
     @Override
+    public T visitGlobalVariableAssignment(GlobalVariableAssignmentNode node) {
+        node.expression().accept(this);
+        return defaultReturn();
+    }
+    
+    @Override
     public T visitViewDefinition(ViewDefinitionNode node) {
         node.query().accept(this);
         return defaultReturn();
@@ -225,6 +231,12 @@ public class BaseASTVisitor<T> implements ASTVisitor<T> {
     }
     
     @Override
+    public T visitVariableAssignmentExpression(VariableAssignmentExpressionNode node) {
+        node.value().accept(this);
+        return defaultReturn();
+    }
+    
+    @Override
     public T visitNestedQuery(NestedQueryNode node) {
         // Nested query content is opaque for traversal purposes
         return defaultReturn();
@@ -293,6 +305,20 @@ public class BaseASTVisitor<T> implements ASTVisitor<T> {
     @Override
     public T visitHelpGrammar(HelpGrammarNode node) {
         // Help grammar nodes don't have child nodes
+        return defaultReturn();
+    }
+    
+    @Override
+    public T visitShowPlan(ShowPlanNode node) {
+        // Visit the query to show the plan for
+        node.query().accept(this);
+        return defaultReturn();
+    }
+    
+    @Override
+    public T visitExplain(ExplainNode node) {
+        // Visit the query to explain
+        node.query().accept(this);
         return defaultReturn();
     }
     

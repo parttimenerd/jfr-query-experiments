@@ -7,7 +7,7 @@ import me.bechberger.jfr.extended.table.CellType;
 import java.util.*;
 
 /**
- * Utility methods for QueryEvaluator: aggregate detection, key extraction, row/column helpers, type helpers.
+ * Utility methods for query processing: aggregate detection, key extraction, row/column helpers, type helpers.
  */
 public class QueryEvaluatorUtils {
     public static boolean isAggregateFunction(String functionName) {
@@ -34,6 +34,20 @@ public class QueryEvaluatorUtils {
                    containsAggregateFunction(binaryExpr.right());
         } else if (expr instanceof UnaryExpressionNode unaryExpr) {
             return containsAggregateFunction(unaryExpr.operand());
+        } else if (expr instanceof CaseExpressionNode caseExpr) {
+            // Check if any part of the CASE expression contains aggregates
+            if (caseExpr.expression() != null && containsAggregateFunction(caseExpr.expression())) {
+                return true;
+            }
+            for (WhenClauseNode whenClause : caseExpr.whenClauses()) {
+                if (containsAggregateFunction(whenClause.condition()) || 
+                    containsAggregateFunction(whenClause.result())) {
+                    return true;
+                }
+            }
+            if (caseExpr.elseExpression() != null && containsAggregateFunction(caseExpr.elseExpression())) {
+                return true;
+            }
         }
         return false;
     }
@@ -64,35 +78,6 @@ public class QueryEvaluatorUtils {
             return unary.operator() + extractExpressionKey(unary.operand());
         }
         return expr.getClass().getSimpleName();
-    }
-
-    public static Map<String, CellValue> precomputeAggregatesInSelect(List<ExpressionNode> selectExpressions, JfrTable sourceData, QueryEvaluator evaluator) {
-        Map<String, CellValue> aggregates = new HashMap<>();
-        for (ExpressionNode expr : selectExpressions) {
-            collectAggregateExpressions(expr, sourceData, aggregates, evaluator);
-        }
-        return aggregates;
-    }
-
-    public static void collectAggregateExpressions(ExpressionNode expr, JfrTable sourceData, Map<String, CellValue> aggregates, QueryEvaluator evaluator) {
-        if (expr instanceof FunctionCallNode functionCall) {
-            String functionName = functionCall.functionName();
-            if (isAggregateFunction(functionName)) {
-                String aggregateKey = createAggregateKey(functionCall);
-                if (!aggregates.containsKey(aggregateKey)) {
-                    CellValue aggregateValue = evaluator.computeAggregateValue(functionCall, sourceData);
-                    aggregates.put(aggregateKey, aggregateValue);
-                }
-            }
-            for (ExpressionNode arg : functionCall.arguments()) {
-                collectAggregateExpressions(arg, sourceData, aggregates, evaluator);
-            }
-        } else if (expr instanceof BinaryExpressionNode binaryExpr) {
-            collectAggregateExpressions(binaryExpr.left(), sourceData, aggregates, evaluator);
-            collectAggregateExpressions(binaryExpr.right(), sourceData, aggregates, evaluator);
-        } else if (expr instanceof UnaryExpressionNode unaryExpr) {
-            collectAggregateExpressions(unaryExpr.operand(), sourceData, aggregates, evaluator);
-        }
     }
 
     public static CellValue getRowValueByColumnName(JfrTable.Row row, List<JfrTable.Column> columns, String columnName) {
@@ -180,24 +165,6 @@ public class QueryEvaluatorUtils {
         return "unknown";
     }
 
-    public static CellType determineColumnType(ExpressionNode expression, JfrTable sourceData, QueryEvaluator evaluator) {
-        try {
-            if (!sourceData.getRows().isEmpty()) {
-                CellValue sampleValue = CellValue.of(evaluator.evaluateExpressionInRowContext(expression, sourceData.getRows().get(0), sourceData.getColumns()));
-                return sampleValue.getType();
-            }
-        } catch (Exception e) {
-        }
-        return CellType.STRING;
-    }
-
-    public static CellValue evaluateExpressionForRow(JfrTable.Row row, ExpressionNode expression, List<JfrTable.Column> columns, QueryEvaluator evaluator) {
-        try {
-            return CellValue.of(evaluator.evaluateExpressionInRowContext(expression, row, columns));
-        } catch (Exception e) {
-            return new CellValue.StringValue("Error: " + e.getMessage());
-        }
-    }
 
     public static boolean isNumericValue(Object value) {
         if (value instanceof Number) {
@@ -205,7 +172,7 @@ public class QueryEvaluatorUtils {
         }
         if (value instanceof CellValue cellValue) {
             return switch (cellValue.getType()) {
-                case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
+                case NUMBER, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
                 default -> false;
             };
         }
@@ -229,8 +196,6 @@ public class QueryEvaluatorUtils {
 
     public static double extractNumericValue(CellValue cellValue) {
         return switch (cellValue.getType()) {
-            case NUMBER -> ((CellValue.NumberValue) cellValue).value();
-            case FLOAT -> ((CellValue.FloatValue) cellValue).value();
             case DURATION -> ((CellValue.DurationValue) cellValue).value().toNanos() / 1_000_000.0;
             case TIMESTAMP -> ((CellValue.TimestampValue) cellValue).value().toEpochMilli();
             case MEMORY_SIZE -> ((CellValue.MemorySizeValue) cellValue).value();
@@ -241,7 +206,7 @@ public class QueryEvaluatorUtils {
 
     public static boolean isNumericColumn(CellType type) {
         return switch (type) {
-            case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
+            case NUMBER, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
             default -> false;
         };
     }
@@ -255,23 +220,16 @@ public class QueryEvaluatorUtils {
                 CellValue cell = row.getCells().get(columnIndex);
                 if (isNumericValue(cell)) {
                     sum += extractNumericValue(cell);
-                    if (cell.getType() == CellType.FLOAT) {
-                        resultType = CellType.FLOAT;
+                    if (cell.getType() == CellType.NUMBER) {
+                        resultType = CellType.NUMBER;
                     }
                 }
             }
         }
         
-        return resultType == CellType.FLOAT ? 
-            new CellValue.FloatValue(sum) : 
+        return resultType == CellType.NUMBER ? 
+            new CellValue.NumberValue(sum) : 
             new CellValue.NumberValue((long) sum);
-    }
-
-    public static boolean isNumericValue(CellValue cellValue) {
-        return switch (cellValue.getType()) {
-            case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
-            default -> false;
-        };
     }
     
     /**
@@ -281,7 +239,7 @@ public class QueryEvaluatorUtils {
         Object value = literal.value();
         if (value instanceof Number) {
             if (value instanceof Double || value instanceof Float) {
-                return new CellValue.FloatValue(((Number) value).doubleValue());
+                return new CellValue.NumberValue(((Number) value).doubleValue());
             } else {
                 return new CellValue.NumberValue(((Number) value).longValue());
             }
@@ -306,7 +264,7 @@ public class QueryEvaluatorUtils {
             return (CellValue) value;
         } else if (value instanceof Number) {
             if (value instanceof Double || value instanceof Float) {
-                return new CellValue.FloatValue(((Number) value).doubleValue());
+                return new CellValue.NumberValue(((Number) value).doubleValue());
             } else {
                 return new CellValue.NumberValue(((Number) value).longValue());
             }
@@ -332,5 +290,80 @@ public class QueryEvaluatorUtils {
         } else {
             return new CellValue.StringValue(value.toString());
         }
+    }
+    
+    /**
+     * Collect all aggregate expressions from ORDER BY and HAVING clauses.
+     * This is used to ensure all aggregates needed by subsequent plans are computed during GROUP BY.
+     */
+    public static Set<FunctionCallNode> collectAdditionalAggregates(OrderByNode orderBy, HavingNode having) {
+        Set<FunctionCallNode> aggregates = new HashSet<>();
+        
+        if (orderBy != null) {
+            for (OrderFieldNode field : orderBy.fields()) {
+                collectAggregatesFromExpression(field.field(), aggregates);
+            }
+        }
+        
+        if (having != null) {
+            collectAggregatesFromCondition(having.condition(), aggregates);
+        }
+        
+        return aggregates;
+    }
+    
+    /**
+     * Collect aggregates from a condition node.
+     */
+    private static void collectAggregatesFromCondition(ConditionNode condition, Set<FunctionCallNode> aggregates) {
+        if (condition instanceof ExpressionConditionNode exprCondition) {
+            collectAggregatesFromExpression(exprCondition.expression(), aggregates);
+        }
+        // Add other condition types as needed
+    }
+    
+    /**
+     * Recursively collect all aggregate function calls from an expression.
+     */
+    private static void collectAggregatesFromExpression(ExpressionNode expr, Set<FunctionCallNode> aggregates) {
+        if (expr instanceof FunctionCallNode functionCall) {
+            if (isAggregateFunction(functionCall.functionName())) {
+                aggregates.add(functionCall);
+            }
+            // Also check arguments for nested aggregates
+            for (ExpressionNode arg : functionCall.arguments()) {
+                collectAggregatesFromExpression(arg, aggregates);
+            }
+        } else if (expr instanceof BinaryExpressionNode binaryExpr) {
+            collectAggregatesFromExpression(binaryExpr.left(), aggregates);
+            collectAggregatesFromExpression(binaryExpr.right(), aggregates);
+        } else if (expr instanceof UnaryExpressionNode unaryExpr) {
+            collectAggregatesFromExpression(unaryExpr.operand(), aggregates);
+        } else if (expr instanceof CaseExpressionNode caseExpr) {
+            if (caseExpr.expression() != null) {
+                collectAggregatesFromExpression(caseExpr.expression(), aggregates);
+            }
+            for (WhenClauseNode whenClause : caseExpr.whenClauses()) {
+                collectAggregatesFromExpression(whenClause.condition(), aggregates);
+                collectAggregatesFromExpression(whenClause.result(), aggregates);
+            }
+            if (caseExpr.elseExpression() != null) {
+                collectAggregatesFromExpression(caseExpr.elseExpression(), aggregates);
+            }
+        } else if (expr instanceof FieldAccessNode) {
+            // Field access doesn't contain aggregates
+        } else if (expr instanceof IdentifierNode) {
+            // Identifiers don't contain aggregates
+        } else if (expr instanceof LiteralNode) {
+            // Literals don't contain aggregates
+        } else if (expr instanceof StarNode) {
+            // Star expressions don't contain aggregates
+        } else if (expr instanceof PercentileFunctionNode percentileFunc) {
+            // Percentile functions are aggregates themselves
+            // Convert to equivalent FunctionCallNode for processing
+            List<ExpressionNode> args = List.of(percentileFunc.valueExpression());
+            aggregates.add(new FunctionCallNode(percentileFunc.functionName(), args, false, percentileFunc.location()));
+        }
+        // Add other expression types as needed
     }
 }

@@ -28,13 +28,20 @@ public class TokenStream {
      * Get the current token without consuming it
      */
     public Token peek() {
-        if (current >= tokens.size()) {
+        return peek(0);
+    }
+
+        /**
+     * Get the current token without consuming it
+     */
+    public Token peek(int offset) {
+        if (current + offset >= tokens.size()) {
             // Return a synthetic EOF token if we're past the end
             Token lastToken = tokens.get(tokens.size() - 1);
             return new Token(TokenType.EOF, "", lastToken.line(), 
-                           lastToken.column() + 1, lastToken.position() + 1);
+                           lastToken.column() + 1, lastToken.fromPosition() + 1);
         }
-        return tokens.get(current);
+        return tokens.get(current + offset);
     }
     
     /**

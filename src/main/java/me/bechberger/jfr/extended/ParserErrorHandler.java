@@ -1007,6 +1007,7 @@ public class ParserErrorHandler {
                     yield "Unexpected '=' in WHERE clause. Check the condition syntax.";
                 }
             }
+            case ASSIGN -> "Variable assignment ':=' is supported in WHERE clause. Use it to assign values to local variables.";
             case COMMA -> "Comma not allowed in WHERE clause. Use AND/OR to combine conditions.";
             case FROM -> "FROM keyword not allowed in WHERE clause. Complete the WHERE condition first.";
             default -> "Invalid token in WHERE clause. WHERE should contain field comparisons with AND/OR operators.";

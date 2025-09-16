@@ -31,8 +31,8 @@ public sealed interface CellValue permits
     CellValue.MemorySizeValue,
     CellValue.RateValue,
     CellValue.BooleanValue,
-    CellValue.FloatValue,
     CellValue.ArrayValue,
+    CellValue.StarValue,
     CellValue.NullValue {
     
     /**
@@ -64,7 +64,6 @@ public sealed interface CellValue permits
         
         return switch (this) {
             case NumberValue n -> new NumberValue(result);
-            case FloatValue f -> new FloatValue(result);
             case DurationValue d -> new DurationValue(Duration.ofNanos((long) (result * 1_000_000.0)));
             case TimestampValue t -> new TimestampValue(Instant.ofEpochMilli((long) result));
             case MemorySizeValue m -> new MemorySizeValue((long) result);
@@ -129,9 +128,9 @@ public sealed interface CellValue permits
             return true;
         }
         
-        // NUMBER and FLOAT can operate with all numeric types
-        if (thisType == CellType.NUMBER || thisType == CellType.FLOAT ||
-            otherType == CellType.NUMBER || otherType == CellType.FLOAT) {
+        // NUMBER and NUMBER can operate with all numeric types
+        if (thisType == CellType.NUMBER ||
+            otherType == CellType.NUMBER) {
             return true;
         }
         
@@ -174,7 +173,6 @@ public sealed interface CellValue permits
         if (thisType == otherType) {
             return switch (thisType) {
                 case NUMBER -> new NumberValue(result);
-                case FLOAT -> new FloatValue(result);
                 case DURATION -> new DurationValue(Duration.ofMillis((long) result));
                 case TIMESTAMP -> new TimestampValue(Instant.ofEpochMilli((long) result));
                 case MEMORY_SIZE -> new MemorySizeValue((long) result);
@@ -183,30 +181,30 @@ public sealed interface CellValue permits
             };
         }
         
-        // For mixed NUMBER/FLOAT operations, promote to FLOAT
-        if ((thisType == CellType.NUMBER || thisType == CellType.FLOAT) &&
-            (otherType == CellType.NUMBER || otherType == CellType.FLOAT)) {
-            return new FloatValue(result);
+        // For mixed NUMBER/NUMBER operations, promote to NUMBER
+        if ((thisType == CellType.NUMBER) &&
+            (otherType == CellType.NUMBER)) {
+            return new NumberValue(result);
         }
         
-        // For operations with NUMBER/FLOAT and other numeric types, preserve the non-NUMBER/FLOAT type
-        if (thisType == CellType.NUMBER || thisType == CellType.FLOAT) {
+        // For operations with NUMBER/NUMBER and other numeric types, preserve the non-NUMBER/NUMBER type
+        if (thisType == CellType.NUMBER) {
             return switch (otherType) {
                 case DURATION -> new DurationValue(Duration.ofMillis((long) result));
                 case TIMESTAMP -> new TimestampValue(Instant.ofEpochMilli((long) result));
                 case MEMORY_SIZE -> new MemorySizeValue((long) result);
                 case RATE -> new RateValue(result, ((RateValue) other).timeUnit());
-                default -> new FloatValue(result);
+                default -> new NumberValue(result);
             };
         }
         
-        if (otherType == CellType.NUMBER || otherType == CellType.FLOAT) {
+        if (otherType == CellType.NUMBER) {
             return switch (thisType) {
                 case DURATION -> new DurationValue(Duration.ofMillis((long) result));
                 case TIMESTAMP -> new TimestampValue(Instant.ofEpochMilli((long) result));
                 case MEMORY_SIZE -> new MemorySizeValue((long) result);
                 case RATE -> new RateValue(result, ((RateValue) this).timeUnit());
-                default -> new FloatValue(result);
+                default -> new NumberValue(result);
             };
         }
         
@@ -219,7 +217,7 @@ public sealed interface CellValue permits
      */
     default boolean isNumeric() {
         return switch (this.getType()) {
-            case NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
+            case NUMBER, DURATION, TIMESTAMP, MEMORY_SIZE, RATE -> true;
             default -> false;
         };
     }
@@ -230,7 +228,6 @@ public sealed interface CellValue permits
     default double extractNumericValue() {
         return switch (this) {
             case NumberValue n -> n.value();
-            case FloatValue f -> f.value();
             case DurationValue d -> d.value().toNanos() / 1_000_000.0; // Convert to milliseconds
             case TimestampValue t -> (double) t.value().toEpochMilli();
             case MemorySizeValue m -> (double) m.value();
@@ -294,6 +291,18 @@ public sealed interface CellValue permits
         
         @Override
         public String toString() { return value != null ? value : "N/A"; }
+        
+        @Override
+        public int hashCode() {
+            return value != null ? value.hashCode() : 0;
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof StringValue other)) return false;
+            return value != null ? value.equals(other.value) : other.value == null;
+        }
     }
     
     /**
@@ -343,10 +352,23 @@ public sealed interface CellValue permits
         
         @Override
         public CellType getType() { return CellType.DURATION; }
-         @Override
+        
+        @Override
         public String toString() { 
             if (value == null) return "N/A";
             return DurationFormatter.format(value);
+        }
+        
+        @Override
+        public int hashCode() {
+            return value != null ? value.hashCode() : 0;
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof DurationValue other)) return false;
+            return value != null ? value.equals(other.value) : other.value == null;
         }
     }
 
@@ -368,6 +390,18 @@ public sealed interface CellValue permits
         @Override
         public String toString() { 
             return originalFormat != null ? originalFormat : (value != null ? value.toString() : "N/A"); 
+        }
+        
+        @Override
+        public int hashCode() {
+            return value != null ? value.hashCode() : 0;
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof TimestampValue other)) return false;
+            return value != null ? value.equals(other.value) : other.value == null;
         }
     }
     
@@ -450,6 +484,19 @@ public sealed interface CellValue permits
             }
             return count + "/" + unit;
         }
+        
+        @Override
+        public int hashCode() {
+            return Double.hashCode(count) * 31 + (timeUnit != null ? timeUnit.hashCode() : 0);
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof RateValue other)) return false;
+            return Double.compare(count, other.count) == 0 && 
+                   (timeUnit != null ? timeUnit.equals(other.timeUnit) : other.timeUnit == null);
+        }
     }
     
     /**
@@ -476,32 +523,6 @@ public sealed interface CellValue permits
             if (this == obj) return true;
             if (!(obj instanceof BooleanValue other)) return false;
             return value == other.value;
-        }
-    }
-    
-    /**
-     * Floating point cell value
-     */
-    record FloatValue(double value) implements CellValue {
-        @Override
-        public Object getValue() { return value; }
-        
-        @Override
-        public CellType getType() { return CellType.FLOAT; }
-        
-        @Override
-        public String toString() { return String.valueOf(value); }
-        
-        @Override
-        public int hashCode() {
-            return Double.hashCode(value);
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (!(obj instanceof FloatValue other)) return false;
-            return Double.compare(value, other.value) == 0;
         }
     }
     
@@ -688,6 +709,30 @@ public sealed interface CellValue permits
     }
     
     /**
+     * Star (*) symbol value - represents the wildcard/all-columns selector in SQL contexts
+     */
+    record StarValue() implements CellValue {
+        @Override
+        public Object getValue() { return "*"; }
+        
+        @Override
+        public CellType getType() { return CellType.STAR; }
+        
+        @Override
+        public String toString() { return "*"; }
+        
+        @Override
+        public int hashCode() {
+            return "*".hashCode();
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof StarValue;
+        }
+    }
+    
+    /**
      * Null/missing cell value
      */
     record NullValue() implements CellValue {
@@ -699,6 +744,16 @@ public sealed interface CellValue permits
         
         @Override
         public String toString() { return "N/A"; }
+        
+        @Override
+        public int hashCode() {
+            return 0; // All null values have the same hash
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof NullValue;
+        }
     }
     
     /**
@@ -710,8 +765,8 @@ public sealed interface CellValue permits
         if (value instanceof String s) return new StringValue(s);
         if (value instanceof Integer i) return new NumberValue(i.longValue());
         if (value instanceof Long l) return new NumberValue(l);
-        if (value instanceof Double d) return new FloatValue(d);
-        if (value instanceof Float f) return new FloatValue(f.doubleValue());
+        if (value instanceof Double d) return new NumberValue(d);
+        if (value instanceof Float f) return new NumberValue(f.doubleValue());
         if (value instanceof Boolean b) return new BooleanValue(b);
         if (value instanceof Duration d) return new DurationValue(d);
         if (value instanceof Instant i) return new TimestampValue(i);
@@ -766,7 +821,6 @@ public sealed interface CellValue permits
         return switch (a.getType()) {
             case STRING -> ((StringValue) a).value().compareTo(((StringValue) b).value());
             case NUMBER -> Double.compare(((NumberValue) a).value(), ((NumberValue) b).value());
-            case FLOAT -> Double.compare(((FloatValue) a).value(), ((FloatValue) b).value());
             case BOOLEAN -> Boolean.compare(((BooleanValue) a).value(), ((BooleanValue) b).value());
             case DURATION -> ((DurationValue) a).value().compareTo(((DurationValue) b).value());
             case TIMESTAMP -> ((TimestampValue) a).value().compareTo(((TimestampValue) b).value());
@@ -783,6 +837,7 @@ public sealed interface CellValue permits
                 }
                 yield Integer.compare(arrayA.elements().size(), arrayB.elements().size());
             }
+            case STAR -> 0; // All star values are equal
             case NULL -> 0;
         };
     }

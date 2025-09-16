@@ -36,7 +36,7 @@ public class TableBuilder {
     }
     
     public TableBuilder withFloatColumn(String name) {
-        return withColumn(name, CellType.FLOAT);
+        return withColumn(name, CellType.NUMBER);
     }
     
     public TableBuilder withBooleanColumn(String name) {
@@ -87,13 +87,24 @@ public class TableBuilder {
         return switch (type) {
             case STRING -> new CellValue.StringValue(value.toString());
             case NUMBER -> new CellValue.NumberValue(value instanceof Number n ? n.doubleValue() : Double.parseDouble(value.toString()));
-            case FLOAT -> new CellValue.FloatValue(value instanceof Number n ? n.doubleValue() : Double.parseDouble(value.toString()));
             case BOOLEAN -> new CellValue.BooleanValue(value instanceof Boolean b ? b : Boolean.parseBoolean(value.toString()));
             case TIMESTAMP -> {
                 if (value instanceof java.time.Instant instant) {
                     yield new CellValue.TimestampValue(instant);
                 } else {
-                    yield new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
+                    String timestampStr = value.toString();
+                    try {
+                        // Try to parse as ISO date string first
+                        if (timestampStr.contains("T") || timestampStr.contains("Z")) {
+                            yield new CellValue.TimestampValue(java.time.Instant.parse(timestampStr));
+                        } else {
+                            // Try to parse as epoch milliseconds
+                            yield new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(Long.parseLong(timestampStr)));
+                        }
+                    } catch (Exception e) {
+                        // If both fail, try to parse as number
+                        yield new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(value instanceof Number n ? n.longValue() : Long.parseLong(timestampStr)));
+                    }
                 }
             }
             case DURATION -> {
@@ -104,6 +115,23 @@ public class TableBuilder {
                 }
             }
             case MEMORY_SIZE -> new CellValue.MemorySizeValue(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()));
+            case ARRAY -> {
+                if (value instanceof List<?> list) {
+                    List<CellValue> cellValues = new ArrayList<>();
+                    for (Object element : list) {
+                        cellValues.add(CellValue.of(element));
+                    }
+                    yield new CellValue.ArrayValue(cellValues);
+                } else if (value instanceof Object[] array) {
+                    List<CellValue> cellValues = new ArrayList<>();
+                    for (Object element : array) {
+                        cellValues.add(CellValue.of(element));
+                    }
+                    yield new CellValue.ArrayValue(cellValues);
+                } else {
+                    yield new CellValue.ArrayValue(Collections.singletonList(CellValue.of(value)));
+                }
+            }
             default -> new CellValue.StringValue(value.toString());
         };
     }

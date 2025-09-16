@@ -400,6 +400,7 @@ public class QueryErrorMessageGenerator {
                 case STRING -> "string";
                 case MATHEMATICAL -> "mathematical";
                 case CONDITIONAL -> "conditional";
+                case CONVERSION -> "conversion";
             };
             
             List<String> functionNames = functions.stream()

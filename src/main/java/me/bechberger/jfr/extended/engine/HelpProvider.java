@@ -26,8 +26,17 @@ public class HelpProvider {
         help.append("  @SELECT ...  (extended syntax for advanced features)\n");
         help.append("  SHOW EVENTS  (list available event types)\n");
         help.append("  SHOW FIELDS event_type  (show fields for a specific event type)\n");
+        help.append("  SHOW PLAN [format] query  (display query execution plan)\n");
+        help.append("  EXPLAIN query  (provide detailed query execution information)\n");
         help.append("  HELP FUNCTION function_name  (get help for a specific function)\n");
         help.append("  HELP GRAMMAR  (show complete grammar documentation)\n\n");
+        
+        help.append("QUERY PLAN FORMATS:\n");
+        help.append("  SHOW PLAN query  (default simple format)\n");
+        help.append("  SHOW PLAN SIMPLE query  (basic plan structure)\n");
+        help.append("  SHOW PLAN VERBOSE query  (detailed plan with statistics)\n");
+        help.append("  SHOW PLAN ASCII query  (ASCII art visualization)\n");
+        help.append("  SHOW PLAN PERFORMANCE query  (performance-focused view)\n\n");
         
         help.append("COMMON OPERATORS:\n");
         help.append("  =, !=, <, >, <=, >=  (comparison)\n");
@@ -65,7 +74,9 @@ public class HelpProvider {
         help.append("  SELECT * FROM GarbageCollection WHERE duration > 100ms\n");
         help.append("  SELECT COUNT(*), AVG(duration) FROM ThreadSleep GROUP BY eventType\n");
         help.append("  SELECT * FROM JavaExceptionThrow WHERE message LIKE '%error%'\n");
-        help.append("  @SELECT eventType, stackTrace FROM * WHERE duration WITHIN 1s OF startTime\n\n");
+        help.append("  @SELECT eventType, stackTrace FROM * WHERE duration WITHIN 1s OF startTime\n");
+        help.append("  SHOW PLAN ASCII @SELECT COUNT(*) FROM GarbageCollection GROUP BY eventType\n");
+        help.append("  EXPLAIN @SELECT * FROM ExecutionSample WHERE duration > 10ms\n\n");
         
         help.append("Use 'HELP FUNCTION function_name' for detailed function help.\n");
         help.append("Use 'HELP GRAMMAR' for complete syntax documentation.\n");
@@ -149,6 +160,7 @@ public class HelpProvider {
             case STRING -> "String";
             case DATE_TIME -> "Date/Time";
             case CONDITIONAL -> "Conditional";
+            case CONVERSION -> "Conversion";
         };
     }
     

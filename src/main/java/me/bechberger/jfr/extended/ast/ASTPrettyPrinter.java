@@ -197,6 +197,16 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
         return "HELP GRAMMAR";
     }
 
+    @Override
+    public String visitShowPlan(ShowPlanNode node) {
+        return "SHOW PLAN " + node.query().accept(this);
+    }
+
+    @Override
+    public String visitExplain(ExplainNode node) {
+        return "EXPLAIN " + node.query().accept(this);
+    }
+
     // ===========================================
     // SELECT Clause
     // ===========================================
@@ -290,6 +300,7 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
             case LEFT -> sb.append("LEFT JOIN ");
             case RIGHT -> sb.append("RIGHT JOIN ");
             case FULL -> sb.append("FULL JOIN ");
+            case CROSS -> sb.append("CROSS JOIN ");
         }
         
         sb.append(node.source());
@@ -298,8 +309,11 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
             sb.append(" AS ").append(node.alias());
         }
         
-        sb.append(" ON ").append(node.leftJoinField())
-          .append(" = ").append(node.rightJoinField());
+        // CROSS JOIN doesn't have an ON clause
+        if (node.joinType() != StandardJoinType.CROSS) {
+            sb.append(" ON ").append(node.leftJoinField())
+              .append(" = ").append(node.rightJoinField());
+        }
         
         return sb.toString();
     }
@@ -359,6 +373,11 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
     @Override
     public String visitIdentifier(IdentifierNode node) {
         return node.name();
+    }
+    
+    @Override
+    public String visitVariableAssignmentExpression(VariableAssignmentExpressionNode node) {
+        return node.variable() + " := " + node.value().accept(this);
     }
     
     @Override
@@ -560,5 +579,11 @@ public class ASTPrettyPrinter implements ASTVisitor<String> {
         
         sb.append(" END");
         return sb.toString();
+    }
+
+    @Override
+    public String visitGlobalVariableAssignment(GlobalVariableAssignmentNode node) {
+        String query = node.expression().accept(this);
+        return node.variable() + " := " + query;
     }
 }

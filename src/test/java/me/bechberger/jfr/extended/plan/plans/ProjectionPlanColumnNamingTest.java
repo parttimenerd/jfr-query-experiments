@@ -1,0 +1,158 @@
+package me.bechberger.jfr.extended.plan.plans;
+
+import me.bechberger.jfr.extended.engine.framework.QueryTestFramework;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Test for ProjectionPlan column naming enhancement.
+ * Tests that non-aggregate queries properly name anonymous columns as $0, $1, $2, etc.
+ * 
+ * @author JFR Query Plan Architecture
+ * @since 2.0
+ */
+public class ProjectionPlanColumnNamingTest {
+    
+    private QueryTestFramework framework;
+    
+    @BeforeEach
+    void setUp() {
+        framework = new QueryTestFramework();
+        
+        // Create test data
+        framework.mockTable("TestData", """
+            value | category | duration
+            10 | A | 100
+            20 | B | 200
+            30 | C | 300
+            """);
+    }
+    
+    @Test
+    @DisplayName("Anonymous arithmetic expressions should be named $0, $1, $2, etc.")
+    void testArithmeticExpressionNaming() {
+        var result = framework.executeQuery("@SELECT value + 5, value * 2, value / 2 FROM TestData WHERE value = 10");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that anonymous expressions are named $0, $1, $2
+        assertEquals(3, columns.size());
+        assertEquals("$0", columns.get(0).name());
+        assertEquals("$1", columns.get(1).name());
+        assertEquals("$2", columns.get(2).name());
+        
+        // Check values
+        var rows = table.getRows();
+        assertEquals(1, rows.size());
+        var row = rows.get(0);
+        assertEquals(15.0, ((Number) row.getCells().get(0).getValue()).doubleValue());
+        assertEquals(20.0, ((Number) row.getCells().get(1).getValue()).doubleValue());
+        assertEquals(5.0, ((Number) row.getCells().get(2).getValue()).doubleValue());
+    }
+    
+    @Test
+    @DisplayName("Mixed named and anonymous columns")
+    void testMixedNamedAndAnonymousColumns() {
+        var result = framework.executeQuery("@SELECT value as original, value + 5, category, value * 2 FROM TestData WHERE value = 20");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check column names
+        assertEquals(4, columns.size());
+        assertEquals("original", columns.get(0).name());    // aliased
+        assertEquals("$1", columns.get(1).name());          // anonymous expression
+        assertEquals("category", columns.get(2).name());    // field name
+        assertEquals("$3", columns.get(3).name());          // anonymous expression
+    }
+    
+    @Test
+    @DisplayName("Non-aggregate function calls should be named $N")
+    void testNonAggregateFunctionCalls() {
+        var result = framework.executeQuery("@SELECT ABS(value), SQRT(value), CEIL(value / 10.0) FROM TestData WHERE value = 25");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that non-aggregate function calls are treated as anonymous expressions
+        assertEquals(3, columns.size());
+        assertEquals("$0", columns.get(0).name());
+        assertEquals("$1", columns.get(1).name());
+        assertEquals("$2", columns.get(2).name());
+    }
+    
+    @Test
+    @DisplayName("Field access should retain field names")
+    void testFieldAccessNaming() {
+        var result = framework.executeQuery("@SELECT value, category, duration FROM TestData WHERE value = 30");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that field access retains field names
+        assertEquals(3, columns.size());
+        assertEquals("value", columns.get(0).name());
+        assertEquals("category", columns.get(1).name());
+        assertEquals("duration", columns.get(2).name());
+    }
+    
+    @Test
+    @DisplayName("Complex expressions with aliases")
+    void testComplexExpressionsWithAliases() {
+        var result = framework.executeQuery("@SELECT value + 10 as increased, value * value as squared, ABS(value - 25) as distance FROM TestData WHERE value = 20");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that aliases are used properly
+        assertEquals(3, columns.size());
+        assertEquals("increased", columns.get(0).name());
+        assertEquals("squared", columns.get(1).name());
+        assertEquals("distance", columns.get(2).name());
+    }
+    
+    @Test
+    @DisplayName("Parenthesized expressions should be named $N")
+    void testParenthesizedExpressions() {
+        var result = framework.executeQuery("@SELECT (value + 5) * 2, (value - 10) / 2, value FROM TestData WHERE value = 20");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that parenthesized expressions are named $N
+        assertEquals(3, columns.size());
+        assertEquals("$0", columns.get(0).name());          // parenthesized expression
+        assertEquals("$1", columns.get(1).name());          // parenthesized expression
+        assertEquals("value", columns.get(2).name());       // field access
+    }
+    
+    @Test
+    @DisplayName("Simple duration + 2 expression test")
+    void testSimpleDurationPlusTwo() {
+        var result = framework.executeQuery("@SELECT duration + 2 FROM TestData WHERE value = 10");
+        assertTrue(result.isSuccess());
+        
+        var table = result.getTable();
+        var columns = table.getColumns();
+        
+        // Check that the expression is named $0
+        assertEquals(1, columns.size());
+        assertEquals("$0", columns.get(0).name());
+        
+        // Check the value
+        var rows = table.getRows();
+        assertEquals(1, rows.size());
+        var row = rows.get(0);
+        assertEquals(102.0, ((Number) row.getCells().get(0).getValue()).doubleValue());
+    }
+}

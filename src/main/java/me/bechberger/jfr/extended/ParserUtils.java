@@ -2,6 +2,7 @@ package me.bechberger.jfr.extended;
 
 import me.bechberger.jfr.extended.ast.Location;
 import me.bechberger.jfr.extended.ast.ASTNodes.*;
+import java.util.EnumSet;
 import java.util.Set;
 
 /**
@@ -53,6 +54,7 @@ public class ParserUtils {
     
     /**
      * Validate string literals for invalid characters.
+     * Accepts tab characters and newlines directly, along with Unicode and most printable characters.
      */
     public static void validateStringLiteral(String value) throws ParserException {
         // Empty strings are allowed
@@ -60,21 +62,50 @@ public class ParserUtils {
             return;
         }
         
-        // Check for control characters that shouldn't be in string literals
+        // Allow tabs, newlines, and most characters - only restrict truly problematic control characters
         for (char c : value.toCharArray()) {
-            if (Character.isISOControl(c) && c != '\t' && c != '\n' && c != '\r') {
-                throw new ParserException("String literal contains invalid control character (code: " + 
-                    (int)c + "). Use escape sequences for special characters.");
+            // Allow tabs (\t), newlines (\n, \r), and other printable characters
+            // Only reject null character and other potentially problematic control characters
+            if (c == '\0') {
+                throw new ParserException("String literal contains null character (\\0) which is not allowed.");
             }
-            if (c == '\t') {
-                throw new ParserException("String literal contains tab character. " +
-                    "Use \\t escape sequence instead.");
-            }
-            if (c == '\n' || c == '\r') {
-                throw new ParserException("String literal contains newline character. " +
-                    "String literals cannot span multiple lines.");
+            // Allow other control characters including tabs and newlines as requested
+        }
+    }
+    
+    /**
+     * Process escape sequences in a string literal.
+     * Converts escape sequences like \n, \t, \', \" to their actual characters.
+     */
+    public static String processEscapeSequences(String value) throws ParserException {
+        if (value.isEmpty()) {
+            return value;
+        }
+        
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\\' && i + 1 < value.length()) {
+                char next = value.charAt(i + 1);
+                switch (next) {
+                    case 'n' -> { result.append('\n'); i++; }
+                    case 't' -> { result.append('\t'); i++; }
+                    case 'r' -> { result.append('\r'); i++; }
+                    case '\\' -> { result.append('\\'); i++; }
+                    case '\'' -> { result.append('\''); i++; }
+                    case '"' -> { result.append('"'); i++; }
+                    case 'b' -> { result.append('\b'); i++; }
+                    case 'f' -> { result.append('\f'); i++; }
+                    default -> {
+                        throw new ParserException("Invalid escape sequence: \\" + next + 
+                            ". Supported escape sequences are: \\n, \\t, \\r, \\\\, \\', \\\", \\b, \\f");
+                    }
+                }
+            } else {
+                result.append(c);
             }
         }
+        return result.toString();
     }
     
     /**
@@ -160,33 +191,13 @@ public class ParserUtils {
     }
     
     /**
-     * Keywords that can be used as identifiers in certain contexts
+     * Keywords that can be used as identifiers in certain contexts.
+     * This set contains all TokenType values that have the KEYWORD attribute.
      */
-    private static final Set<TokenType> KEYWORDS_AS_IDENTIFIERS = Set.of(
-        // Aggregate function names
-        TokenType.PERCENTILE, TokenType.P90, TokenType.P95, TokenType.P99, TokenType.P999,
-        TokenType.P90SELECT, TokenType.P95SELECT, TokenType.P99SELECT, TokenType.P999SELECT,
-        TokenType.PERCENTILE_SELECT,
-        
-        // Join-related keywords 
-        TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL, TokenType.OUTER,
-        TokenType.JOIN, TokenType.FUZZY, TokenType.ON, TokenType.WITH,
-        
-        // Order and aggregate keywords
-        TokenType.ASC, TokenType.DESC, TokenType.DISTINCT,
-        
-        // Temporal and conditional keywords
-        TokenType.TOLERANCE, TokenType.NEAREST, TokenType.PREVIOUS, TokenType.AFTER,
-        TokenType.WITHIN, TokenType.OF, TokenType.OVER,
-        TokenType.CASE, TokenType.WHEN, TokenType.THEN, TokenType.ELSE, TokenType.END,
-        
-        // Core SQL keywords that might be used as column names
-        TokenType.FROM, TokenType.WHERE, TokenType.GROUP_BY, TokenType.HAVING, 
-        TokenType.ORDER_BY, TokenType.LIMIT, TokenType.AS,
-        
-        // Logical operators that might be column names
-        TokenType.AND, TokenType.OR, TokenType.NOT, TokenType.LIKE, TokenType.IN, TokenType.BETWEEN
-    );
+    private static final Set<TokenType> KEYWORDS_AS_IDENTIFIERS = EnumSet.allOf(TokenType.class)
+            .stream()
+            .filter(TokenType::isKeyword)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
     
     /**
      * Checks if the current token can be used as an identifier (either IDENTIFIER or allowed keyword)

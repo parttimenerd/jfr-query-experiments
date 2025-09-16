@@ -244,6 +244,11 @@ public class Parser {
                 return parseShowQuery();
             }
             
+            // Check for EXPLAIN queries
+            if (tokens.match(TokenType.EXPLAIN)) {
+                return parseExplainQuery();
+            }
+            
             // Check for HELP queries
             if (tokens.match(TokenType.HELP)) {
                 return parseHelpQuery();
@@ -254,9 +259,10 @@ public class Parser {
                 return parseViewDefinition();
             }
             
-            // Check for assignment (identifier := ... or $variable := ...)
-            if ((tokens.check(TokenType.IDENTIFIER) || tokens.check(TokenType.SYNTHETIC_FIELD)) && tokens.checkNext(TokenType.ASSIGN)) {
-                return parseAssignment();
+            // Check for assignment (identifier := ... or $variable := ... or keyword := ...)
+            if ((tokens.check(TokenType.IDENTIFIER) || tokens.check(TokenType.SYNTHETIC_FIELD) || 
+                 ParserUtils.canUseAsIdentifier(tokens)) && tokens.checkNext(TokenType.ASSIGN)) {
+                return parseAssignmentOrGlobalVariable();
             }
             
             // Check if this is an extended query (starts with @ only)
@@ -297,13 +303,15 @@ public class Parser {
     }
     
     /**
-     * Parse SHOW EVENTS or SHOW FIELDS queries (metadata queries).
+     * Parse SHOW EVENTS, SHOW FIELDS, or SHOW PLAN queries (metadata and plan queries).
      * 
      * <p><strong>Grammar Rule:</strong></p>
      * <pre>
      * show_query ::= SHOW EVENTS
      *              | SHOW FIELDS event_type
+     *              | SHOW PLAN [format] query
      * event_type ::= IDENTIFIER ( DOT IDENTIFIER )*
+     * format ::= SIMPLE | VERBOSE | ASCII | PERFORMANCE
      * </pre>
      * 
      * 
@@ -311,10 +319,11 @@ public class Parser {
      * <ul>
      *   <li>SHOW EVENTS lists all available JFR event types</li>
      *   <li>SHOW FIELDS requires an event type name</li>
+     *   <li>SHOW PLAN visualizes query execution plan</li>
      *   <li>Event types can be dotted (e.g., jdk.GarbageCollection)</li>
      * </ul>
      * 
-     * @return StatementNode representing the SHOW query (ShowEventsNode or ShowFieldsNode)
+     * @return StatementNode representing the SHOW query (ShowEventsNode, ShowFieldsNode, or ShowPlanNode)
      * @throws ParserException if syntax is invalid or unsupported SHOW type
      */
     private StatementNode parseShowQuery() throws ParserException {
@@ -335,9 +344,68 @@ public class Parser {
             }
             
             return new ShowFieldsNode(eventType.toString(), location(eventTypeToken));
+        } else if ("PLAN".equalsIgnoreCase(keyword.value())) {
+            return parseShowPlan(location(keyword));
         } else {
-            throw new ParserException("Expected EVENTS or FIELDS after SHOW");
+            throw new ParserException("Expected EVENTS, FIELDS, or PLAN after SHOW");
         }
+    }
+    
+    /**
+     * Parse SHOW PLAN queries (query plan visualization).
+     * 
+     * <p><strong>Grammar Rule:</strong></p>
+     * <pre>
+     * show_plan ::= SHOW PLAN [format] query
+     * format ::= SIMPLE | VERBOSE | ASCII | PERFORMANCE
+     * </pre>
+     * 
+     * @param location The location of the SHOW PLAN keywords
+     * @return ShowPlanNode representing the SHOW PLAN query
+     * @throws ParserException if syntax is invalid
+     */
+    private StatementNode parseShowPlan(Location location) throws ParserException {
+        PlanFormat format = PlanFormat.SIMPLE; // Default format
+        
+        // Check for optional format specifier
+        if (tokens.check(TokenType.IDENTIFIER)) {
+            Token formatToken = tokens.peek();
+            String formatName = formatToken.value().toUpperCase();
+            
+            // Check if it's a valid format
+            try {
+                format = PlanFormat.valueOf(formatName);
+                tokens.advance(); // consume the format token
+            } catch (IllegalArgumentException e) {
+                // Not a format token, continue with default format
+                // The identifier will be parsed as part of the query
+            }
+        }
+        
+        // Parse the query to analyze
+        QueryNode query = parseQuery();
+        
+        return new ShowPlanNode(query, format, location);
+    }
+    
+    /**
+     * Parse EXPLAIN queries (query execution plan analysis).
+     * 
+     * <p><strong>Grammar Rule:</strong></p>
+     * <pre>
+     * explain_query ::= EXPLAIN query
+     * </pre>
+     * 
+     * @return ExplainNode representing the EXPLAIN query
+     * @throws ParserException if syntax is invalid
+     */
+    private StatementNode parseExplainQuery() throws ParserException {
+        Location location = location(tokens.previous());
+        
+        // Parse the query to explain
+        QueryNode query = parseQuery();
+        
+        return new ExplainNode(query, location);
     }
     
     /**
@@ -450,6 +518,63 @@ public class Parser {
     }
     
     /**
+     * Parse assignment or global variable assignment.
+     * 
+     * <p>This method determines whether we have:
+     * <ul>
+     *   <li>Query assignment: `var := (@SELECT * FROM table)` or `var := (SELECT * FROM table)`</li>
+     *   <li>Global variable assignment: `var := 3m` or `var := "hello"`</li>
+     * </ul>
+     * 
+     * The distinction is made by looking ahead to see if the right-hand side starts
+     * with SELECT, @SELECT, or is a simple expression.
+     * 
+     * @return AssignmentNode or GlobalVariableAssignmentNode
+     * @throws ParserException if assignment syntax is invalid
+     */
+    private StatementNode parseAssignmentOrGlobalVariable() throws ParserException {
+        Token variable;
+        String variableName;
+        if (tokens.check(TokenType.IDENTIFIER)) {
+            variable = tokens.consume(TokenType.IDENTIFIER, "Expected variable name");
+            variableName = variable.value();
+        } else if (tokens.check(TokenType.SYNTHETIC_FIELD)) {
+            variable = tokens.consume(TokenType.SYNTHETIC_FIELD, "Expected variable name");
+            // Strip the $ prefix from synthetic field names
+            variableName = variable.value().startsWith("$") ? variable.value().substring(1) : variable.value();
+        } else {
+            // This must be a keyword being used as an identifier
+            variable = ParserUtils.consumeIdentifierOrKeyword(tokens, "variable assignment");
+            variableName = variable.value();
+        }
+        tokens.consume(TokenType.ASSIGN, "Expected := after variable name");
+        
+        // Look ahead to determine assignment type
+        if (tokens.check(TokenType.SELECT) || tokens.check(TokenType.EXTENDED_QUERY)) {
+            // This is a query assignment
+            QueryNode query = parseQuery();
+            return new AssignmentNode(variableName, query, location(variable.line(), variable.column()));
+        } else {
+            // Check if this looks like a variable assignment inside a SELECT clause
+            // This happens when someone writes "SELECT x := 42 FROM ..." instead of proper syntax
+            if (tokens.check(TokenType.FROM) || tokens.check(TokenType.WHERE) || 
+                tokens.check(TokenType.GROUP_BY) || tokens.check(TokenType.ORDER_BY) || tokens.check(TokenType.HAVING)) {
+                throw new ParserException(
+                    String.format("Variable assignment '%s := ...' is not allowed in SELECT clause. " +
+                                "Variable assignments can only be used in WHERE clauses. " +
+                                "To fix this, move the assignment to the WHERE clause: " +
+                                "SELECT * FROM table WHERE %s := expression AND %s > value", 
+                                variableName, variableName, variableName)
+                );
+            }
+            
+            // This is a global variable assignment with an expression
+            ExpressionNode expression = parseExpression();
+            return new GlobalVariableAssignmentNode(variableName, expression, location(variable.line(), variable.column()));
+        }
+    }
+    
+    /**
      * Parse a query (main query parsing logic).
      * 
      * <p><strong>Grammar Rule:</strong></p>
@@ -506,7 +631,7 @@ public class Parser {
         
         // Check for JOINs after the WHERE clause
         if (tokens.check(TokenType.INNER) || tokens.check(TokenType.LEFT) || tokens.check(TokenType.RIGHT) || 
-            tokens.check(TokenType.FULL) || tokens.check(TokenType.JOIN) || tokens.check(TokenType.FUZZY)) {
+            tokens.check(TokenType.FULL) || tokens.check(TokenType.CROSS) || tokens.check(TokenType.JOIN) || tokens.check(TokenType.FUZZY)) {
             // Update the FROM clause with additional JOINs
             from = parseAdditionalJoins(from);
         }
@@ -552,7 +677,16 @@ public class Parser {
             tokens.advance(); // consume COLUMN
             do {
                 Token text = tokens.consume(TokenType.STRING, "Expected column name");
-                columns.add(text.value());
+                String columnName = text.value();
+                // Remove surrounding quotes (both single and double quotes)
+                if (columnName.length() >= 2 && 
+                    ((columnName.startsWith("'") && columnName.endsWith("'")) || 
+                     (columnName.startsWith("\"") && columnName.endsWith("\"")))) {
+                    columnName = columnName.substring(1, columnName.length() - 1);
+                }
+                // Process escape sequences in column names
+                columnName = ParserUtils.processEscapeSequences(columnName);
+                columns.add(columnName);
             } while (tokens.match(TokenType.COMMA));
         }
         
@@ -681,11 +815,6 @@ public class Parser {
         currentContext = QueryErrorMessageGenerator.QueryContext.SELECT_CLAUSE;
         
         try {
-            // Check if we have * for SELECT *
-            if (tokens.match(TokenType.STAR)) {
-                return new SelectNode(List.of(), true, location(line, column));
-            }
-            
             // Validate that we have SELECT items (not empty SELECT)
             if (tokens.check(TokenType.FROM) || tokens.isAtEnd()) {
                 ParserErrorHandler.ParserError error = new ParserErrorHandler.ParserError(
@@ -710,6 +839,19 @@ public class Parser {
             
             do {
                 try {
+                    // Check for variable assignment pattern in SELECT clause (identifier := expression)
+                    if (tokens.check(TokenType.IDENTIFIER) && tokens.checkNext(TokenType.ASSIGN)) {
+                        String variableName = tokens.current().value();
+                        
+                        // Throw specific exception for variable assignment in SELECT
+                        throw new ParserException(
+                            String.format("Variable assignment '%s := ...' is not allowed in SELECT clause. " +
+                                        "Variable assignments can only be used in WHERE clauses. " +
+                                        "Example: SELECT * FROM table WHERE %s := expression AND %s > value", 
+                                        variableName, variableName, variableName)
+                        );
+                    }
+                    
                     ExpressionNode expression = parseExpression();
                     String alias = null;
                     
@@ -754,7 +896,12 @@ public class Parser {
                 }
             } while (tokens.check(TokenType.COMMA) && tokens.match(TokenType.COMMA));
             
-            return new SelectNode(selectItems, false, location(line, column));
+            // Determine if this is a pure "SELECT *" case
+            boolean isSelectAll = selectItems.size() == 1 && 
+                                 selectItems.get(0).expression() instanceof StarNode &&
+                                 selectItems.get(0).alias() == null;
+            
+            return new SelectNode(selectItems, isSelectAll, location(line, column));
         } finally {
             // Restore previous context
             currentContext = previousContext;
@@ -840,32 +987,62 @@ public class Parser {
                         joinType = FuzzyJoinType.AFTER;
                     }
                     
-                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after FUZZY JOIN");
-                    
-                    // Parse alias for the joined source (before ON clause)
+                    // Parse the right source (can be table name or subquery)
+                    SourceNodeBase rightSource = parseSource();
+                    String rightSourceName;
                     String rightAlias = null;
+                    
+                    if (rightSource instanceof SourceNode sourceNode) {
+                        rightSourceName = sourceNode.source();
+                        rightAlias = sourceNode.alias();
+                    } else if (rightSource instanceof SubquerySourceNode subqueryNode) {
+                        rightSourceName = "subquery"; // Placeholder name for subqueries
+                        rightAlias = subqueryNode.alias();
+                    } else {
+                        throw new ParserException("Unexpected source type in FUZZY JOIN: " + rightSource.getClass().getSimpleName());
+                    }
+                    
+                    // Add alias to valid aliases set if present
+                    if (rightAlias != null) {
+                        validAliases.add(rightAlias);
+                    }
+                    
+                    // Parse alias for the joined source (before ON clause) - DEPRECATED approach
+                    // This is kept for backward compatibility but the alias should come from parseSource()
                     if (tokens.match(TokenType.AS)) {
                         Token aliasToken = parseAlias("Expected alias after AS");
-                        rightAlias = aliasToken.value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
+                        if (rightAlias == null) {
+                            rightAlias = aliasToken.value();
+                            // Add alias to valid aliases set
                             validAliases.add(rightAlias);
                         }
-                    } else if (tokens.check(TokenType.IDENTIFIER)) {
-                        // Handle alias without AS keyword
+                    } else if (tokens.check(TokenType.IDENTIFIER) && !tokens.check(TokenType.ON)) {
+                        // Handle alias without AS keyword - DEPRECATED approach
                         Token aliasToken = tokens.advance();
-                        rightAlias = aliasToken.value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
+                        if (rightAlias == null) {
+                            rightAlias = aliasToken.value();
+                            // Add alias to valid aliases set
                             validAliases.add(rightAlias);
                         }
                     }
                     
                     // Parse join condition
                     tokens.consume(TokenType.ON, "Expected ON clause after FUZZY JOIN");
-                    Token joinField = tokens.consume(TokenType.IDENTIFIER, "Expected field name in ON clause");
                     
-                    // Parse alternative fuzzy join type (WITH NEAREST/PREVIOUS/AFTER) - for backward compatibility
+                    // Parse the left field reference
+                    String joinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                    
+                    // Check if this is a complex condition (field1 = field2)
+                    if (tokens.check(TokenType.EQUALS)) {
+                        // This is a complex condition: field1 = field2
+                        // For fuzzy joins, we typically use the left field as the join field
+                        tokens.consume(TokenType.EQUALS, "Expected = in fuzzy join ON clause");
+                        // Skip the right field for now - fuzzy joins typically join on temporal proximity
+                        ParserUtils.parseFieldReference(tokens, "ON clause");
+                        // joinField already contains the left field, which is what we want
+                    }
+                    
+                    // Parse alternative fuzzy join type (WITH NEAREST/PREVIOUS/AFTER/BEFORE) - for backward compatibility
                     if (tokens.match(TokenType.WITH)) {
                         if (tokens.match(TokenType.NEAREST)) {
                             joinType = FuzzyJoinType.NEAREST;
@@ -873,8 +1050,11 @@ public class Parser {
                             joinType = FuzzyJoinType.PREVIOUS;
                         } else if (tokens.match(TokenType.AFTER)) {
                             joinType = FuzzyJoinType.AFTER;
+                        } else if (ParserUtils.canUseAsIdentifier(tokens) && "BEFORE".equalsIgnoreCase(tokens.current().value())) {
+                            tokens.advance(); // consume "BEFORE"
+                            joinType = FuzzyJoinType.PREVIOUS; // Map BEFORE to PREVIOUS
                         } else {
-                            throw new ParserException("Expected NEAREST, PREVIOUS, or AFTER after WITH");
+                            throw new ParserException("Expected NEAREST, PREVIOUS, AFTER, or BEFORE after WITH");
                         }
                     }
                     
@@ -882,15 +1062,22 @@ public class Parser {
                     ExpressionNode tolerance = null;
                     ExpressionNode threshold = null;
                     
-                    // Allow tolerance and threshold in any order
-                    while (tokens.check(TokenType.TOLERANCE) || (tokens.check(TokenType.IDENTIFIER) && "threshold".equalsIgnoreCase(tokens.current().value()))) {
+                    // Allow tolerance and threshold in any order, and accept WITHIN as alias for TOLERANCE
+                    while (tokens.check(TokenType.TOLERANCE) || 
+                           tokens.check(TokenType.THRESHOLD) ||
+                           (tokens.check(TokenType.WITHIN))) {
                         if (tokens.match(TokenType.TOLERANCE)) {
                             if (tolerance != null) {
                                 throw new ParserException("TOLERANCE specified multiple times");
                             }
                             tolerance = parseExpression();
-                        } else if (tokens.check(TokenType.IDENTIFIER) && "threshold".equalsIgnoreCase(tokens.current().value())) {
-                            tokens.advance(); // consume "threshold" identifier
+                        } else if (tokens.match(TokenType.WITHIN)) {
+                            // WITHIN is an alias for TOLERANCE
+                            if (tolerance != null) {
+                                throw new ParserException("TOLERANCE (WITHIN) specified multiple times");
+                            }
+                            tolerance = parseExpression();
+                        } else if (tokens.match(TokenType.THRESHOLD)) {
                             if (threshold != null) {
                                 throw new ParserException("THRESHOLD specified multiple times");
                             }
@@ -899,10 +1086,10 @@ public class Parser {
                     }
                     
                     FuzzyJoinSourceNode fuzzyJoinSource = new FuzzyJoinSourceNode(
-                        rightSourceToken.value(), 
+                        rightSourceName, 
                         rightAlias, 
                         joinType, 
-                        joinField.value(), 
+                        joinField, 
                         tolerance, 
                         threshold,
                         location(line, column)
@@ -912,47 +1099,65 @@ public class Parser {
                 }
                 
                 // Check for standard join after the source
-                else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL)) {
+                else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL, TokenType.CROSS)) {
                     TokenType joinTokenType = tokens.previous().type();
                     StandardJoinType joinType = switch (joinTokenType) {
                         case INNER -> StandardJoinType.INNER;
                         case LEFT -> StandardJoinType.LEFT;
                         case RIGHT -> StandardJoinType.RIGHT;
                         case FULL -> StandardJoinType.FULL;
+                        case CROSS -> StandardJoinType.CROSS;
                         default -> throw new ParserException("Unexpected join type: " + tokens.previous().value());
                     };
                     
-                    // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER)
-                    if (joinTokenType != TokenType.INNER && tokens.check(TokenType.OUTER)) {
+                    // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER or CROSS)
+                    if (joinTokenType != TokenType.INNER && joinTokenType != TokenType.CROSS && tokens.check(TokenType.OUTER)) {
                         tokens.match(TokenType.OUTER);  // Optional OUTER keyword
                     }
                     
                     tokens.consume(TokenType.JOIN, "Expected JOIN after join type");
-                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                     
+                    // Parse the right source (can be table name or subquery)
+                    SourceNodeBase rightSource = parseSource();
+                    String rightSourceName;
                     String rightAlias = null;
-                    if (tokens.match(TokenType.AS)) {
-                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
-                    } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
-                        // Handle alias without AS keyword (like "ExecutionSample e")
-                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
+                    
+                    if (rightSource instanceof SourceNode sourceNode) {
+                        rightSourceName = sourceNode.source();
+                        rightAlias = sourceNode.alias();
+                    } else if (rightSource instanceof SubquerySourceNode subqueryNode) {
+                        rightSourceName = "subquery"; // Placeholder name for subqueries
+                        rightAlias = subqueryNode.alias();
+                    } else {
+                        throw new ParserException("Unexpected source type in JOIN: " + rightSource.getClass().getSimpleName());
+                    }
+                    
+                    // Add alias to valid aliases set if present
+                    if (rightAlias != null) {
+                        validAliases.add(rightAlias);
+                    }
+                    
+                    // CROSS JOIN doesn't require an ON clause (Cartesian product)
+                    String leftJoinField = null;
+                    String rightJoinField = null;
+                    
+                    if (joinType != StandardJoinType.CROSS) {
+                        tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
+                        leftJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                        tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
+                        rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                        
+                        // Check for complex JOIN conditions with AND
+                        if (tokens.check(TokenType.AND)) {
+                            // Throw informative error about complex JOIN conditions
+                            throw new ParserException("Complex JOIN conditions with AND are not yet supported. " +
+                                "Please move additional conditions to the WHERE clause. " +
+                                "For example, change 'ON a = b AND c != d' to 'ON a = b' and add 'WHERE c != d'");
                         }
                     }
                     
-                    tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
-                    String leftJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
-                    tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
-                    String rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
-                    
                     StandardJoinSourceNode standardJoinSource = new StandardJoinSourceNode(
-                        rightSourceToken.value(),
+                        rightSourceName,
                         rightAlias,
                         joinType,
                         leftJoinField,
@@ -965,22 +1170,24 @@ public class Parser {
                 
                 // Check for standalone JOIN (defaults to INNER)
                 else if (tokens.match(TokenType.JOIN)) {
-                    Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
-                    
+                    // Parse the right source (can be table name or subquery)
+                    SourceNodeBase rightSource = parseSource();
+                    String rightSourceName;
                     String rightAlias = null;
-                    if (tokens.match(TokenType.AS)) {
-                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
-                    } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
-                        // Handle alias without AS keyword (like "ExecutionSample e")
-                        rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
+                    
+                    if (rightSource instanceof SourceNode sourceNode) {
+                        rightSourceName = sourceNode.source();
+                        rightAlias = sourceNode.alias();
+                    } else if (rightSource instanceof SubquerySourceNode subqueryNode) {
+                        rightSourceName = "subquery"; // Placeholder name for subqueries
+                        rightAlias = subqueryNode.alias();
+                    } else {
+                        throw new ParserException("Unexpected source type in JOIN: " + rightSource.getClass().getSimpleName());
+                    }
+                    
+                    // Add alias to valid aliases set if present
+                    if (rightAlias != null) {
+                        validAliases.add(rightAlias);
                     }
                     
                     tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
@@ -988,8 +1195,16 @@ public class Parser {
                     tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
                     String rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
                     
+                    // Check for complex JOIN conditions with AND
+                    if (tokens.check(TokenType.AND)) {
+                        // Throw informative error about complex JOIN conditions
+                        throw new ParserException("Complex JOIN conditions with AND are not yet supported. " +
+                            "Please move additional conditions to the WHERE clause. " +
+                            "For example, change 'ON a = b AND c != d' to 'ON a = b' and add 'WHERE c != d'");
+                    }
+                    
                     StandardJoinSourceNode standardJoinSource = new StandardJoinSourceNode(
-                        rightSourceToken.value(),
+                        rightSourceName,
                         rightAlias,
                         StandardJoinType.INNER,  // Default to INNER JOIN
                         leftJoinField,
@@ -1022,7 +1237,7 @@ public class Parser {
         
         // Continue parsing JOIN clauses until we hit a non-JOIN token
         while (tokens.check(TokenType.INNER) || tokens.check(TokenType.LEFT) || tokens.check(TokenType.RIGHT) || 
-               tokens.check(TokenType.FULL) || tokens.check(TokenType.JOIN) || tokens.check(TokenType.FUZZY)) {
+               tokens.check(TokenType.FULL) || tokens.check(TokenType.CROSS) || tokens.check(TokenType.JOIN) || tokens.check(TokenType.FUZZY)) {
             
             // Parse FUZZY JOIN
             if (tokens.match(TokenType.FUZZY)) {
@@ -1041,23 +1256,41 @@ public class Parser {
                     joinType = FuzzyJoinType.AFTER;
                 }
                 
-                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after FUZZY JOIN");
-                
-                // Parse alias for the joined source (before ON clause)
+                // Parse the right source (can be table name or subquery)
+                SourceNodeBase rightSource = parseSource();
+                String rightSourceName;
                 String rightAlias = null;
+                
+                if (rightSource instanceof SourceNode sourceNode) {
+                    rightSourceName = sourceNode.source();
+                    rightAlias = sourceNode.alias();
+                } else if (rightSource instanceof SubquerySourceNode subqueryNode) {
+                    rightSourceName = "subquery"; // Placeholder name for subqueries
+                    rightAlias = subqueryNode.alias();
+                } else {
+                    throw new ParserException("Unexpected source type in FUZZY JOIN: " + rightSource.getClass().getSimpleName());
+                }
+                
+                // Add alias to valid aliases set if present
+                if (rightAlias != null) {
+                    validAliases.add(rightAlias);
+                }
+                
+                // Parse alias for the joined source (before ON clause) - DEPRECATED approach
+                // This is kept for backward compatibility but the alias should come from parseSource()
                 if (tokens.match(TokenType.AS)) {
                     Token aliasToken = parseAlias("Expected alias after AS");
-                    rightAlias = aliasToken.value();
+                    if (rightAlias == null) {
+                        rightAlias = aliasToken.value();
                         // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
-                } else if (tokens.check(TokenType.IDENTIFIER)) {
-                    // Handle alias without AS keyword
+                        validAliases.add(rightAlias);
+                    }
+                } else if (tokens.check(TokenType.IDENTIFIER) && !tokens.check(TokenType.ON)) {
+                    // Handle alias without AS keyword - DEPRECATED approach
                     Token aliasToken = tokens.advance();
-                    rightAlias = aliasToken.value();
-                    // Add alias to valid aliases set
-                    if (rightAlias != null) {
+                    if (rightAlias == null) {
+                        rightAlias = aliasToken.value();
+                        // Add alias to valid aliases set
                         validAliases.add(rightAlias);
                     }
                 }
@@ -1100,7 +1333,7 @@ public class Parser {
                 }
                 
                 FuzzyJoinSourceNode fuzzyJoinSource = new FuzzyJoinSourceNode(
-                    rightSourceToken.value(), 
+                    rightSourceName, 
                     rightAlias, 
                     joinType, 
                     joinField.value(), 
@@ -1112,41 +1345,67 @@ public class Parser {
                 sources.add(fuzzyJoinSource);
             }
             
-            // Parse standard join (INNER, LEFT, RIGHT, FULL)
-            else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL)) {
+            // Parse standard join (INNER, LEFT, RIGHT, FULL, CROSS)
+            else if (tokens.match(TokenType.INNER, TokenType.LEFT, TokenType.RIGHT, TokenType.FULL, TokenType.CROSS)) {
                 TokenType joinTokenType = tokens.previous().type();
                 StandardJoinType joinType = switch (joinTokenType) {
                     case INNER -> StandardJoinType.INNER;
                     case LEFT -> StandardJoinType.LEFT;
                     case RIGHT -> StandardJoinType.RIGHT;
                     case FULL -> StandardJoinType.FULL;
+                    case CROSS -> StandardJoinType.CROSS;
                     default -> throw new ParserException("Unexpected join type: " + tokens.previous().value());
                 };
                 
-                // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER)
-                if (joinTokenType != TokenType.INNER && tokens.check(TokenType.OUTER)) {
+                // Optionally consume OUTER keyword (only for LEFT, RIGHT, FULL - not INNER or CROSS)
+                if (joinTokenType != TokenType.INNER && joinTokenType != TokenType.CROSS && tokens.check(TokenType.OUTER)) {
                     tokens.match(TokenType.OUTER);  // Optional OUTER keyword
                 }
                 
                 tokens.consume(TokenType.JOIN, "Expected JOIN after join type");
-                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
                 
+                // Parse the right source (could be a table name or subquery)
+                SourceNodeBase rightSource = parseSource();
+                
+                String rightSourceName = null;
                 String rightAlias = null;
-                if (tokens.match(TokenType.AS)) {
-                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
+                
+                if (rightSource instanceof SourceNode tableSource) {
+                    rightSourceName = tableSource.source();
+                    rightAlias = tableSource.alias();
+                } else if (rightSource instanceof SubquerySourceNode subquerySource) {
+                    rightSourceName = "__subquery__"; // Placeholder for subquery joins
+                    rightAlias = subquerySource.alias();
+                } else {
+                    throw new ParserException("Unsupported source type in JOIN: " + rightSource.getClass().getSimpleName());
                 }
                 
-                tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
-                String leftJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
-                tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
-                String rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                // Add alias to valid aliases set
+                if (rightAlias != null) {
+                    validAliases.add(rightAlias);
+                }
+                
+                // CROSS JOIN doesn't require an ON clause (Cartesian product)
+                String leftJoinField = null;
+                String rightJoinField = null;
+                
+                if (joinType != StandardJoinType.CROSS) {
+                    tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
+                    leftJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                    tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
+                    rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
+                    
+                    // Check for complex JOIN conditions with AND
+                    if (tokens.check(TokenType.AND)) {
+                        // Throw informative error about complex JOIN conditions
+                        throw new ParserException("Complex JOIN conditions with AND are not yet supported. " +
+                            "Please move additional conditions to the WHERE clause. " +
+                            "For example, change 'ON a = b AND c != d' to 'ON a = b' and add 'WHERE c != d'");
+                    }
+                }
                 
                 StandardJoinSourceNode standardJoinSource = new StandardJoinSourceNode(
-                    rightSourceToken.value(),
+                    rightSourceName,
                     rightAlias,
                     joinType,
                     leftJoinField,
@@ -1159,22 +1418,25 @@ public class Parser {
             
             // Parse standalone JOIN (defaults to INNER)
             else if (tokens.match(TokenType.JOIN)) {
-                Token rightSourceToken = tokens.consumeIdentifierOrKeyword("Expected source name after JOIN");
+                // Parse the right source (could be a table name or subquery)
+                SourceNodeBase rightSource = parseSource();
                 
+                String rightSourceName = null;
                 String rightAlias = null;
-                if (tokens.match(TokenType.AS)) {
-                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias after AS").value();
-                        // Add alias to valid aliases set
-                        if (rightAlias != null) {
-                            validAliases.add(rightAlias);
-                        }
-                } else if (ParserUtils.canUseAsIdentifier(tokens) && !tokens.check(TokenType.ON)) {
-                    // Handle alias without AS keyword (like "ExecutionSample e")
-                    rightAlias = tokens.consumeIdentifierOrKeyword("Expected alias").value();
-                    // Add alias to valid aliases set
-                    if (rightAlias != null) {
-                        validAliases.add(rightAlias);
-                    }
+                
+                if (rightSource instanceof SourceNode tableSource) {
+                    rightSourceName = tableSource.source();
+                    rightAlias = tableSource.alias();
+                } else if (rightSource instanceof SubquerySourceNode subquerySource) {
+                    rightSourceName = "__subquery__"; // Placeholder for subquery joins
+                    rightAlias = subquerySource.alias();
+                } else {
+                    throw new ParserException("Unsupported source type in JOIN: " + rightSource.getClass().getSimpleName());
+                }
+                
+                // Add alias to valid aliases set
+                if (rightAlias != null) {
+                    validAliases.add(rightAlias);
                 }
                 
                 tokens.consume(TokenType.ON, "Expected ON clause after JOIN");
@@ -1182,8 +1444,16 @@ public class Parser {
                 tokens.consume(TokenType.EQUALS, "Expected = in ON clause");
                 String rightJoinField = ParserUtils.parseFieldReference(tokens, "ON clause");
                 
+                // Check for complex JOIN conditions with AND
+                if (tokens.check(TokenType.AND)) {
+                    // Throw informative error about complex JOIN conditions
+                    throw new ParserException("Complex JOIN conditions with AND are not yet supported. " +
+                        "Please move additional conditions to the WHERE clause. " +
+                        "For example, change 'ON a = b AND c != d' to 'ON a = b' and add 'WHERE c != d'");
+                }
+                
                 StandardJoinSourceNode standardJoinSource = new StandardJoinSourceNode(
-                    rightSourceToken.value(),
+                    rightSourceName,
                     rightAlias,
                     StandardJoinType.INNER,  // Default to INNER JOIN
                     leftJoinField,
@@ -1327,28 +1597,34 @@ public class Parser {
             if (alias != null) {
                 validAliases.add(alias);
             }
-        } else if (tokens.check(TokenType.IDENTIFIER) && 
-                   !tokens.check(TokenType.WHERE) && 
-                   !tokens.check(TokenType.GROUP_BY) && 
-                   !tokens.check(TokenType.HAVING) && 
-                   !tokens.check(TokenType.ORDER_BY) && 
-                   !tokens.check(TokenType.LIMIT) && 
-                   !tokens.check(TokenType.COMMA) && 
-                   !tokens.isAtEnd()) {
-            // Check if next token could be an alias (identifier that's not a keyword)
-            Token nextToken = tokens.current();
-            if (nextToken.type() == TokenType.IDENTIFIER) {
-                Token aliasToken = parseAlias("Expected alias");
-                alias = aliasToken.value();
-                
-                // Add alias to valid aliases set
-                if (alias != null) {
-                    validAliases.add(alias);
-                }
+        } else if (tokens.check(TokenType.IDENTIFIER) && !isKeywordThatEndsSource(tokens.current())) {
+            // Allow implicit alias for backward compatibility
+            Token aliasToken = tokens.advance();
+            alias = aliasToken.value();
+            // Add alias to valid aliases set
+            if (alias != null) {
+                validAliases.add(alias);
             }
         }
         
         return new SourceNode(sourceName.toString(), alias, location(source));
+    }
+    
+    /**
+     * Check if a token represents a keyword that should end source parsing
+     * (i.e., it shouldn't be consumed as an implicit alias)
+     */
+    private boolean isKeywordThatEndsSource(Token token) {
+        if (token.type() != TokenType.IDENTIFIER) {
+            return true; // Non-identifiers always end source parsing
+        }
+        
+        String value = token.value().toUpperCase();
+        return value.equals("WHERE") || value.equals("GROUP") || value.equals("ORDER") || 
+               value.equals("HAVING") || value.equals("LIMIT") || value.equals("INNER") ||
+               value.equals("LEFT") || value.equals("RIGHT") || value.equals("FULL") ||
+               value.equals("CROSS") || value.equals("JOIN") || value.equals("FUZZY") ||
+               value.equals("ON");
     }
     
     /**
@@ -1485,7 +1761,7 @@ public class Parser {
             );
         }
         
-        while (tokens.match(TokenType.OR)) {
+        while (tokens.match(TokenType.OR, TokenType.LOGICAL_OR)) {
             Token operator = tokens.previous();
             ConditionNode rightCondition;
             try {
@@ -1538,7 +1814,7 @@ public class Parser {
     private ConditionNode parseAndCondition() throws ParserException {
         ConditionNode condition = parsePrimaryCondition();
         
-        while (tokens.match(TokenType.AND)) {
+        while (tokens.match(TokenType.AND, TokenType.LOGICAL_AND)) {
             Token operator = tokens.previous();
             ConditionNode right = parsePrimaryCondition();
             // For now, we'll create a simple combined condition
@@ -1576,6 +1852,10 @@ public class Parser {
     private ExpressionNode toExpression(ConditionNode condition) {
         if (condition instanceof ExpressionConditionNode exprCond) {
             return exprCond.expression();
+        }
+        if (condition instanceof VariableDeclarationNode varDecl) {
+            // Variable declarations are always true in boolean context
+            return new LiteralNode(new CellValue.BooleanValue(true), varDecl.location());
         }
         // For other condition types, wrap them in an identifier for now
         return new IdentifierNode("condition", location(condition.getLine(), condition.getColumn()));
@@ -1636,11 +1916,19 @@ public class Parser {
             }
         }
         
-        // Check for variable declaration (x := expression)
-        if (tokens.check(TokenType.IDENTIFIER) && tokens.checkNext(TokenType.ASSIGN)) {
-            Token variable = tokens.advance();
+        // Check for variable declaration (x := expression or keyword := expression)
+        if ((tokens.check(TokenType.IDENTIFIER) || ParserUtils.canUseAsIdentifier(tokens)) && tokens.checkNext(TokenType.ASSIGN)) {
+            Token variable;
+            if (tokens.check(TokenType.IDENTIFIER)) {
+                variable = tokens.advance();
+            } else {
+                // This is a keyword being used as a variable name
+                variable = ParserUtils.consumeIdentifierOrKeyword(tokens, "variable declaration");
+            }
             tokens.consume(TokenType.ASSIGN, "Expected :=");
-            ExpressionNode value = parseExpression();
+            // Use parseComparison() instead of parseExpression() to avoid consuming logical operators (AND/OR)
+            // This allows multiple variable declarations to be chained with AND: x := 1 AND y := 2
+            ExpressionNode value = parseComparison();
             return new VariableDeclarationNode(variable.value(), value, location(variable));
         }
         
@@ -1665,7 +1953,7 @@ public class Parser {
             // Check if it's a comparison operator
             switch (binaryExpr.operator()) {
                 case EQUALS, NOT_EQUALS, LESS_THAN, LESS_EQUAL, 
-                     GREATER_THAN, GREATER_EQUAL, LIKE, IN, AND, OR, WITHIN, OF -> {
+                     GREATER_THAN, GREATER_EQUAL, LIKE, NOT_LIKE, IN, AND, OR, WITHIN, OF, BETWEEN -> {
                     // Valid comparison operators for WHERE clause
                     return;
                 }
@@ -1893,7 +2181,7 @@ public class Parser {
      * 
      * <p><strong>Grammar Rule:</strong></p>
      * <pre>
-     * expression ::= comparison
+     * expression ::= logical_or
      * </pre>
      * 
      * 
@@ -1901,7 +2189,53 @@ public class Parser {
      * @throws ParserException if syntax errors occur in expression
      */
     private ExpressionNode parseExpression() throws ParserException {
-        return parseComparison();
+        return parseLogicalOr();
+    }
+    
+    /**
+     * Parse logical OR expressions.
+     * 
+     * <p><strong>Grammar Rule:</strong></p>
+     * <pre>
+     * logical_or ::= logical_and ( OR logical_and )*
+     * </pre>
+     * 
+     * @return ExpressionNode representing the parsed logical OR expression
+     * @throws ParserException if syntax errors occur in logical OR expression
+     */
+    private ExpressionNode parseLogicalOr() throws ParserException {
+        ExpressionNode left = parseLogicalAnd();
+        
+        while (tokens.match(TokenType.OR, TokenType.LOGICAL_OR)) {
+            Token operator = tokens.previous();
+            ExpressionNode right = parseLogicalAnd();
+            left = new BinaryExpressionNode(left, BinaryOperator.OR, right, location(operator));
+        }
+        
+        return left;
+    }
+    
+    /**
+     * Parse logical AND expressions.
+     * 
+     * <p><strong>Grammar Rule:</strong></p>
+     * <pre>
+     * logical_and ::= comparison ( AND comparison )*
+     * </pre>
+     * 
+     * @return ExpressionNode representing the parsed logical AND expression
+     * @throws ParserException if syntax errors occur in logical AND expression
+     */
+    private ExpressionNode parseLogicalAnd() throws ParserException {
+        ExpressionNode left = parseComparison();
+        
+        while (tokens.match(TokenType.AND, TokenType.LOGICAL_AND)) {
+            Token operator = tokens.previous();
+            ExpressionNode right = parseComparison();
+            left = new BinaryExpressionNode(left, BinaryOperator.AND, right, location(operator));
+        }
+        
+        return left;
     }
     
     /**
@@ -1968,6 +2302,52 @@ public class Parser {
                 new BinaryExpressionNode(timeWindow, BinaryOperator.OF, referenceTime, location(withinToken)),
                 location(withinToken)
             );
+        }
+        
+        // Handle IS NOT NULL and IS NULL patterns
+        if (tokens.check(TokenType.IDENTIFIER) && 
+            "IS".equalsIgnoreCase(tokens.current().value())) {
+            
+            Token isToken = tokens.advance();
+            
+            if (tokens.check(TokenType.NOT)) {
+                // IS NOT NULL pattern
+                tokens.advance(); // consume NOT
+                if (tokens.check(TokenType.IDENTIFIER) && 
+                    "NULL".equalsIgnoreCase(tokens.current().value())) {
+                    tokens.advance(); // consume NULL
+                    
+                    // Create NOT(ISNULL(expr)) function call
+                    FunctionCallNode isNullCall = new FunctionCallNode(
+                        "ISNULL", 
+                        List.of(expr), 
+                        false, // not distinct
+                        location(isToken)
+                    );
+                    
+                    expr = new UnaryExpressionNode(
+                        UnaryOperator.NOT,
+                        isNullCall,
+                        location(isToken)
+                    );
+                } else {
+                    throw new ParserException("Expected 'NULL' after 'IS NOT'");
+                }
+            } else if (tokens.check(TokenType.IDENTIFIER) && 
+                      "NULL".equalsIgnoreCase(tokens.current().value())) {
+                // IS NULL pattern
+                tokens.advance(); // consume NULL
+                
+                // Create ISNULL(expr) function call
+                expr = new FunctionCallNode(
+                    "ISNULL", 
+                    List.of(expr), 
+                    false, // not distinct
+                    location(isToken)
+                );
+            } else {
+                throw new ParserException("Expected 'NULL' or 'NOT NULL' after 'IS'");
+            }
         }
         
         while (tokens.match(TokenType.EQUALS, TokenType.NOT_EQUALS, TokenType.LESS_THAN, 
@@ -2180,19 +2560,11 @@ public class Parser {
      *           | ARRAY_FIELD_REFERENCE
      *           | LBRACKET expression_list RBRACKET
      *           | LPAREN expression RPAREN
-     *           | percentile_function
-     *           | unary_minus primary
-     * 
-     * percentile_function ::= ( P90 | P95 | P99 | P999 | PERCENTILE ) 
-     *                       ( LPAREN argument_list RPAREN )?
-     *                       ( SELECT LPAREN expression RPAREN )?
      * </pre>
      * 
      * 
      * <p><strong>Special Cases:</strong></p>
      * <ul>
-     *   <li>Percentile functions with and without parentheses</li>
-     *   <li>Percentile selection functions (P90SELECT, etc.)</li>
      *   <li>Array literals with square bracket syntax</li>
      *   <li>Synthetic field references ($field)</li>
      *   <li>Array field references (field[index])</li>
@@ -2209,26 +2581,86 @@ public class Parser {
             return parseCaseExpression(caseToken);
         }
         
-        // Parenthesized expression
+        // Parenthesized expression or subquery
         if (tokens.match(TokenType.LPAREN)) {
-            try {
-                ExpressionNode expr = parseExpression();
-                tokens.consume(TokenType.RPAREN, "Expected ')' after expression");
-                return expr;
-            } catch (ParserException e) {
-                // Error in parenthesized expression - add error and create synthetic node
-                ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
-                    tokens.current(), "Invalid parenthesized expression: " + e.getMessage());
-                errorHandler.addError(error);
-                
-                // Skip to closing paren or recovery point
-                tokens.skipToRecoveryPoint(TokenType.RPAREN);
-                if (tokens.check(TokenType.RPAREN)) {
-                    tokens.advance(); // consume closing paren
+            // Check if this is a subquery (starts with @SELECT or SELECT)
+            if (tokens.check(TokenType.EXTENDED_QUERY) || tokens.check(TokenType.SELECT)) {
+                // This is a subquery, capture the query string
+                try {
+                    Token startToken = tokens.current();
+                    StringBuilder queryBuilder = new StringBuilder();
+                    
+                    // Capture all tokens until we find the matching closing parenthesis
+                    int parenCount = 1; // We already consumed the opening paren
+                    
+                    while (!tokens.isAtEnd() && parenCount > 0) {
+                        Token token = tokens.current();
+                        
+                        if (token.type() == TokenType.LPAREN) {
+                            parenCount++;
+                        } else if (token.type() == TokenType.RPAREN) {
+                            parenCount--;
+                        }
+                        
+                        // Don't include the final closing parenthesis
+                        if (parenCount > 0) {
+                            if (queryBuilder.length() > 0) {
+                                queryBuilder.append(" ");
+                            }
+                            queryBuilder.append(token.value());
+                        }
+                        
+                        tokens.advance();
+                    }
+                    
+                    // Consume the closing parenthesis
+                    if (tokens.check(TokenType.RPAREN)) {
+                        tokens.advance();
+                    }
+                    
+                    String queryString = queryBuilder.toString().trim();
+                    if (queryString.isEmpty()) {
+                        throw new ParserException("Empty subquery");
+                    }
+                    
+                    // Create a NestedQueryNode with the raw query string
+                    return new NestedQueryNode(queryString, location(startToken));
+                } catch (ParserException e) {
+                    // Error in subquery - add error and create synthetic node
+                    ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                        tokens.current(), "Invalid subquery: " + e.getMessage());
+                    errorHandler.addError(error);
+                    
+                    // Skip to closing paren or recovery point
+                    tokens.skipToRecoveryPoint(TokenType.RPAREN);
+                    if (tokens.check(TokenType.RPAREN)) {
+                        tokens.advance(); // consume closing paren
+                    }
+                    
+                    // Return synthetic identifier for continued parsing
+                    return new IdentifierNode("__error__", location(tokens.previous()));
                 }
-                
-                // Return synthetic identifier for continued parsing
-                return new IdentifierNode("__error__", location(tokens.previous()));
+            } else {
+                // Regular parenthesized expression
+                try {
+                    ExpressionNode expr = parseExpression();
+                    tokens.consume(TokenType.RPAREN, "Expected ')' after expression");
+                    return expr;
+                } catch (ParserException e) {
+                    // Error in parenthesized expression - add error and create synthetic node
+                    ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                        tokens.current(), "Invalid parenthesized expression: " + e.getMessage());
+                    errorHandler.addError(error);
+                    
+                    // Skip to closing paren or recovery point
+                    tokens.skipToRecoveryPoint(TokenType.RPAREN);
+                    if (tokens.check(TokenType.RPAREN)) {
+                        tokens.advance(); // consume closing paren
+                    }
+                    
+                    // Return synthetic identifier for continued parsing
+                    return new IdentifierNode("__error__", location(tokens.previous()));
+                }
             }
         }
         
@@ -2246,33 +2678,24 @@ public class Parser {
             }
         }
         
-        // Special percentile functions check (these have specific token types)
-        if (tokens.check(TokenType.P90SELECT) || tokens.check(TokenType.P95SELECT) || 
-            tokens.check(TokenType.P99SELECT) || tokens.check(TokenType.P999SELECT) || 
-            tokens.check(TokenType.PERCENTILE_SELECT) ||
-            tokens.check(TokenType.P90) || tokens.check(TokenType.P95) || 
-            tokens.check(TokenType.P99) || tokens.check(TokenType.P999) || 
-            tokens.check(TokenType.PERCENTILE)) {
-            Token funcToken = tokens.advance();
-            try {
-                return parseFunctionCall(funcToken);
-            } catch (ParserException e) {
-                // Error in function call - already handled by parseFunctionCall recovery
-                // Return synthetic function call
-                return createSyntheticFunctionCall(funcToken.value(), new ArrayList<>(), location(funcToken));
+        // Handle identifiers (including function names and keywords used as identifiers)
+        if (tokens.check(TokenType.IDENTIFIER) || tokens.check(TokenType.SYNTHETIC_FIELD) || 
+            ParserUtils.canUseAsIdentifier(tokens)) {
+            Token identifier;
+            if (tokens.check(TokenType.IDENTIFIER) || tokens.check(TokenType.SYNTHETIC_FIELD)) {
+                identifier = tokens.advance();
+            } else {
+                // This is a keyword being used as an identifier
+                identifier = tokens.advance();
             }
-        }
-        
-        // Handle identifiers (including function names)
-        if (tokens.match(TokenType.IDENTIFIER, TokenType.SYNTHETIC_FIELD)) {
-            Token identifier = tokens.previous();
             
             // Validate identifier length
             ParserUtils.validateIdentifierLength(identifier.value(), "identifier");
             
             // Check for common duration units used without a value (common mistake)
-            // But only if this isn't followed by a dot (table alias) or function call
-            if (!tokens.check(TokenType.DOT) && !tokens.check(TokenType.LPAREN)) {
+            // But only if this isn't followed by a dot (table alias), function call, or in SELECT clause where it could be a field name
+            if (!tokens.check(TokenType.DOT) && !tokens.check(TokenType.LPAREN) && 
+                currentContext != QueryErrorMessageGenerator.QueryContext.SELECT_CLAUSE) {
                 String[] durationUnits = {"ms", "us", "ns", "s", "m", "h", "d", "min", "hour", "hours", "day", "days"};
                 for (String unit : durationUnits) {
                     if (identifier.value().equals(unit)) {
@@ -2298,18 +2721,10 @@ public class Parser {
                     return createSyntheticFunctionCall(identifier.value(), new ArrayList<>(), location(identifier));
                 }
             }
-                 // Special case: check if this looks like a function name but user forgot delimiters
-        if (functionValidator.functionExists(identifier.value()) && 
-            !tokens.check(TokenType.DOT) && !tokens.isAtEndOfClause()) {
-            // This looks like a function name but missing parentheses
-            ParserErrorHandler.ParserError error = errorHandler.createFunctionCallError(
-                identifier, "Function '" + identifier.value() + "' is missing parentheses. Use " + 
-                identifier.value() + "() for function calls");
-            errorHandler.addError(error);
             
-            // Create synthetic function call with no arguments
-            return createSyntheticFunctionCall(identifier.value(), new ArrayList<>(), location(identifier));
-        }
+            // Note: Identifiers without parentheses are treated as variables/column references,
+            // even if they match function names. This allows variables named "count", "max", etc.
+            // Function calls MUST have parentheses to be recognized as functions.
             
             // Check for field access (alias.field) - only allow access via valid aliases
             if (tokens.match(TokenType.DOT)) {
@@ -2369,12 +2784,14 @@ public class Parser {
         if (tokens.match(TokenType.STRING)) {
             Token literal = tokens.previous();
             String value = literal.value();
-            // Remove surrounding quotes
-            if (value.length() >= 2 && value.startsWith("'") && value.endsWith("'")) {
+            // Remove surrounding quotes (both single and double quotes)
+            if (value.length() >= 2 && 
+                ((value.startsWith("'") && value.endsWith("'")) || 
+                 (value.startsWith("\"") && value.endsWith("\"")))) {
                 value = value.substring(1, value.length() - 1);
             }
-            // Validate string literal content
-            ParserUtils.validateStringLiteral(value);
+            // Process escape sequences in string literal content
+            value = ParserUtils.processEscapeSequences(value);
             return new LiteralNode(new CellValue.StringValue(value), location(literal));
         }
         
@@ -2421,6 +2838,22 @@ public class Parser {
             }
         }
         
+        if (tokens.match(TokenType.DATE_LITERAL)) {
+            Token literal = tokens.previous();
+            try {
+                String value = literal.value();
+                // Parse date as start of day in UTC
+                java.time.LocalDate date = java.time.LocalDate.parse(value);
+                java.time.Instant instant = date.atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+                return new LiteralNode(new CellValue.TimestampValue(instant), location(literal));
+            } catch (Exception e) {
+                ParserErrorHandler.ParserError error = errorHandler.createExpressionError(
+                    literal, "Invalid date literal: " + literal.value() + ". Expected format: YYYY-MM-DD");
+                errorHandler.addError(error);
+                return new LiteralNode(new CellValue.TimestampValue(java.time.Instant.EPOCH), location(literal));
+            }
+        }
+        
         if (tokens.match(TokenType.NUMBER)) {
             Token literal = tokens.previous();
             double value = Double.parseDouble(literal.value());
@@ -2450,19 +2883,13 @@ public class Parser {
      * <p><strong>Grammar Rule:</strong></p>
      * <pre>
      * function_call ::= function_name LPAREN argument_list RPAREN
-     *                 | function_name LBRACKET argument_list RBRACKET
-     *                 | percentile_function ( SELECT LPAREN expression RPAREN )?
      * 
      * argument_list ::= ( expression ( COMMA expression )* )?
-     * percentile_function ::= P90 | P95 | P99 | P999 | PERCENTILE
      * </pre>
      * 
      * 
      * <p><strong>Special Cases:</strong></p>
      * <ul>
-     *   <li>Percentile functions can omit parentheses (P90 vs P90())</li>
-     *   <li>Percentile selection functions (P90SELECT expression)</li>
-     *   <li>Square bracket syntax for some functions</li>
      *   <li>Function name validation with typo suggestions</li>
      *   <li>Recovery from missing delimiters</li>
      * </ul>
@@ -2596,44 +3023,55 @@ public class Parser {
         StringBuilder queryBuilder = new StringBuilder();
         boolean first = true;
         int lastTokenLine = line;
+        int parenthesesCount = 0; // Track parentheses nesting level
         
         while (!tokens.isAtEnd()) {
             Token token = tokens.current();
             
-            // Stop at semicolon (explicit statement separator)
-            if (token.type() == TokenType.SEMICOLON) {
-                break; // Don't consume the semicolon here - let main parser handle it
+            // Track parentheses to avoid breaking on keywords inside parentheses
+            if (token.type() == TokenType.LPAREN) {
+                parenthesesCount++;
+            } else if (token.type() == TokenType.RPAREN) {
+                parenthesesCount--;
             }
             
-            // Stop only at explicit statement-starting tokens
-            // Be conservative - only split on very clear statement boundaries
-            if (token.type() == TokenType.SHOW) {
-                break;
-            }
-            
-            // Stop at VIEW definition
-            if (token.type() == TokenType.VIEW) {
-                break;
-            }
-            
-            // Stop at assignment (identifier followed by :=)
-            if (token.type() == TokenType.IDENTIFIER && tokens.checkNext(TokenType.ASSIGN)) {
-                break;
-            }
-            
-            // Stop at extended query marker (@)
-            if (token.type() == TokenType.EXTENDED_QUERY) {
-                break;
-            }
-            
-            // Check for empty line separator (more than 1 line gap)
-            // This handles raw queries separated by empty lines
-            // without requiring explicit semicolons
-            if (!first && token.line() > lastTokenLine + 1) {
-                // We found an empty line gap - this should split the raw query
-                // But only if we have some content already
-                if (!queryBuilder.toString().trim().isEmpty()) {
+            // Only check for statement boundaries when we're not inside parentheses
+            if (parenthesesCount == 0) {
+                // Stop at semicolon (explicit statement separator)
+                if (token.type() == TokenType.SEMICOLON) {
+                    break; // Don't consume the semicolon here - let main parser handle it
+                }
+                
+                // Stop only at explicit statement-starting tokens
+                // Be conservative - only split on very clear statement boundaries
+                if (token.type() == TokenType.SHOW) {
                     break;
+                }
+                
+                // Stop at VIEW definition
+                if (token.type() == TokenType.VIEW) {
+                    break;
+                }
+                
+                // Stop at assignment (identifier followed by :=)
+                if (token.type() == TokenType.IDENTIFIER && tokens.checkNext(TokenType.ASSIGN)) {
+                    break;
+                }
+                
+                // Stop at extended query marker (@)
+                if (token.type() == TokenType.EXTENDED_QUERY) {
+                    break;
+                }
+                
+                // Check for empty line separator (more than 1 line gap)
+                // This handles raw queries separated by empty lines
+                // without requiring explicit semicolons
+                if (!first && token.line() > lastTokenLine + 1) {
+                    // We found an empty line gap - this should split the raw query
+                    // But only if we have some content already
+                    if (!queryBuilder.toString().trim().isEmpty()) {
+                        break;
+                    }
                 }
             }
             

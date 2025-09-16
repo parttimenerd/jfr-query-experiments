@@ -11,6 +11,7 @@ public interface ASTVisitor<T> {
     T visitProgram(ProgramNode node);
     T visitStatement(StatementNode node);
     T visitAssignment(AssignmentNode node);
+    T visitGlobalVariableAssignment(GlobalVariableAssignmentNode node);
     T visitViewDefinition(ViewDefinitionNode node);
     T visitRawJfrQuery(RawJfrQueryNode node);
     
@@ -40,6 +41,7 @@ public interface ASTVisitor<T> {
     T visitFunctionCall(FunctionCallNode node);
     T visitLiteral(LiteralNode node);
     T visitIdentifier(IdentifierNode node);
+    T visitVariableAssignmentExpression(VariableAssignmentExpressionNode node);
     T visitNestedQuery(NestedQueryNode node);
     T visitArrayLiteral(ArrayLiteralNode node);
     T visitStar(StarNode node);
@@ -55,6 +57,8 @@ public interface ASTVisitor<T> {
     T visitHelp(HelpNode node);
     T visitHelpFunction(HelpFunctionNode node);
     T visitHelpGrammar(HelpGrammarNode node);
+    T visitShowPlan(ShowPlanNode node);
+    T visitExplain(ExplainNode node);
 
     // New AST nodes
     T visitFuzzyJoinSource(FuzzyJoinSourceNode node);

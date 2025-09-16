@@ -681,13 +681,9 @@ public class RawJfrQueryExecutorImpl implements RawJfrQueryExecutor {
                         if (cleanNumber.matches("^-?\\d+$")) {
                             return new CellValue.NumberValue(Long.parseLong(cleanNumber));
                         } else if (cleanNumber.matches("^-?\\d*\\.\\d+$")) {
-                            return new CellValue.FloatValue(Double.parseDouble(cleanNumber));
+                            return new CellValue.NumberValue(Double.parseDouble(cleanNumber));
                         }
                         break;
-                        
-                    case FLOAT:
-                        String cleanFloat = value.replace(",", "");
-                        return new CellValue.FloatValue(Double.parseDouble(cleanFloat));
                         
                     case DURATION:
                         return parseDurationValue(value);

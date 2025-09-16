@@ -13,15 +13,21 @@ public interface ASTNode {
     /**
      * Returns the line number where this node appears in the source
      */
-    int getLine();
+    default int getLine() {
+        return getLocation().line();
+    }
     
     /**
      * Returns the column number where this node appears in the source
      */
-    int getColumn();
+    default int getColumn() {
+        return getLocation().column();
+    }
     
     /**
      * Format this node as a pretty-printed string
      */
     String format();
+
+    Location getLocation();
 }

@@ -82,8 +82,8 @@ public class MultiLineQueryTest {
         """,
         """
         @SELECT *
-        FROM GarbageCollection g
-        JOIN ExecutionSample e ON g.startTime = e.startTime
+        FROM GarbageCollection AS g
+        JOIN ExecutionSample AS e ON g.startTime = e.startTime
         WHERE g.duration > 10ms
         """
     })

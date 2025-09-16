@@ -684,7 +684,7 @@ public class Lexer {
         String[] keywords = {
             "SELECT", "FROM", "WHERE", "GROUP", "ORDER", "BY", "HAVING", "LIMIT", "AS",
             "AND", "OR", "NOT", "LIKE", "IN", "ASC", "DESC", "INNER", "LEFT", "RIGHT", "FULL",
-            "JOIN", "ON", "COUNT", "SUM", "AVG", "MIN", "MAX", "P90", "P95", "P99"
+            "JOIN", "ON", "COUNT", "SUM", "AVG", "MIN", "MAX"
         };
         
         String suggestion = findClosestMatch(lastWord.toUpperCase(), keywords);

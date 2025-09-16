@@ -6,7 +6,9 @@ import me.bechberger.jfr.extended.Token;
 import me.bechberger.jfr.extended.ast.ASTNodes.*;
 import me.bechberger.jfr.extended.table.JfrTable;
 import me.bechberger.jfr.extended.table.CellType;
+import me.bechberger.jfr.extended.table.CellValue;
 import me.bechberger.jfr.extended.table.SingleCellTable;
+import me.bechberger.jfr.extended.plan.QueryPlanExecutor;
 
 import java.util.*;
 
@@ -26,16 +28,23 @@ import java.util.*;
  */
 public class QueryTestFramework {
     
-    private final me.bechberger.jfr.extended.engine.QueryEvaluator evaluator;
+    private final QueryPlanExecutor executor;
     private final MockRawJfrQueryExecutor mockExecutor;
     private final Map<String, JfrTable> mockTables = new HashMap<>();
     private final Map<String, Object> sessionVariables = new HashMap<>();
     
     public QueryTestFramework() {
         this.mockExecutor = new MockRawJfrQueryExecutor();
-        this.evaluator = new me.bechberger.jfr.extended.engine.QueryEvaluator(mockExecutor);
+        this.executor = new QueryPlanExecutor(mockExecutor);
         
         setupDefaultMockTables();
+    }
+    
+    /**
+     * Get the QueryPlanExecutor for accessing execution context and traces
+     */
+    public QueryPlanExecutor getExecutor() {
+        return executor;
     }
     
     /**
@@ -63,7 +72,7 @@ public class QueryTestFramework {
      */
     public QueryResult executeQuery(String queryString) {
         try {
-            JfrTable result = evaluator.query(queryString);
+            JfrTable result = executor.query(queryString);
             return new QueryResult(result, true, null);
         } catch (Exception e) {
             return new QueryResult(null, false, e);
@@ -71,38 +80,59 @@ public class QueryTestFramework {
     }
     
     /**
-     * Execute multi-statement queries with variable support
+     * Execute a query and print execution trace for debugging
+     */
+    public QueryResult executeQueryWithTrace(String queryString) {
+        QueryResult result = executeQuery(queryString);
+        
+        // Try to get the execution trace if available
+        // Note: This is a simplified approach since we don't have direct access to the context
+        System.out.println("=== Query Execution Debug ===");
+        System.out.println("Query: " + queryString);
+        System.out.println("Success: " + result.isSuccess());
+        if (!result.isSuccess()) {
+            System.out.println("Error: " + result.getError());
+        }
+        System.out.println("===============================");
+        
+        return result;
+    }
+    
+    /**
+     * Execute a multi-statement query and return results for each statement.
+     * Uses the QueryPlanExecutor's minimal API for proper lazy variable handling.
+     * 
+     * Note: With the simplified API, we can only get the final result.
+     * For testing purposes, we simulate individual statement results.
      */
     public List<QueryResult> executeMultiStatementQuery(String multiStatementQuery) {
-        List<QueryResult> results = new ArrayList<>();
-        String[] statements = multiStatementQuery.split(";");
-        
-        for (String statement : statements) {
-            statement = statement.trim();
-            if (statement.isEmpty()) continue;
+        try {
+            // Execute the entire multi-statement query to get final result
+            JfrTable finalTable = executor.execute(multiStatementQuery);
             
-            try {
-                if (statement.contains(":=")) {
-                    // Variable assignment - simplified for mock testing
-                    String[] parts = statement.split(":=", 2);
-                    String varName = parts[0].trim().replace("var ", "");
-                    String expression = parts[1].trim();
-                    
-                    // Simple expression evaluation for testing
-                    Object value = parseSimpleExpression(expression);
-                    sessionVariables.put(varName, value);
-                    results.add(new QueryResult(null, true, null));
-                } else {
-                    // Regular query
-                    QueryResult result = executeQuery(statement);
-                    results.add(result);
-                }
-            } catch (Exception e) {
-                results.add(new QueryResult(null, false, e));
+            // Parse to determine how many statements there are
+            Parser parser = new Parser(multiStatementQuery);
+            ProgramNode program = parser.parse();
+            
+            List<QueryResult> results = new ArrayList<>();
+            
+            // For all statements except the last, create success results with empty tables
+            // (since variable assignments don't return meaningful tables)
+            for (int i = 0; i < program.statements().size() - 1; i++) {
+                // Create an empty success result for variable assignment statements
+                JfrTable emptyTable = SingleCellTable.ofString("Variable assigned");
+                results.add(new QueryResult(emptyTable, true, null));
             }
+            
+            // Add the final result (the actual query result)
+            results.add(new QueryResult(finalTable, true, null));
+            
+            return results;
+        } catch (Exception e) {
+            List<QueryResult> errorResults = new ArrayList<>();
+            errorResults.add(new QueryResult(null, false, e));
+            return errorResults;
         }
-        
-        return results;
     }
     
     /**
@@ -265,7 +295,7 @@ public class QueryTestFramework {
             String[] parts = column.trim().split("\\s+");
             if (parts.length > 1) {
                 String potentialType = parts[1].toUpperCase();
-                if (potentialType.matches("STRING|NUMBER|FLOAT|BOOLEAN|TIMESTAMP|DURATION|MEMORY_SIZE|ARRAY|NULL")) {
+                if (potentialType.matches("STRING|NUMBER|NUMBER|BOOLEAN|TIMESTAMP|DURATION|MEMORY_SIZE|ARRAY|NULL")) {
                     return true;
                 }
             }
@@ -448,7 +478,7 @@ public class QueryTestFramework {
      *    "name | age | score\nAlice | 25 | 95.5\nBob | 30 | 87.2"
      * 
      * 2. Multi-line with explicit types:
-     *    "name STRING | age NUMBER | score FLOAT\nAlice | 25 | 95.5\nBob | 30 | 87.2"
+     *    "name STRING | age NUMBER | score NUMBER\nAlice | 25 | 95.5\nBob | 30 | 87.2"
      * 
      * 3. Single-line with semicolon separators:
      *    "name age score; Alice 25 95.5; Bob 30 87.2"
@@ -476,25 +506,6 @@ public class QueryTestFramework {
         
         // Default: multi-line format with automatic type inference
         return mockTable(tableName, tableSpec);
-    }
-    
-    /**
-     * Simple expression parser for testing (just parses literals)
-     */
-    private Object parseSimpleExpression(String expression) {
-        expression = expression.trim();
-        if (expression.startsWith("\"") && expression.endsWith("\"")) {
-            return expression.substring(1, expression.length() - 1);
-        }
-        try {
-            return Long.parseLong(expression);
-        } catch (NumberFormatException e) {
-            try {
-                return Double.parseDouble(expression);
-            } catch (NumberFormatException e2) {
-                return expression; // Return as string if all else fails
-            }
-        }
     }
     
     /**
@@ -665,10 +676,35 @@ public class QueryTestFramework {
     public QueryResult executeAndAssertSuccess(String query) {
         var result = executeQuery(query);
         if (!result.isSuccess()) {
-            throw new AssertionError("Query should succeed: " + query + 
-                ". Error: " + (result.getError() != null ? result.getError().getMessage() : "Unknown"));
+            // Create a more detailed assertion error message
+            String errorDetails = createDetailedErrorMessage(query, result.getError());
+            throw new AssertionError(errorDetails, result.getError());
         }
         return result;
+    }
+    
+    /**
+     * Create a detailed error message for test failures.
+     */
+    private String createDetailedErrorMessage(String query, Exception error) {
+        StringBuilder details = new StringBuilder();
+        details.append("Query execution failed:\n");
+        details.append("Query: ").append(query).append("\n");
+        details.append("Error: ").append(error.getClass().getSimpleName());
+        
+        if (error.getMessage() != null) {
+            details.append(": ").append(error.getMessage());
+        }
+        
+        // If there's a cause, include it
+        if (error.getCause() != null && error.getCause() != error) {
+            details.append("\nCaused by: ").append(error.getCause().getClass().getSimpleName());
+            if (error.getCause().getMessage() != null) {
+                details.append(": ").append(error.getCause().getMessage());
+            }
+        }
+        
+        return details.toString();
     }
     
     /**
@@ -678,12 +714,13 @@ public class QueryTestFramework {
         var result = executeAndAssertSuccess(query);
         
         ExpectedTable expected = expectTable(expectedTableSpec);
+
         try {
             expected.assertMatches(result.getTable());
         } catch (Exception e) {
             throw new AssertionError("Table validation failed for query: " + query + 
                 "\nExpected: " + expectedTableSpec + 
-                "\nActual: " + result.toString(), e);
+                "\nActual: " + result.toString() + ": " + e.getCause().getMessage());
         }
     }
     
@@ -755,8 +792,7 @@ public class QueryTestFramework {
         for (String query : queries) {
             var result = executeQuery(query);
             if (!result.isSuccess()) {
-                throw new AssertionError("Query should succeed: " + query + 
-                    ". Error: " + (result.getError() != null ? result.getError().getMessage() : "Unknown"));
+                throw new AssertionError(result.getError());
             }
         }
     }
@@ -786,7 +822,7 @@ public class QueryTestFramework {
             }
             case "mixed_types" -> {
                 createTable(tableName, """
-                    name STRING | count NUMBER | ratio FLOAT | enabled BOOLEAN | timestamp TIMESTAMP
+                    name STRING | count NUMBER | ratio NUMBER | enabled BOOLEAN | timestamp TIMESTAMP
                     Test1 | 100 | 1.5 | true | 1609459200000
                     Test2 | 200 | 2.5 | false | 1609545600000
                     """);

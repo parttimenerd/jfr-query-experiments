@@ -94,7 +94,7 @@ public class MockTableTest {
     void testCreateTableWithExplicitTypesAndExpectTable() {
         // Using the unified createTable method with explicit types
         framework.createTable("TestTable3", """
-            name STRING | age NUMBER | score FLOAT | active BOOLEAN
+            name STRING | age NUMBER | score NUMBER | active BOOLEAN
             Alice | 25 | 95.5 | true
             Bob | 30 | 87.2 | false
             """);
@@ -119,13 +119,11 @@ public class MockTableTest {
      */
     @Test
     void testBuilderBasedTableCreationWithExpectTable() {
-        framework.mockTable("TestTable4")
-            .withStringColumn("name")
-            .withNumberColumn("age")
-            .withFloatColumn("score")
-            .withRow("Alice", 25L, 95.5)
-            .withRow("Bob", 30L, 87.2)
-            .build();
+        framework.createTable("TestTable4", """
+            name STRING | age NUMBER | score NUMBER
+            Alice | 25 | 95.5
+            Bob | 30 | 87.2
+            """);
         
         // Use helper method for validation
         executeAndExpectTable("@SELECT * FROM TestTable4", """
@@ -228,14 +226,12 @@ public class MockTableTest {
         assertDoesNotThrow(() -> expectedGC.assertMatches(gcResult.getTable()));
         
         // Test custom table builder
-        framework.customTable("CustomEvents")
-            .withStringColumn("event")
-            .withTimestampColumn("timestamp")
-            .withStringColumn("status")
-            .withRow("API_CALL", 1609459200000L, "SUCCESS")
-            .withRow("DB_QUERY", 1609459210000L, "FAILED")
-            .withRow("CACHE_HIT", 1609459220000L, "SUCCESS")
-            .build();
+        framework.createTable("CustomEvents", """
+            event STRING | timestamp TIMESTAMP | status STRING
+            API_CALL | 1609459200000 | SUCCESS
+            DB_QUERY | 1609459210000 | FAILED
+            CACHE_HIT | 1609459220000 | SUCCESS
+            """);
         
         var customResult = framework.executeQuery("@SELECT event, status FROM CustomEvents");
         assertTrue(customResult.isSuccess());
@@ -336,7 +332,7 @@ public class MockTableTest {
         
         // Multi-line with explicit types
         framework.createTable("MultiExplicit", """
-            score FLOAT | count NUMBER
+            score NUMBER | count NUMBER
             95.5 | 10
             87.2 | 15
             """);

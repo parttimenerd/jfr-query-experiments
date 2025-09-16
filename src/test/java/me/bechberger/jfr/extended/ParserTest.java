@@ -1045,10 +1045,10 @@ public class ParserTest {
         Lexer lexer = new Lexer("P90(value)");
         List<Token> tokens = lexer.tokenize();
         
-        // Check that P90 is recognized as a special token
-        boolean foundP90Token = tokens.stream()
-            .anyMatch(token -> token.type() == TokenType.P90);
-        assertTrue(foundP90Token, "Should be a percentile function");
+        // Check that P90 is recognized as a regular identifier (not a special token anymore)
+        boolean foundIdentifierToken = tokens.stream()
+            .anyMatch(token -> token.type() == TokenType.IDENTIFIER && "P90".equals(token.value()));
+        assertTrue(foundIdentifierToken, "P90 should be parsed as a regular identifier");
     }
     
     @Test

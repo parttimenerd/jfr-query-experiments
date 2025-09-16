@@ -378,7 +378,7 @@ public class AggregateFunctions {
             }
         }
         
-        return new CellValue.FloatValue(Math.sqrt(variance / count));
+        return new CellValue.NumberValue(Math.sqrt(variance / count));
     }
     
     static CellValue evaluateVariance(EvaluationContext context, List<CellValue> arguments) {

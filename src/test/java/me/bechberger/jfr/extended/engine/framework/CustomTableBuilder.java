@@ -32,7 +32,7 @@ public class CustomTableBuilder {
     }
     
     public CustomTableBuilder withFloatColumn(String name) {
-        columns.add(new JfrTable.Column(name, CellType.FLOAT));
+        columns.add(new JfrTable.Column(name, CellType.NUMBER));
         return this;
     }
     
@@ -84,7 +84,6 @@ public class CustomTableBuilder {
         return switch (type) {
             case STRING -> new CellValue.StringValue(value.toString());
             case NUMBER -> new CellValue.NumberValue(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()));
-            case FLOAT -> new CellValue.FloatValue(value instanceof Number n ? n.doubleValue() : Double.parseDouble(value.toString()));
             case BOOLEAN -> new CellValue.BooleanValue(value instanceof Boolean b ? b : Boolean.parseBoolean(value.toString()));
             case TIMESTAMP -> new CellValue.TimestampValue(java.time.Instant.ofEpochMilli(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));
             case DURATION -> new CellValue.DurationValue(java.time.Duration.ofMillis(value instanceof Number n ? n.longValue() : Long.parseLong(value.toString())));

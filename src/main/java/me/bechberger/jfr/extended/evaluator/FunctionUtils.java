@@ -142,11 +142,11 @@ public class FunctionUtils {
             assertNumberArgument(functionName, arguments, argumentIndex);
             return (CellValue.NumberValue) arguments.get(argumentIndex);
         } catch (FunctionArgumentException e) {
-            // Handle special case for FloatValue
-            if (arguments.get(argumentIndex) instanceof CellValue.FloatValue floatValue) {
+            // Handle special case for NumberValue
+            if (arguments.get(argumentIndex) instanceof CellValue.NumberValue floatValue) {
                 return new CellValue.NumberValue(floatValue.value());
             }
-            throw e; // Re-throw if not a FloatValue
+            throw e; // Re-throw if not a NumberValue
         }
     }
     
@@ -187,7 +187,6 @@ public class FunctionUtils {
     private static double extractNumericValue(CellValue cellValue, String functionName, int argumentIndex) {
         return switch (cellValue.getType()) {
             case NUMBER -> ((CellValue.NumberValue) cellValue).value();
-            case FLOAT -> ((CellValue.FloatValue) cellValue).value();
             case DURATION -> ((CellValue.DurationValue) cellValue).value().toNanos() / 1_000_000.0;
             case TIMESTAMP -> ((CellValue.TimestampValue) cellValue).value().toEpochMilli();
             case MEMORY_SIZE -> ((CellValue.MemorySizeValue) cellValue).value();
@@ -288,8 +287,6 @@ public class FunctionUtils {
         
         return switch (value.getType()) {
             case BOOLEAN -> ((CellValue.BooleanValue) value).value();
-            case NUMBER -> ((CellValue.NumberValue) value).value() != 0;
-            case FLOAT -> ((CellValue.FloatValue) value).value() != 0;
             case STRING -> {
                 String str = ((CellValue.StringValue) value).value().toLowerCase().trim();
                 yield "true".equals(str) || "1".equals(str) || "yes".equals(str);
@@ -381,7 +378,7 @@ public class FunctionUtils {
         if (obj instanceof Number) {
             double value = ((Number) obj).doubleValue();
             if (obj instanceof Float || obj instanceof Double) {
-                return new CellValue.FloatValue(value);
+                return new CellValue.NumberValue(value);
             } else {
                 return new CellValue.NumberValue(value);
             }

@@ -1,15 +1,95 @@
 # JFR Query Language Development Roadmap
 
-## 🎯 **CURRENT FOCUS: STREAMING QUERY PLAN IMPLEMENTATION**
+## 🚨 **IMMEDIATE PRIORITIES - QUERYEVALUATOR REPLACEMENT**
 
-**📋 For detailed implementation status and immediate priorities, see:**
-**➡️ [QUERY_PLAN_ROADMAP.md](./QUERY_PLAN_ROADMAP.md)**
+✅ **Custom Exception System Complete** (July 17, 2025)
+- **PlanException**: Universal wrapper that associates plans with underlying query execution errors
+- **PlanExceptionFactory**: Factory for creating and wrapping exceptions with proper plan context
+- **Exception Wrapping**: All plan exceptions now wrap existing QueryEvaluationException/QueryExecutionException instances instead of creating plan-specific exception types
+- **Specialized Exceptions**: DataAccessException and TypeException for specific error categories with suggestions
+- **Plan Association**: Every exception automatically includes plan context, AST node, and execution phase information
+- **Enhanced Error Reports**: Detailed error reporting with plan type, execution phase, and original exception details
+
+✅ **No Event Assumptions in Production Code** (July 17, 2025)
+- **Production Code Cleanup**: Removed all hardcoded event type assumptions from non-test code
+- **QueryPlanExecutor**: Eliminated fallback hardcoded event types ("GarbageCollection", "ExecutionSample", "JavaMonitorEnter")
+- **ScanPlan**: Now uses actual JFR metadata from QueryExecutionContext instead of hardcoded table names
+- **Demo Code Documentation**: Added clear comments indicating demo-only hardcoded examples
+- **Principle**: Production code only queries actual JFR metadata, never assumes specific events are present
+
+but implement where and function calling and mathematical expressions  (but preserve types as fitting) (maybe via plans, don't know)
+
+do proper logging use Java logging framework and custom execptions (with context, error message, suggestions and meta data)
+
+create parametrized tests that specifically test the current status
+
+JfrFileMetadata, ask RawJfrQuery... for it
+
+(add all this to the roadmap and start implementing)
+            
+
+keep all query plans streaming, if possible
+
+"@SELECT" -> "@SELECT" (no spaces) - ✅ COMPLETED
+
+support and test aliased tables
+
+✅ **SHOW PLAN and EXPLAIN Commands Complete** (July 18, 2025)
+- **Parser Support**: Added full parser support for "SHOW PLAN [FORMAT]" and "EXPLAIN" commands
+- **Format Options**: SIMPLE, VERBOSE, ASCII, PERFORMANCE formats supported
+- **AST Integration**: Seamless integration with existing ShowPlanNode and ExplainNode AST nodes
+- **Comprehensive Testing**: 13 test cases covering all format options and edge cases
+- **Grammar Documentation**: Updated grammar and help system with new command documentation
+- **Error Handling**: Proper error messages for invalid formats and missing queries
+
+
+✅ **Engine Tests Backup Complete** (July 16, 2025)
+- **27 test files backed up** to `engine-tests-backup/` directory  
+- All tests using `QueryEvaluator` or `QueryTestFramework` safely preserved
+- Original test files removed to enable clean migration
+- Comprehensive README.md created with migration strategy and priorities
+
+✅ **QueryTestFramework Migration Complete** (July 17, 2025)
+- **QueryTestFramework updated** to use `QueryPlanExecutor` instead of `QueryEvaluator`
+- Added `query()` method to QueryPlanExecutor for API compatibility
+- Enhanced AstToPlanConverter with `getRawExecutor()` method
+- Framework now successfully executes queries with streaming plan architecture
+
+🔄 **ONGOING: Streaming Architecture Bug Fixes** (July 18, 2025)
+- **FilterPlan Streaming Optimization**: Fixed ProjectionPlan to use streaming iteration instead of indexed access, eliminating premature materialization in WHERE clause filtering
+- **Lazy Variable Fix**: Corrected StatementExecutionVisitor to store lazy variables only as lazy variables, not regular variables, preventing incorrect string serialization
+- **PlanExpressionEvaluator StarNode Support**: Added proper StarNode evaluation in row context for aggregate functions like COUNT(*)
+- **Performance Impact**: Major streaming performance improvement by eliminating forced materialization in common query patterns
+
+### 🔄 **CURRENT PHASE: Core Plan Implementation**
+
+### Phase 1: Complete Missing Plan Infrastructure (1-2 weeks) - **IN PROGRESS**
+
+1. **✅ QueryPlanExecutor Foundation** - Basic executor with query() method compatibility
+2. **✅ JFRFileMetadata** - Metadata infrastructure for query planning  
+3. **🔄 Complete Missing Plan Classes** - Implement placeholder plans with full functionality
+4. **🔄 AstToPlanConverter Enhancement** - Convert all AST node types to streaming plans
+5. **🔄 Test One Backed-up Test** - Migrate and verify one test from backup works
+
+### Phase 2: Plan Execution Engine (1-2 weeks)
+
+1. **Implement Core Plan Types** - TableScanPlan, FilterPlan, SelectPlan execution
+2. **Add GROUP BY Support** - GroupByPlan with streaming aggregation
+3. **Implement JOIN Operations** - JoinPlan with memory-efficient algorithms  
+4. **Complete ORDER BY** - OrderByPlan with streaming sort
+5. **Add LIMIT/OFFSET** - LimitPlan with efficient stream limiting
+
+## 🎯 **CURRENT FOCUS: STREAMING QUERY PLAN FEATURE PARITY**
+
+**📋 For comprehensive QueryEvaluator replacement roadmap, see:**
+**➡️ [STREAMING_QUERY_PLAN_FEATURE_PARITY_ROADMAP.md](./STREAMING_QUERY_PLAN_FEATURE_PARITY_ROADMAP.md)**
 
 **Current Status Summary:**
-- ❌ **Compilation**: FAILING - Missing core infrastructure classes
-- 🔄 **Plan Architecture**: 60% complete - Core interfaces implemented
-- ❌ **Missing Classes**: QueryResult, MemoryUsageStats, JFRErrorContext, Parser
-- 📊 **Overall Progress**: 30% complete - Focus on compilation baseline
+- ✅ **Compilation**: PASSING - Core infrastructure complete  
+- � **Feature Parity**: 58% complete - Major gaps in advanced features
+- ✅ **Basic Functionality**: SELECT/FROM/WHERE/GROUP BY/JOIN working
+- 🚨 **Critical Gaps**: Subqueries, Views, Context execution, Help system
+- 📊 **Overall Progress**: Ready for Phase 1 critical API parity work
 
 ## � **IMMEDIATE PRIORITIES**
 
@@ -367,7 +447,7 @@
     - Comprehensive documentation and examples including the requested use case
   - **Comprehensive Testing**: Created `ClampFunctionTest.java` with parameterized JUnit5 tests:
     - Basic clamping behavior: value below min, above max, within range
-    - Type preservation tests: NumberValue and FloatValue type handling
+    - Type preservation tests: NumberValue and NumberValue type handling
     - Error condition tests: invalid arguments, wrong parameter count, min > max
     - Edge cases: equal min/max, very small/large numbers, mixed numeric types
   - **Integration Testing**: Updated `FunctionRegistryTest.java` to include CLAMP:
@@ -691,24 +771,24 @@ Suggestion: Use single '=' for comparison, not '==' (double equals is not suppor
 **After Enhancement:**
 ```java
 // Basic field sorting with direction control
-@ SELECT * FROM ExecutionSample ORDER BY duration DESC
+@SELECT * FROM ExecutionSample ORDER BY duration DESC
 
 // Multi-field sorting with precedence
-@ SELECT name, age FROM Users ORDER BY name ASC, age DESC
+@SELECT name, age FROM Users ORDER BY name ASC, age DESC
 
 // Complex expression-based sorting
-@ SELECT * FROM Users ORDER BY ABS(age - 30) ASC
+@SELECT * FROM Users ORDER BY ABS(age - 30) ASC
 
 // ORDER BY with GROUP BY and aggregates
-@ SELECT threadId, COUNT(*) FROM ExecutionSample 
+@SELECT threadId, COUNT(*) FROM ExecutionSample 
   GROUP BY threadId ORDER BY COUNT(*) DESC
 
 // ORDER BY with percentiles and complex expressions
-@ SELECT threadId, P99(duration) as p99 FROM ExecutionSample 
+@SELECT threadId, P99(duration) as p99 FROM ExecutionSample 
   GROUP BY threadId ORDER BY (P99(duration) * 2 + 1) DESC
 
 // Integration with HAVING and LIMIT
-@ SELECT stackTrace, COUNT(*) FROM ExecutionSample 
+@SELECT stackTrace, COUNT(*) FROM ExecutionSample 
   GROUP BY stackTrace 
   HAVING COUNT(*) > 10 
   ORDER BY COUNT(*) DESC 
@@ -772,3 +852,255 @@ WHERE duraton > 10ms  // <- Real-time error: "Unknown field 'duraton', did you m
 - Real-time validation and error checking in development environments  
 - Reduced query development time through IDE integration
 - Enhanced developer experience with rich language support
+
+---
+
+## 🚨 **COMPREHENSIVE TODO LIST & IMPLEMENTATION GAPS**
+
+### **🔥 IMMEDIATE PRIORITIES (Next 1-2 weeks)**
+
+#### **1. Query Plan Visualization & Debugging (COMPLETED)**
+- **Status**: ✅ **COMPLETED** - Full parser and help system integration
+- **Completed**: 
+  - ✅ QueryPlanVisualizer with 4 visualization formats (simple, verbose, ASCII art, performance)
+  - ✅ ShowPlanPlan and ExplainPlan infrastructure
+  - ✅ Comprehensive test coverage for visualizer functionality
+  - ✅ **Parser Integration**: Added ShowPlanNode and ExplainNode AST node types with PlanFormat enum
+  - ✅ **Command Recognition**: Updated parser to recognize "SHOW PLAN [FORMAT]" and "EXPLAIN" commands
+  - ✅ **Visitor Pattern**: Implemented all required visitor methods across codebase
+  - ✅ **Grammar Documentation**: Updated grammar and help system with new command documentation
+  - ✅ **Comprehensive Testing**: 13 test cases covering all format options and edge cases
+- **TODO**:
+  - [ ] **Query Execution**: Integrate ShowPlanPlan and ExplainPlan into query execution pipeline
+  - [ ] **Documentation**: Update README with SHOW PLAN and EXPLAIN examples
+
+#### **2. Type Inference System Enhancement (RECENTLY COMPLETED)**
+- **Status**: ✅ **COMPLETED** - Dynamic type inference implemented
+- **Completed**: 
+  - ✅ FunctionRegistry enhanced with getDefaultReturnType method
+  - ✅ AggregationPlan uses dynamic type inference instead of hardcoded mappings
+  - ✅ Comprehensive test coverage for type inference improvements
+- **TODO**:
+  - [ ] **Validation**: Test complex queries with multiple aggregate functions
+  - [ ] **Edge Cases**: Handle null values and type conversion edge cases
+  - [ ] **Performance**: Optimize type inference for large result sets
+
+#### **3. Placeholder Plan Implementation (CRITICAL)**
+- **Status**: 🚨 **CRITICAL** - 4 placeholder plans need full implementation
+- **TODO**:
+  - [ ] **OrderByPlan**:
+    - [ ] Implement Comparator-based field sorting
+    - [ ] Support ASC/DESC directions and multi-field sorting
+    - [ ] Memory-efficient streaming sort for large datasets
+    - [ ] Integration with expression evaluation system
+  - [ ] **LimitPlan**:
+    - [ ] Efficient stream limiting with skip() and limit() operations
+    - [ ] Integration with ORDER BY for top-N queries
+    - [ ] Memory optimization for large offset values
+  - [ ] **HavingPlan**:
+    - [ ] HAVING condition evaluation after GROUP BY aggregation
+    - [ ] Integration with ExpressionEvaluator
+    - [ ] Proper handling of aggregate function references
+  - [ ] **DistinctPlan**:
+    - [ ] Hash-based deduplication for memory efficiency
+    - [ ] Custom hashCode/equals for EventRow comparison
+    - [ ] Streaming deduplication to avoid memory loading
+
+#### **4. Missing Core Classes (BLOCKING COMPILATION)**
+- **Status**: 🚨 **BLOCKING** - Prevents full functionality
+- **TODO**:
+  - [ ] **QueryResult.java**: Complete implementation with proper result wrapping
+  - [ ] **MemoryUsageStats.java**: Memory monitoring and reporting
+  - [ ] **JFRErrorContext.java**: Enhanced error context for debugging
+  - [ ] **EventRow.java**: Proper event row abstraction for streaming
+  - [ ] **QueryExecutionContext.java**: Complete execution context management
+
+### **🎯 MEDIUM PRIORITY (Next 2-4 weeks)**
+
+#### **5. Advanced Query Features (FEATURE PARITY)**
+- **Status**: ❌ **MISSING** - Critical gaps vs QueryEvaluator
+- **TODO**:
+  - [ ] **Subquery Support**:
+    - [ ] Create SubqueryPlan for nested query execution
+    - [ ] Integration with SelectPlan for subquery sources
+    - [ ] Proper scope management for nested variable contexts
+  - [ ] **View Definition Support**:
+    - [ ] Create ViewDefinitionPlan for materialized views
+    - [ ] Integration with QueryExecutionContext for view storage
+    - [ ] Automatic view dependency tracking and invalidation
+  - [ ] **Variable Assignment Support**:
+    - [ ] Create AssignmentPlan for variable storage
+    - [ ] Enhanced QueryExecutionContext with variable scope management
+    - [ ] Type checking and validation for variable assignments
+  - [ ] **Context-Based Execution**:
+    - [ ] executeWithContext methods in QueryPlanExecutor
+    - [ ] Direct AST execution methods
+    - [ ] Function evaluation context access
+
+#### **6. Enhanced Expression Evaluation**
+- **Status**: 🔄 **PARTIAL** - Basic functionality working
+- **TODO**:
+  - [ ] **Complete Expression Evaluator**:
+    - [ ] Integration with SimpleFunctionEvaluator and AggregateEvaluator
+    - [ ] Support for all expression types (binary, unary, field access, function calls)
+    - [ ] Proper type conversion and error handling
+  - [ ] **Advanced Function Support**:
+    - [ ] Complete integration with FunctionRegistry
+    - [ ] Support for user-defined functions
+    - [ ] Aggregate function optimization and memory management
+  - [ ] **Complex Expression Evaluation**:
+    - [ ] Nested expression evaluation with proper precedence
+    - [ ] Support for CASE/WHEN expressions
+    - [ ] Array and complex type operations
+
+#### **7. JOIN Operations Enhancement**
+- **Status**: 🔄 **BASIC** - Simple joins working
+- **TODO**:
+  - [ ] **Advanced Join Algorithms**:
+    - [ ] Hash join implementation for large datasets
+    - [ ] Merge join for sorted data
+    - [ ] Nested loop join optimization
+  - [ ] **Join Condition Support**:
+    - [ ] Complex join conditions with multiple fields
+    - [ ] Support for different join types (INNER, LEFT, RIGHT, FULL OUTER)
+    - [ ] Cross join and self-join support
+  - [ ] **Performance Optimization**:
+    - [ ] Memory management for large join operations
+    - [ ] Streaming join algorithms
+    - [ ] Join order optimization
+
+### **🔧 LONG-TERM IMPROVEMENTS (Next 1-3 months)**
+
+#### **8. Performance Optimization**
+- **Status**: ⚠️ **NEEDS IMPROVEMENT** - Basic performance working
+- **TODO**:
+  - [ ] **Query Plan Optimization**:
+    - [ ] Cost-based query optimization
+    - [ ] Index utilization for JFR data
+    - [ ] Filter pushdown optimization
+  - [ ] **Memory Management**:
+    - [ ] Streaming-first architecture completion
+    - [ ] Memory pool management
+    - [ ] Garbage collection optimization
+  - [ ] **Execution Engine**:
+    - [ ] Parallel query execution
+    - [ ] Pipeline optimization
+    - [ ] Cache management for frequent queries
+
+#### **9. Error Handling & Diagnostics**
+- **Status**: ✅ **GOOD** - Basic error handling complete
+- **TODO**:
+  - [ ] **Enhanced Error Messages**:
+    - [ ] Context-aware error suggestions
+    - [ ] Query snippet highlighting in errors
+    - [ ] Performance bottleneck identification
+  - [ ] **Debugging Tools**:
+    - [ ] Query execution tracing
+    - [ ] Performance profiling integration
+    - [ ] Memory usage debugging
+
+#### **10. Advanced Features**
+- **Status**: ❌ **MISSING** - Future enhancements
+- **TODO**:
+  - [ ] **Help System**:
+    - [ ] Interactive help commands
+    - [ ] Function documentation
+    - [ ] Query examples and templates
+  - [ ] **Event Discovery**:
+    - [ ] Dynamic event type discovery from JFR files
+    - [ ] Schema inference and validation
+    - [ ] Event relationship mapping
+  - [ ] **SHOW Commands**:
+    - [ ] SHOW EVENTS, SHOW FIELDS, SHOW TABLES
+    - [ ] SHOW PERFORMANCE, SHOW MEMORY
+    - [ ] SHOW CONFIGURATION, SHOW VERSION
+
+### **🔬 EXPERIMENTAL & RESEARCH (Future)**
+
+#### **11. JFR Integration Enhancement**
+- **TODO**:
+  - [ ] **Real-time JFR Analysis**:
+    - [ ] Live JFR stream processing
+    - [ ] Event correlation across multiple files
+    - [ ] Advanced metadata handling
+  - [ ] **Performance Monitoring**:
+    - [ ] Built-in performance metrics
+    - [ ] Query execution statistics
+    - [ ] Memory usage tracking and optimization
+
+#### **12. Language Server & IDE Integration**
+- **TODO**:
+  - [ ] **Language Server Protocol (LSP)**:
+    - [ ] Auto-completion based on JFR metadata
+    - [ ] Real-time syntax validation
+    - [ ] Hover documentation
+  - [ ] **IDE Features**:
+    - [ ] Syntax highlighting
+    - [ ] Error squiggles and quick fixes
+    - [ ] Query formatting and refactoring
+  - [ ] **Developer Tools**:
+    - [ ] Query debugger
+    - [ ] Performance profiler
+    - [ ] Schema explorer
+
+#### **13. Advanced SQL Features**
+- **TODO**:
+  - [ ] **Window Functions**:
+    - [ ] ROW_NUMBER, RANK, DENSE_RANK
+    - [ ] LAG, LEAD, FIRST_VALUE, LAST_VALUE
+    - [ ] Custom window frame definitions
+  - [ ] **Common Table Expressions (CTE)**:
+    - [ ] WITH clause support
+    - [ ] Recursive CTEs
+    - [ ] Multiple CTE definitions
+  - [ ] **Advanced Aggregations**:
+    - [ ] ROLLUP, CUBE, GROUPING SETS
+    - [ ] FILTER clause for aggregates
+    - [ ] Custom aggregate functions
+
+---
+
+## 📊 **IMPLEMENTATION PRIORITY MATRIX**
+
+| **Feature** | **Priority** | **Effort** | **Impact** | **Status** |
+|-------------|-------------|------------|------------|------------|
+| **Query Plan Visualization** | 🔥 **CRITICAL** | Medium | High | 🔄 **IN PROGRESS** |
+| **Placeholder Plan Implementation** | 🔥 **CRITICAL** | High | High | 🚨 **BLOCKED** |
+| **Missing Core Classes** | 🔥 **CRITICAL** | Medium | High | 🚨 **BLOCKED** |
+| **Subquery Support** | 🎯 **HIGH** | High | High | ❌ **MISSING** |
+| **View Definition Support** | 🎯 **HIGH** | Medium | High | ❌ **MISSING** |
+| **Advanced JOIN Operations** | 🎯 **HIGH** | High | Medium | 🔄 **PARTIAL** |
+| **Performance Optimization** | 🔧 **MEDIUM** | High | High | ⚠️ **NEEDS WORK** |
+| **Error Handling Enhancement** | 🔧 **MEDIUM** | Medium | Medium | ✅ **GOOD** |
+| **Help System** | 🔧 **MEDIUM** | Medium | Medium | ❌ **MISSING** |
+| **JFR Integration** | 🔬 **FUTURE** | Very High | High | ❌ **MISSING** |
+| **Language Server** | 🔬 **FUTURE** | Very High | High | ❌ **MISSING** |
+| **Advanced SQL Features** | 🔬 **FUTURE** | Very High | Medium | ❌ **MISSING** |
+
+---
+
+## 🎯 **NEXT STEPS RECOMMENDATION**
+
+### **Week 1-2: Core Infrastructure**
+1. **Complete QueryPlanVisualizer integration** - Add parser support for SHOW PLAN/EXPLAIN
+2. **Implement placeholder plans** - Focus on OrderByPlan and LimitPlan first
+3. **Create missing core classes** - QueryResult, MemoryUsageStats, JFRErrorContext
+
+### **Week 3-4: Feature Parity**
+1. **Add subquery support** - Critical for complex queries
+2. **Implement view definitions** - Essential for QueryEvaluator parity
+3. **Enhance JOIN operations** - Complete advanced join algorithms
+
+### **Month 2-3: Performance & Polish**
+1. **Optimize query execution** - Focus on memory efficiency and speed
+2. **Add comprehensive error handling** - Better debugging and user experience
+3. **Implement help system** - Complete user experience
+
+### **Future: Advanced Features**
+1. **JFR integration enhancement** - Real-time analysis and metadata
+2. **Language server implementation** - IDE integration and developer tools
+3. **Advanced SQL features** - Window functions, CTEs, advanced aggregations
+
+---
+
+*This comprehensive TODO list represents the complete roadmap for achieving full feature parity with QueryEvaluator and extending beyond with modern streaming architecture, comprehensive debugging tools, and advanced query capabilities.*

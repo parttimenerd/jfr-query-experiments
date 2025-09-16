@@ -23,15 +23,16 @@ public class ExpressionEvaluator {
     
     private final FunctionRegistry functionRegistry;
     private final AggregateFunctions.EvaluationContext evaluationContext;
+    private final ExecutionContext executionContext;
     
-    public ExpressionEvaluator(FunctionRegistry functionRegistry, AggregateFunctions.EvaluationContext evaluationContext) {
+    public ExpressionEvaluator(FunctionRegistry functionRegistry, AggregateFunctions.EvaluationContext evaluationContext, ExecutionContext executionContext) {
         this.functionRegistry = functionRegistry;
         this.evaluationContext = evaluationContext;
+        this.executionContext = executionContext;
     }
     
     public ExpressionEvaluator(FunctionRegistry functionRegistry) {
-        this.functionRegistry = functionRegistry;
-        this.evaluationContext = null; // Will need to be passed to methods that need it
+        this(functionRegistry, null, null);
     }
     
     /**
@@ -47,7 +48,14 @@ public class ExpressionEvaluator {
             return ((LiteralNode) expression).value().getValue();
         } else if (expression instanceof IdentifierNode) {
             String columnName = ((IdentifierNode) expression).name();
-            // Find the column by name
+            
+            // First check for local variables (from variable assignments)
+            if (executionContext != null && executionContext.hasLocalVariable(columnName)) {
+                Object value = executionContext.getLocalVariable(columnName);
+                return value;
+            }
+            
+            // Then check for columns
             for (int i = 0; i < columns.size(); i++) {
                 if (columns.get(i).name().equals(columnName)) {
                     CellValue cellValue = row.getCell(i);
@@ -60,6 +68,17 @@ public class ExpressionEvaluator {
             return evaluateFunctionCall(funcCall, row, columns);
         } else if (expression instanceof CaseExpressionNode) {
             return evaluateCaseExpression((CaseExpressionNode) expression, row, columns);
+        } else if (expression instanceof VariableAssignmentExpressionNode) {
+            VariableAssignmentExpressionNode varAssign = (VariableAssignmentExpressionNode) expression;
+            Object value = evaluateExpressionInRowContext(varAssign.value(), row, columns);
+            
+            // Store the variable in the execution context
+            if (executionContext != null) {
+                executionContext.setLocalVariable(varAssign.variable(), value);
+            }
+            
+            // Return the assigned value so it can be used in boolean context
+            return value;
         } else if (expression instanceof BinaryExpressionNode) {
             BinaryExpressionNode binOp = (BinaryExpressionNode) expression;
             Object left = evaluateExpressionInRowContext(binOp.left(), row, columns);
@@ -92,6 +111,21 @@ public class ExpressionEvaluator {
             } else {
                 return true; // Non-null, non-zero values are truthy
             }
+        }
+        
+        if (condition instanceof VariableDeclarationNode) {
+            VariableDeclarationNode varDecl = (VariableDeclarationNode) condition;
+            
+            // Evaluate the variable's value expression in the current row context
+            Object variableValue = evaluateExpressionInRowContext(varDecl.value(), row, columns);
+            
+            // Store the variable in the local context for this row evaluation
+            if (executionContext != null) {
+                executionContext.setLocalVariable(varDecl.variable(), variableValue);
+            }
+            
+            // Variable declarations are always true (they don't filter rows)
+            return true;
         }
         
         throw new RuntimeException("Unsupported condition type: " + condition.getClass().getName());

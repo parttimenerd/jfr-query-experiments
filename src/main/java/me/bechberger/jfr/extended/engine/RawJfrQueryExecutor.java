@@ -2,6 +2,9 @@ package me.bechberger.jfr.extended.engine;
 
 import me.bechberger.jfr.extended.table.JfrTable;
 import me.bechberger.jfr.extended.ast.ASTNodes.RawJfrQueryNode;
+import jdk.jfr.EventType;
+
+import java.util.List;
 
 /**
  * Interface for executing raw JFR queries.
@@ -12,7 +15,6 @@ import me.bechberger.jfr.extended.ast.ASTNodes.RawJfrQueryNode;
  * @author JFR Extended Query Engine
  * @since 1.0
  */
-@FunctionalInterface
 public interface RawJfrQueryExecutor {
     /**
      * Execute a raw JFR query and return the result as a table.
@@ -22,4 +24,12 @@ public interface RawJfrQueryExecutor {
      * @throws Exception if the query execution fails
      */
     JfrTable execute(RawJfrQueryNode queryNode) throws Exception;
+    
+    /**
+     * Get available event types from the JFR source.
+     * 
+     * @return list of available event types
+     * @throws Exception if event types cannot be retrieved
+     */
+    List<EventType> getEventTypes() throws Exception;
 }

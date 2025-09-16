@@ -76,10 +76,6 @@ public class SyntaxHighlighter {
             case SELECT, FROM, WHERE, GROUP_BY, ORDER_BY, LIMIT, AS, AND, OR, ASC, DESC,
                  SHOW, VIEW, EXTENDED_QUERY -> TokenCategory.KEYWORD;
             
-            // Percentile functions (still reserved tokens)
-            case PERCENTILE, P90, P95, P99, P999, P90SELECT, P95SELECT, P99SELECT, P999SELECT,
-                 PERCENTILE_SELECT -> TokenCategory.FUNCTION;
-            
             // Operators
             case EQUALS, NOT_EQUALS, LESS_THAN, GREATER_THAN, LESS_EQUAL, GREATER_EQUAL,
                  LIKE, IN, PLUS, MINUS, STAR, DIVIDE, MODULO, ASSIGN -> TokenCategory.OPERATOR;

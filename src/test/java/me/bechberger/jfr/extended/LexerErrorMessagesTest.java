@@ -103,7 +103,6 @@ public class LexerErrorMessagesTest {
             
             // String literal errors
             Arguments.of("@SELECT text = 'unclosed", "unclosed_string", "Unclosed string literal"),
-            Arguments.of("@SELECT text = \"invalid\"", "double_quotes", "Double quotes instead of single"),
             
             // Comment errors
             Arguments.of("@SELECT * /* unclosed comment", "unclosed_comment", "Unclosed multi-line comment"),

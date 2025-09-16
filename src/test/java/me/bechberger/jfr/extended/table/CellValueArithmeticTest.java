@@ -15,15 +15,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Comprehensive tests for arithmetic operations on all numeric CellValue types
  * 
- * These tests verify that all numeric types (NUMBER, FLOAT, DURATION, TIMESTAMP, MEMORY_SIZE, RATE)
+ * These tests verify that all numeric types (NUMBER, NUMBER, DURATION, TIMESTAMP, MEMORY_SIZE, RATE)
  * can participate in arithmetic operations with proper type compatibility checking and result types.
  */
 public class CellValueArithmeticTest {
     
     private CellValue.NumberValue number1;
     private CellValue.NumberValue number2;
-    private CellValue.FloatValue float1;
-    private CellValue.FloatValue float2;
+    private CellValue.NumberValue float1;
+    private CellValue.NumberValue float2;
     private CellValue.DurationValue duration1;
     private CellValue.DurationValue duration2;
     private CellValue.TimestampValue timestamp1;
@@ -37,8 +37,8 @@ public class CellValueArithmeticTest {
     public void setUp() {
         number1 = new CellValue.NumberValue(10.0);
         number2 = new CellValue.NumberValue(3.0);
-        float1 = new CellValue.FloatValue(10.5);
-        float2 = new CellValue.FloatValue(2.5);
+        float1 = new CellValue.NumberValue(10.5);
+        float2 = new CellValue.NumberValue(2.5);
         duration1 = new CellValue.DurationValue(Duration.ofSeconds(10));
         duration2 = new CellValue.DurationValue(Duration.ofSeconds(3));
         timestamp1 = new CellValue.TimestampValue(Instant.ofEpochMilli(1000000));
@@ -84,38 +84,38 @@ public class CellValueArithmeticTest {
     }
     
     /**
-     * Test scenario: FLOAT + FLOAT operations
-     * Purpose: Verify that FLOAT type operations preserve FLOAT type
-     * Expected: Result should be FloatValue with correct calculation
+     * Test scenario: NUMBER + NUMBER operations
+     * Purpose: Verify that NUMBER type operations preserve NUMBER type
+     * Expected: Result should be NumberValue with correct calculation
      */
     @Test
     public void testFloatArithmetic() {
         CellValue result = float1.mapBinary(float2, BinaryOperator.ADD);
-        assertTrue(result instanceof CellValue.FloatValue, "Result should be FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "Result should be NumberValue");
         assertNumericEquals("10.5 + 2.5 = 13.0", 13.0, result.getValue());
         
         result = float1.mapBinary(float2, BinaryOperator.SUBTRACT);
-        assertTrue(result instanceof CellValue.FloatValue, "Result should be FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "Result should be NumberValue");
         assertNumericEquals("10.5 - 2.5 = 8.0", 8.0, result.getValue());
         
         result = float1.mapBinary(float2, BinaryOperator.MULTIPLY);
-        assertTrue(result instanceof CellValue.FloatValue, "Result should be FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "Result should be NumberValue");
         assertNumericEquals("10.5 * 2.5 = 26.25", 26.25, result.getValue());
     }
     
     /**
-     * Test scenario: NUMBER + FLOAT operations (type promotion)
-     * Purpose: Verify that mixed NUMBER/FLOAT operations promote to FLOAT
-     * Expected: Result should be FloatValue when mixing NUMBER and FLOAT
+     * Test scenario: NUMBER + NUMBER operations (type promotion)
+     * Purpose: Verify that mixed NUMBER/NUMBER operations promote to NUMBER
+     * Expected: Result should be NumberValue when mixing NUMBER and NUMBER
      */
     @Test
     public void testNumberFloatMixed() {
         CellValue result = number1.mapBinary(float2, BinaryOperator.ADD);
-        assertTrue(result instanceof CellValue.FloatValue, "NUMBER + FLOAT should promote to FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "NUMBER + NUMBER should promote to NumberValue");
         assertNumericEquals("10.0 + 2.5 = 12.5", 12.5, result.getValue());
         
         result = float1.mapBinary(number2, BinaryOperator.SUBTRACT);
-        assertTrue(result instanceof CellValue.FloatValue, "FLOAT - NUMBER should promote to FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "NUMBER - NUMBER should promote to NumberValue");
         assertNumericEquals("10.5 - 3.0 = 7.5", 7.5, result.getValue());
     }
     
@@ -205,8 +205,8 @@ public class CellValueArithmeticTest {
     
     /**
      * Test scenario: Mixed numeric type operations
-     * Purpose: Verify that NUMBER/FLOAT can operate with other numeric types
-     * Expected: Operations preserve the non-NUMBER/FLOAT type
+     * Purpose: Verify that NUMBER/NUMBER can operate with other numeric types
+     * Expected: Operations preserve the non-NUMBER/NUMBER type
      */
     @Test
     public void testMixedNumericOperations() {
@@ -214,9 +214,9 @@ public class CellValueArithmeticTest {
         CellValue result = number1.mapBinary(duration1, BinaryOperator.ADD);
         assertTrue(result instanceof CellValue.DurationValue, "NUMBER + DURATION should return DurationValue");
         
-        // FLOAT * MEMORY_SIZE
+        // NUMBER * MEMORY_SIZE
         result = float2.mapBinary(memory1, BinaryOperator.MULTIPLY);
-        assertTrue(result instanceof CellValue.MemorySizeValue, "FLOAT * MEMORY_SIZE should return MemorySizeValue");
+        assertTrue(result instanceof CellValue.MemorySizeValue, "NUMBER * MEMORY_SIZE should return MemorySizeValue");
         assertNumericEquals("2.5 * 1024 = 2560", 2560.0, result.getValue());
         
         // RATE / NUMBER
@@ -244,10 +244,10 @@ public class CellValueArithmeticTest {
             assertTrue(e.getMessage().contains("operation"), "Should mention operation incompatibility");
         }
         
-        // BOOLEAN * FLOAT should fail
+        // BOOLEAN * NUMBER should fail
         try {
             boolValue.mapBinary(float1, BinaryOperator.MULTIPLY);
-            fail("BOOLEAN * FLOAT should throw exception");
+            fail("BOOLEAN * NUMBER should throw exception");
         } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("operation"), "Should mention operation incompatibility");
         }
@@ -300,7 +300,7 @@ public class CellValueArithmeticTest {
         
         // Test SQRT on float
         result = float1.mapNumeric(Math::sqrt);
-        assertTrue(result instanceof CellValue.FloatValue, "Result should be FloatValue");
+        assertTrue(result instanceof CellValue.NumberValue, "Result should be NumberValue");
         assertNumericEquals("sqrt(10.5)", Math.sqrt(10.5), result.getValue());
         
         // Test doubling a memory size
@@ -318,7 +318,7 @@ public class CellValueArithmeticTest {
     public void testTypeHelpers() {
         // Test isNumeric
         assertTrue(number1.isNumeric(), "NumberValue should be numeric");
-        assertTrue(float1.isNumeric(), "FloatValue should be numeric");
+        assertTrue(float1.isNumeric(), "NumberValue should be numeric");
         assertTrue(duration1.isNumeric(), "DurationValue should be numeric");
         assertTrue(timestamp1.isNumeric(), "TimestampValue should be numeric");
         assertTrue(memory1.isNumeric(), "MemorySizeValue should be numeric");
@@ -366,8 +366,8 @@ public class CellValueArithmeticTest {
         BinaryOperator operator = BinaryOperator.valueOf(operation);
         CellValue result = float1.mapBinary(float2, operator);
         
-        assertTrue(result instanceof CellValue.FloatValue, "Float operations should return FloatValue");
-        CellValue.FloatValue floatResult = (CellValue.FloatValue) result;
+        assertTrue(result instanceof CellValue.NumberValue, "Float operations should return NumberValue");
+        CellValue.NumberValue floatResult = (CellValue.NumberValue) result;
         
         // Test that the operation was performed
         assertNotNull(floatResult.value(), "Result value should not be null");
