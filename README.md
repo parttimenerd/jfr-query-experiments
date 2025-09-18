@@ -1,6 +1,47 @@
 JFR Query Experiments
 =====================
 
+In this branch, I try to experiment with using DuckDB as the backend for JFR queries.
+
+Usage:
+
+```shell
+java -jar target/query.jar import recording.jfr duckdb.db -e STACK_TRACES
+```
+
+Then you can use any DuckDB client to query the `duckdb.db` file.
+For example, using the DuckDB CLI:
+
+```shell
+> duckdb duckdb.db
+D SELECT * FROM CPULoad;
+┌────────────────────────────┬──────────────┬───────────────┬──────────────┐
+│         startTime          │   jvmUser    │   jvmSystem   │ machineTotal │
+│         timestamp          │    float     │     float     │    float     │
+├────────────────────────────┼──────────────┼───────────────┼──────────────┤
+│ 2024-05-24 10:06:42.816701 │  0.012596757 │  0.0018829145 │   0.92435896 │
+│ 2024-05-24 10:06:44.141573 │ 0.0058958004 │   0.002999063 │    0.9324324 │
+...
+```
+Limitations:
+- Durations are stores as milliseconds.
+- Stack traces are stored a fixed size (100 frames by default) but are slow to import, so avoid if possible.
+
+Lessons learned on duckdb
+-------------------------
+- not using the appender is a terrible idea, it is much, much slower
+  - so fixed arrays instead of varlen are a good idea
+
+TODO
+- before_gc and after_gc macros
+- formatting
+  - macros for formatting timestamps, durations, bytes, frequency
+- other features from JFR view
+- JFR views
+
+Old
+===
+
 Experiments with `jfr` tool code and JFR queries.
 
 It's essentially a standalone version of the `jfr view` command,

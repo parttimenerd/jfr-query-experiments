@@ -14,7 +14,8 @@ import java.util.concurrent.Callable;
                 HelpCommand.class,
                 ViewCommand.class,
                 QueryCommand.class,
-                WebCommand.class
+                WebCommand.class,
+                me.bechberger.jfr.duckdb.Main.class,
         }
 )
 public class Main implements Callable<Integer> {
