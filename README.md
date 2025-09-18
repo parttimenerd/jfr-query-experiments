@@ -9,12 +9,23 @@ based, currently, on the [JDK 21](https://github.com/openjdk/jdk21u) code.
 And it has a (highly experimental) web mode to easily test JFR queries:
 
 ```shell
-java -jar target/query.jar web recording.jfr
+jbang jfr-query@parttimenerd/jfr-query-experiments web recording.jfr
 -> starts a web server on port 8080
 -> open http://localhost:8080
 ```
 
 ![Screenshot of the web UI](img/tool.png)
+
+Try it out
+----------
+
+Download the [latest release](  https://github.com/parttimenerd/jfr-query-experiments/releases/download/snapshot/query.jar) and run it: `java -jar query.jar`
+
+Or use [jbang](https://www.jbang.dev/):
+
+```shell
+jbang jfr-query@parttimenerd/jfr-query-experiments
+```
 
 Build
 -----
