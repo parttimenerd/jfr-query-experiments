@@ -3,8 +3,11 @@ package me.bechberger.jfr.duckdb;
 import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import jdk.jfr.EventType;
+import jdk.jfr.FlightRecorder;
 import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.*;
+import me.bechberger.jfr.duckdb.definitions.MacroCollection;
+import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 import me.bechberger.jfr.duckdb.wrapper.AppenderWrapper;
 import me.bechberger.jfr.duckdb.wrapper.DuckDBAppenderWrapper;
 import me.bechberger.jfr.duckdb.wrapper.NoOpAppenderWrapper;
@@ -12,6 +15,8 @@ import org.duckdb.DuckDBConnection;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -20,6 +25,8 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Stream;
+
+import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
 
 /**
  * Imports a JFR recording into a DuckDB database and creates the database tables
@@ -121,7 +128,6 @@ public class BasicParallelImporter extends AbstractImporter {
 
         private void createTable(DuckDBConnection conn) {
             try (Statement stmt = conn.createStatement()) {
-                System.err.println("Creating table " + this);
                 stmt.execute(this.toString());
             } catch (Exception e) {
                 throw new RuntimeSQLException("Failed to create table " + name, e);
@@ -238,16 +244,20 @@ public class BasicParallelImporter extends AbstractImporter {
                         });
                     }
                     case "jdk.jfr.Timespan" -> {
-                        col = new Table.Column(fieldName, "LONG", (obj, app) -> {
+                        col = new Table.Column(fieldName, "DOUBLE", (obj, app) -> {
                             var duration = getBaseObject.apply(obj).getDuration(fieldName);
-                            app.append(duration.toSecondsPart() * 1_000_000L + duration.toNanosPart() / 1_000L);
+                            if (duration.toHours() > 24 * 365 * 10) {
+                                // avoid overflow for very large durations
+                                app.append(Double.POSITIVE_INFINITY);
+                                return;
+                            }
+                            app.append(duration.toMinutes() * 60.0 + duration.toSecondsPart() + duration.toMillisPart() / 1000.0 + (duration.toNanosPart() % 1_000_000) / 1_000_000_000.0);
                         });
                     }
                     case "jdk.jfr.Unsigned", "jdk.jfr.Frequency" -> {
                         col = defaultCol; // -1 is a valid value here
                     }
                     default -> {
-                        System.out.println("Mapping long field " + descriptor.getContentType() + " as BIGINT");
                         col = defaultCol;
                     }
                 }
@@ -329,6 +339,13 @@ public class BasicParallelImporter extends AbstractImporter {
                 .orElseThrow(() -> new IllegalArgumentException("Field " + fieldName + " not found in descriptor " + descriptor));
     }
 
+    private ValueDescriptor getField(RecordedObject descriptor, String fieldName) {
+        return descriptor.getFields().stream()
+                .filter(f -> f.getName().equals(fieldName))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Field " + fieldName + " not found in descriptor " + descriptor));
+    }
+
     /**
      * Map a stack trace field to two columns:
      *
@@ -342,11 +359,34 @@ public class BasicParallelImporter extends AbstractImporter {
      */
     private List<Table.Column> createStackTraceColumns(ValueDescriptor field, Function<RecordedObject, RecordedObject> getBaseObject) {
         String fieldName = field.getName();
+        List<Table.Column> cols = new ArrayList<>();
+        cols.addAll(List.of(new Table.Column(fieldName + "$topClass", "INTEGER", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = stackTrace.getFrames().getFirst();
+                RecordedMethod topMethod = topFrame.getMethod();
+                if (topMethod == null) {
+                    app.appendNull();
+                    return;
+                }
+                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
+            }
+        }), new Table.Column(fieldName + "$topMethod", "VARCHAR", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = stackTrace.getFrames().getFirst();
+                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
+            }
+        })));
         if (options.isExcluded(Options.ExcludableItems.STACK_TRACES)) {
-            return List.of();
+            return cols;
         }
         var frames = getTableForMiscType(getField(field, "frames")).assumeCaching();
-        return List.of(new Table.Column(fieldName + "$length", "SHORT", (obj, app) -> {
+        cols.addAll(List.of(new Table.Column(fieldName + "$length", "SHORT", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
             app.append(stackTrace != null ? (short) stackTrace.getFrames().size() : 0);
         }), new Table.Column(fieldName + "$truncated", "BOOLEAN", (obj, app) -> {
@@ -376,7 +416,8 @@ public class BasicParallelImporter extends AbstractImporter {
                 }
                 app.append(arr);
             }
-        }));
+        })));
+        return cols;
     }
 
     /**
@@ -418,9 +459,26 @@ public class BasicParallelImporter extends AbstractImporter {
         return structTypeToTable.get(descriptor.getTypeName());
     }
 
+    private List<Table.Column> additionalColumns(String name, List<ValueDescriptor> fields) {
+        switch (name) {
+            case "java.lang.Class" -> {
+                // add a javaName column that contains the fully qualified name of the class
+                // in human readable form (with dots)
+                return List.of(new Table.Column("javaName", "VARCHAR", (obj, app) -> {
+                        RecordedClass cls = (RecordedClass) obj;
+                        app.append(decodeBytecodeClassName(cls.getName()));
+                    }));
+            }
+            default -> {
+                return List.of();
+            }
+        }
+    }
+
     private Table createTable(String name, List<ValueDescriptor> fields, boolean cache) {
-        List<Table.Column> columns = fields.stream()
-                .flatMap(f -> createColumnsForType(f, IDENTITY_FUNCTION).stream())
+        List<Table.Column> columns = Stream.concat(fields.stream()
+                .flatMap(f -> createColumnsForType(f, IDENTITY_FUNCTION).stream()),
+                additionalColumns(name, fields).stream())
                 .toList();
         if (columns.isEmpty()) {
             throw new IllegalArgumentException("Type " + name + " has no mappable fields, cannot create table");
@@ -442,13 +500,42 @@ public class BasicParallelImporter extends AbstractImporter {
     private void writeEventCounts() {
         try {
             Table table = new Table("Events", List.of(
-                    new Table.Column("eventType", "VARCHAR", null),
+                    new Table.Column("name", "VARCHAR", null),
                     new Table.Column("count", "INTEGER", null)
             ), connectionSupplier, null);
             for (Map.Entry<EventType, Integer> entry : eventCount.entrySet().stream().sorted(Comparator.comparing(e -> -e.getValue())).toList()) {
                 table.appender.begin();
                 table.appender.append(normalizeTableName(entry.getKey().getName()));
                 table.appender.append(entry.getValue());
+                table.appender.end();
+            }
+            Table eventIdTable = new Table("EventIDs", List.of(
+                    new Table.Column("name", "VARCHAR", null),
+                    new Table.Column("id", "LONG", null)
+            ), connectionSupplier, null);
+            Set<EventType> eventTypes = new HashSet<>(eventTypeToTable.keySet());
+            eventTypes.addAll(FlightRecorder.getFlightRecorder().getEventTypes());
+            for (EventType eventType : eventTypes) {
+                eventIdTable.appender.begin();
+                eventIdTable.appender.append(normalizeTableName(eventType.getName()));
+                eventIdTable.appender.append(eventType.getId());
+                eventIdTable.appender.end();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void writeEventLabels() {
+        try {
+            Table table = new Table("EventLabels", List.of(
+                    new Table.Column("name", "VARCHAR", null),
+                    new Table.Column("label", "VARCHAR", null)
+            ), connectionSupplier, null);
+            for (EventType eventType : eventTypeToTable.keySet()) {
+                table.appender.begin();
+                table.appender.append(normalizeTableName(eventType.getName()));
+                table.appender.append(eventType.getLabel());
                 table.appender.end();
             }
         } catch (SQLException e) {
@@ -464,11 +551,54 @@ public class BasicParallelImporter extends AbstractImporter {
             eventCount.merge(event.getEventType(), 1, Integer::sum);
         });
         writeEventCounts();
+        writeEventLabels();
         for (Table table : eventTypeToTable.values()) {
             table.close();
         }
         for (Table table : structTypeToTable.values()) {
             table.close();
+        }
+        try {
+            MacroCollection.addToDatabase(connectionSupplier.get());
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to add macros to database", e);
+        }
+        try {
+            ViewCollection.addToDatabase(connectionSupplier.get());
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to add views to database", e);
+        }
+    }
+
+    public static void createFile(Path jfrFile, Path dbFile, Options options) throws IOException, SQLException {
+        List<DuckDBConnection> conns = new ArrayList<>();
+        new BasicParallelImporter(() -> {
+            try {
+                DuckDBConnection duckDBConnection = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:" + dbFile);
+                conns.add(duckDBConnection);
+                return duckDBConnection;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, options).importRecording(jfrFile);
+        for (DuckDBConnection duckDBConnection : conns) {
+            duckDBConnection.close();
+        }
+    }
+
+    public static void importIntoConnection(Path jfrFile, DuckDBConnection connection, Options options) throws IOException, SQLException {
+        List<DuckDBConnection> conns = new ArrayList<>();
+        new BasicParallelImporter(() -> {
+            try {
+                DuckDBConnection duckDBConnection = (DuckDBConnection) connection.duplicate();
+                conns.add(duckDBConnection);
+                return duckDBConnection;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, options).importRecording(jfrFile);
+        for (DuckDBConnection duckDBConnection : conns) {
+            duckDBConnection.close();
         }
     }
 }

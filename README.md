@@ -6,7 +6,7 @@ In this branch, I try to experiment with using DuckDB as the backend for JFR que
 Usage:
 
 ```shell
-java -jar target/query.jar import recording.jfr duckdb.db -e STACK_TRACES
+java -jar target/query.jar duckdb import recording.jfr duckdb.db -e STACK_TRACES
 ```
 
 Then you can use any DuckDB client to query the `duckdb.db` file.
@@ -33,11 +33,17 @@ Lessons learned on duckdb
   - so fixed arrays instead of varlen are a good idea
 
 TODO
-- before_gc and after_gc macros
-- formatting
-  - macros for formatting timestamps, durations, bytes, frequency
-- other features from JFR view
-- JFR views
+- simple "query" command that 
+  - shows errors 
+  - does file caching /tmp (configurable)
+  - shows a table (--format csv,table,json)
+- simple "view" command that
+  - supports many jfr views
+  - if view is not known, searches in list of views
+  - by defaults shows a list of all views
+- performance comparison with Calcite based Gunnar Morling stuff
+
+Write basic blog post
 
 Old
 ===

@@ -18,7 +18,7 @@ public class Options {
          * Just have a package string
          */
         PACKAGE_HIERARCHY,
-        THREAD_GROUPS,
+        THREAD_GROUPS
     }
 
     @CommandLine.Option(names = {"-e", "--exclude"}, description = "Exclude certain items from the import, possible values: ${COMPLETION-CANDIDATES}")

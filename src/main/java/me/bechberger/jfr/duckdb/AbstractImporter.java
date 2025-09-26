@@ -1,6 +1,7 @@
 package me.bechberger.jfr.duckdb;
 
 import jdk.jfr.consumer.RecordedEvent;
+import me.bechberger.jfr.duckdb.util.JFRUtil;
 import org.duckdb.DuckDBConnection;
 
 import java.io.IOException;
@@ -35,6 +36,6 @@ public abstract class AbstractImporter {
     abstract void importRecording(Stream<RecordedEvent> eventStream) throws IOException;
 
     public String normalizeTableName(String name) {
-        return name.replaceAll("^(java|jfr|jdk)(\\.[a-z]+)*\\.", "jdk\\$");
+        return name.replaceAll("^(java|jfr|jdk)(\\.[a-z]+)*\\.", "");
     }
 }
