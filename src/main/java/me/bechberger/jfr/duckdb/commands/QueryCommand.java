@@ -44,7 +44,7 @@ public class QueryCommand implements Runnable {
         // 2. inputFile is a .jfr file and noCache is false -> create/open a .db file next to it
         // 3. inputFile is a .jfr file and noCache is true -> create a temporary in-memory database
         if (inputFile.endsWith(".db")) {
-            try (DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection(inputFile)) {
+            try (DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:" + inputFile)) {
                 runWithDB(conn);
             } catch (Exception e) {
                 throw new RuntimeException("Error opening database file: " + inputFile, e);

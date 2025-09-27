@@ -34,14 +34,11 @@ Lessons learned on duckdb
 
 TODO
 - simple "query" command that 
-  - shows errors 
-  - does file caching /tmp (configurable)
-  - shows a table (--format csv,table,json)
-- simple "view" command that
-  - supports many jfr views
-  - if view is not known, searches in list of views
-  - by defaults shows a list of all views
-- performance comparison with Calcite based Gunnar Morling stuff
+  - shows errors better
+  - implement another table view that is closer to the original JFR view
+  - investigate why allocation-by-class differs between jfr and duckdb
+- implement all views
+- performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 
 Write basic blog post
 
