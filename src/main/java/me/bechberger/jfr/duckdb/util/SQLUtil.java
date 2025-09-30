@@ -1,9 +1,12 @@
 package me.bechberger.jfr.duckdb.util;
 
+import org.duckdb.DuckDBAppender;
 import org.duckdb.DuckDBConnection;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -85,5 +88,13 @@ public class SQLUtil {
             tableNames.add(rs.getString(1));
         }
         return tableNames;
+    }
+
+    public static void append(DuckDBAppender appender, Instant value) throws SQLException {
+        appender.append(value.atOffset(java.time.ZoneOffset.UTC).toLocalDateTime());
+    }
+
+    public static void append(DuckDBAppender appender, Duration value) throws SQLException {
+        appender.append(value.toNanos() + "ns");
     }
 }

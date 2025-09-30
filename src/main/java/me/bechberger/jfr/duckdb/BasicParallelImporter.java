@@ -8,9 +8,8 @@ import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.*;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
-import me.bechberger.jfr.duckdb.wrapper.AppenderWrapper;
-import me.bechberger.jfr.duckdb.wrapper.DuckDBAppenderWrapper;
-import me.bechberger.jfr.duckdb.wrapper.NoOpAppenderWrapper;
+import me.bechberger.jfr.duckdb.util.SQLUtil;
+import org.duckdb.DuckDBAppender;
 import org.duckdb.DuckDBConnection;
 import org.jetbrains.annotations.Nullable;
 
@@ -53,7 +52,7 @@ public class BasicParallelImporter extends AbstractImporter {
          * @param appender the DuckDBAppender to append to
          * @throws SQLException if appending fails
          */
-        void appendTo(RecordedObject object, AppenderWrapper appender) throws SQLException;
+        void appendTo(RecordedObject object, DuckDBAppender appender) throws SQLException;
     }
 
     @FunctionalInterface
@@ -69,7 +68,7 @@ public class BasicParallelImporter extends AbstractImporter {
     static class Table {
         final String name;
         final List<Column> columns;
-        final AppenderWrapper appender;
+        final DuckDBAppender appender;
         private final AtomicInteger counter = new AtomicInteger(0);
         private final Long2IntMap longToIndex = new Long2IntOpenHashMap();
         private final @Nullable ObjectCacheFunction cacheFunction;
@@ -80,18 +79,8 @@ public class BasicParallelImporter extends AbstractImporter {
             var connection = connectionSupplier.get();
             this.cacheFunction = cacheFunction;
             createTable(connection);
-            // list appenders are not yet supported in the DuckDBAppender
-            // https://github.com/duckdb/duckdb-java/issues/344
-            this.appender = hasVariableLengthArrayType() ? createNoAppenderWrapper(connection, name, columns, cacheFunction != null) :
-                    new DuckDBAppenderWrapper(connection.createAppender(name), name);
-        }
-
-        static NoOpAppenderWrapper createNoAppenderWrapper(DuckDBConnection connection, String tableName, List<Column> columns, boolean caching) throws SQLException {
-            String idPrefix = caching ? "_id, " : "";
-            String sql = "INSERT INTO \"" + tableName + "\" (" + idPrefix + String.join(", ", columns.stream().map(c -> "\"" + c.name + "\"").toList()) + ") VALUES (" +
-                    String.join(", ", Collections.nCopies(columns.size() + (caching ? 1 : 0), "?")) + ");";
-            PreparedStatement ps = connection.prepareStatement(sql);
-            return new NoOpAppenderWrapper(ps);
+            // Always use DuckDBAppenderWrapper
+            this.appender = connection.createAppender(name);
         }
 
         boolean hasVariableLengthArrayType() {
@@ -168,14 +157,14 @@ public class BasicParallelImporter extends AbstractImporter {
         }
 
         private void insertIntoWithoutCaching(RecordedObject object) throws SQLException {
-            appender.begin();
+            appender.beginRow();
             if (doesUseCaching()) {
                 appender.append(counter.get());
             }
             for (Column column : columns) {
                 column.append.appendTo(object, appender);
             }
-            appender.end();
+            appender.endRow();
         }
 
         public void close() {
@@ -237,10 +226,10 @@ public class BasicParallelImporter extends AbstractImporter {
                         col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
                             var instant = getBaseObject.apply(obj).getInstant(fieldName);
                             if (instant.getEpochSecond() < 0) {
-                                app.append(Instant.EPOCH);
+                                SQLUtil.append(app, Instant.EPOCH);
                                 return;
                             }
-                            app.append(instant);
+                            SQLUtil.append(app, instant);
                         });
                     }
                     case "jdk.jfr.Timespan" -> {
@@ -557,10 +546,10 @@ public class BasicParallelImporter extends AbstractImporter {
                     new Table.Column("count", "INTEGER", null)
             ), connectionSupplier, null);
             for (Map.Entry<EventType, Integer> entry : eventCount.entrySet().stream().sorted(Comparator.comparing(e -> -e.getValue())).toList()) {
-                table.appender.begin();
+                table.appender.beginRow();
                 table.appender.append(normalizeTableName(entry.getKey().getName()));
                 table.appender.append(entry.getValue());
-                table.appender.end();
+                table.appender.endRow();
             }
             Table eventIdTable = new Table("EventIDs", List.of(
                     new Table.Column("name", "VARCHAR", null),
@@ -569,10 +558,10 @@ public class BasicParallelImporter extends AbstractImporter {
             Set<EventType> eventTypes = new HashSet<>(eventTypeToTable.keySet());
             eventTypes.addAll(FlightRecorder.getFlightRecorder().getEventTypes());
             for (EventType eventType : eventTypes) {
-                eventIdTable.appender.begin();
+                eventIdTable.appender.beginRow();
                 eventIdTable.appender.append(normalizeTableName(eventType.getName()));
                 eventIdTable.appender.append(eventType.getId());
-                eventIdTable.appender.end();
+                eventIdTable.appender.endRow();
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
@@ -586,10 +575,10 @@ public class BasicParallelImporter extends AbstractImporter {
                     new Table.Column("label", "VARCHAR", null)
             ), connectionSupplier, null);
             for (EventType eventType : eventTypeToTable.keySet()) {
-                table.appender.begin();
+                table.appender.beginRow();
                 table.appender.append(normalizeTableName(eventType.getName()));
                 table.appender.append(eventType.getLabel());
-                table.appender.end();
+                table.appender.endRow();
             }
         } catch (SQLException e) {
             throw new RuntimeException(e);
