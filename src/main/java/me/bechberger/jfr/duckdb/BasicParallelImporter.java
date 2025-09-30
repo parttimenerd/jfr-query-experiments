@@ -382,6 +382,48 @@ public class BasicParallelImporter extends AbstractImporter {
                 app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
             }
         })));
+        Function<RecordedStackTrace, RecordedFrame> getTopApplicationFrame = (stackTrace) -> {
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                return null;
+            }
+            return stackTrace.getFrames().stream().filter(f -> {
+                if (f.isJavaFrame()) {
+                    RecordedClassLoader cl = f.getMethod().getType().getClassLoader();
+                    return cl != null && !"bootstrap".equals(cl.getName());
+                }
+                return false;
+            }).findFirst().orElse(null);
+        };
+        cols.addAll(List.of(new Table.Column(fieldName + "$topApplicationClass", "INTEGER", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = getTopApplicationFrame.apply(stackTrace);
+                if (topFrame == null) {
+                    app.appendNull();
+                    return;
+                }
+                RecordedMethod topMethod = topFrame.getMethod();
+                if (topMethod == null) {
+                    app.appendNull();
+                    return;
+                }
+                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
+            }
+        }), new Table.Column(fieldName + "$topApplicationMethod", "VARCHAR", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = getTopApplicationFrame.apply(stackTrace);
+                if (topFrame == null) {
+                    app.appendNull();
+                    return;
+                }
+                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
+            }
+        })));
         if (options.isExcluded(Options.ExcludableItems.STACK_TRACES)) {
             return cols;
         }
@@ -468,6 +510,17 @@ public class BasicParallelImporter extends AbstractImporter {
                         RecordedClass cls = (RecordedClass) obj;
                         app.append(decodeBytecodeClassName(cls.getName()));
                     }));
+            }
+            case "jdk.types.ClassLoader" -> {
+                // I still want to know the class loader name
+                // but don't want a class reference cycle
+                return List.of(
+                        new Table.Column("javaName", "VARCHAR", (obj, app) -> {
+                            RecordedObject cl = getField(obj, "type").getTypeName().equals("java.lang.Class") ?
+                                    obj.getValue("type") : null;
+                            app.append(cl != null ? decodeBytecodeClassName(cl.getString("name")) : "null-bootstrap");
+                        })
+                );
             }
             default -> {
                 return List.of();

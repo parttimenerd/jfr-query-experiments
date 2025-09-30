@@ -1,5 +1,6 @@
 package me.bechberger.jfr.duckdb.definitions;
 
+import me.bechberger.jfr.duckdb.RuntimeSQLException;
 import org.duckdb.DuckDBConnection;
 
 import java.sql.ResultSet;
@@ -22,10 +23,14 @@ public class MacroCollection {
      * @param sampleUsages example usages of the macro
      * @param definition SQL definition of the macro (including "CREATE MACRO ... AS ...")
      */
-    public record Macro(String name, String description, String sampleUsages, String definition) {
+    public record Macro(String name, String description, String sampleUsages, String definition, boolean referencesNoTables) {
+
+        public Macro(String name, String description, String sampleUsages, String definition) {
+            this(name, description, sampleUsages, definition, false);
+        }
 
         public boolean isValid(Set<String> availableTables) {
-            return availableTables.containsAll(getReferencedTables(definition));
+            return referencesNoTables || availableTables.containsAll(getReferencedTables(definition));
         }
 
         public String nameWithArgs() {
@@ -134,12 +139,80 @@ public class MacroCollection {
                              WHEN abs(bytes) >= 1073741824 THEN format_decimals(abs(bytes)/1073741824.0, decimals) || ' GB'
                              WHEN abs(bytes) >= 1048576 THEN format_decimals(abs(bytes)/1048576.0, decimals) || ' MB'
                              WHEN abs(bytes) >= 1024 THEN format_decimals(abs(bytes)/1024.0, decimals) || ' KB'
-                             ELSE format_decimals(abs(bytes), decimals) || ' B'
+                             ELSE format_decimals(abs(bytes) * 1.0, decimals) || ' B'
                           END)
                       END
                     )
                     """
             ),
+
+            new Macro("format_human_duration",
+                    "Format seconds into human readable string).",
+                    "SELECT format_human_duration(60.1);",
+                    """
+                            CREATE MACRO format_human_duration(sec) AS (
+                               CASE
+                                  WHEN sec IS NULL THEN NULL
+                                  ELSE
+                                    (CASE WHEN sec < 0 THEN '-' ELSE '' END) ||
+                                    (
+                                      WITH vals AS (
+                                        SELECT
+                                          -- total nanoseconds (rounded)
+                                          CAST(ROUND(sec * 1000000000.0) AS BIGINT) AS total_ns
+                                      ),
+                                      a AS (
+                                        SELECT
+                                          ABS(total_ns) AS ns
+                                        FROM vals
+                                      ),
+                                      u AS (
+                                        SELECT
+                                          CAST(floor(ns / 86400000000000.0) AS BIGINT) AS days,
+                                          CAST(floor((ns % 86400000000000.0) / 3600000000000.0) AS BIGINT) AS hours,
+                                          CAST(floor((ns % 3600000000000.0) / 60000000000.0) AS BIGINT) AS minutes,
+                                          CAST(floor((ns % 60000000000.0) / 1000000000.0) AS BIGINT) AS seconds,
+                                          CAST(floor((ns % 1000000000.0) / 1000000.0) AS BIGINT) AS milliseconds,
+                                          CAST(floor((ns % 1000000.0) / 1000.0) AS BIGINT) AS microseconds,
+                                          ns % 1000 AS nanoseconds,
+                                          ns AS total_ns
+                                        FROM a
+                                      )
+                                      SELECT
+                                        CASE
+                                          WHEN total_ns = 0 THEN '0s'
+                                          WHEN days > 0 THEN CAST(days AS VARCHAR) || 'd' || (CASE WHEN hours > 0 THEN ' ' || CAST(hours AS VARCHAR) || 'h' ELSE '' END)
+                                          WHEN hours > 0 THEN CAST(hours AS VARCHAR) || 'h' || (CASE WHEN minutes > 0 THEN ' ' || CAST(minutes AS VARCHAR) || 'm' ELSE '' END)
+                                          WHEN minutes > 0 THEN CAST(minutes AS VARCHAR) || 'm' || (CASE WHEN seconds > 0 THEN ' ' || CAST(seconds AS VARCHAR) || 's' ELSE '' END)
+                                          WHEN seconds > 0 THEN CAST(seconds AS VARCHAR) || 's' || (CASE WHEN milliseconds > 0 THEN ' ' || CAST(milliseconds AS VARCHAR) || 'ms' ELSE '' END)
+                                          WHEN milliseconds > 0 THEN CAST(milliseconds AS VARCHAR) || 'ms' || (CASE WHEN microseconds > 0 THEN ' ' || CAST(microseconds AS VARCHAR) || 'us' ELSE '' END)
+                                          WHEN microseconds > 0 THEN CAST(microseconds AS VARCHAR) || 'us' || (CASE WHEN nanoseconds > 0 THEN ' ' || CAST(nanoseconds AS VARCHAR) || 'ns' ELSE '' END)
+                                          ELSE CAST(nanoseconds AS VARCHAR) || 'ns'
+                                        END
+                                      FROM u
+                                    )
+                                END
+                                  )
+                              """, true),
+            new Macro("format_duration",
+                    "Format seconds using SI units (s, ms, μs, ns) with specified decimal places. Does not go larger than seconds.",
+                    "SELECT format_duration(40), format_duration(0.4), format_duration(0.0004), format_duration(0.0000004);",
+                    """
+                    CREATE MACRO format_duration(seconds, decimals := 2) AS (
+                      CASE
+                        WHEN seconds IS NULL THEN NULL
+                        ELSE
+                          (CASE WHEN seconds < 0 THEN '-' ELSE '' END) ||
+                          (CASE
+                             WHEN abs(seconds) >= 1 THEN format_decimals(abs(seconds), decimals) || 's'
+                             WHEN abs(seconds) >= 0.001 THEN format_decimals(abs(seconds) * 1000.0, decimals) || 'ms'
+                             WHEN abs(seconds) >= 0.000001 THEN format_decimals(abs(seconds) * 1000000.0, decimals) || 'μs'
+                             ELSE format_decimals(abs(seconds) * 1000000000.0, decimals) || 'ns'
+                          END)
+                      END
+                    )
+                    """, true),
+
             // ==========================================
             // GARBAGE COLLECTION ANALYSIS
             // ==========================================
@@ -270,8 +343,9 @@ public class MacroCollection {
                         continue;
                     }
                     stmt.execute(macro.definition());
+                    System.out.println("Created macro " + macro.nameWithArgs() + ": " + macro.description());
                 } catch (SQLException e) {
-                    throw new SQLException("Error creating macro " + macro.name() + ": " + e.getMessage(), e);
+                    throw new RuntimeSQLException("Error creating macro " + macro.name() + ": " + e.getMessage(), e);
                 }
             }
             stmt.execute("""

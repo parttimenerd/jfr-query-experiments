@@ -37,7 +37,10 @@ TODO
   - shows errors better
   - implement another table view that is closer to the original JFR view
   - investigate why allocation-by-class differs between jfr and duckdb
+- fuzzy search for views
 - implement all views
+- test all commands
+- generate description of all tables and views in a database, that contains the relationships (like class ids)
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 
 Write basic blog post
