@@ -490,6 +490,72 @@ public class ViewsTest {
                                 2025-09-29 18:10:00.84577,146,145,149,147
                                 2025-09-29 18:10:01.85013,202,201,205,202
                                 ...
+                                """, JFRFile.METAL),
+                new ExpectedView("longest-compilations",
+                        """
+                                Start Time,Duration,Method,Compile Level,Succeeded
+                                2025-09-29 18:11:06.403713,540.73ms,org.h2.mvstore.MVMap.operate,4,true
+                                2025-09-29 18:10:15.084012,481.31ms,akka.actor.ActorCell.invoke,4,true
+                                2025-09-29 18:10:15.089539,477.36ms,akka.dispatch.Mailbox.processMailbox,4,true
+                                ...
+                                """, JFRFile.METAL),
+                new ExpectedView("longest-class-loading",
+                        """
+                                Time,Loaded Class,Load Time
+                                2025-09-29 17:44:46.210251,dotty.tools.dotc.transform.Memoize$MyState,449.81ms
+                                2025-09-29 17:44:44.917427,scala.collection.immutable.List,23.83ms
+                                ...
+                                """, JFRFile.CONTAINER),
+                new ExpectedView("system-properties",
+                        """
+                                Key,Value
+                                java.class.path,/home/i560383/code/experiments/record-all-events/renaissance.jar
+                                java.home,/home/i560383/.sdkman/candidates/java/25-sapmchn
+                                java.library.path,/usr/java/packages/lib:/usr/lib64:/lib64:/lib:/usr/lib
+                                java.vm.compressedOopsMode,Zero based
+                                java.vm.info,mixed mode\\, sharing
+                                ...
+                                """, JFRFile.METAL),
+                new ExpectedView("system-information",
+                        """
+                                Total Physical Memory Size,OS Version,CPU Type,Number of Cores,Number of Hardware Threads,Number of Sockets,CPU Description
+                                123.59 GB,ID=gardenlinux\\nNAME=""Garden Linux""\\nPRETTY_NAME=""Garden Linux 1592.13""\\nHOME_URL=""https://gardenlinux.io""\\nSUPPORT_URL=""https://github.com/gardenlinux/gardenlinux""\\nBUG_REPORT_URL=""https://github.com/gardenlinux/gardenlinux/issues""\\nGARDENLINUX_CNAME=container-amd64-1592.13\\nGARDENLINUX_FEATURES=_slim\\,base\\,container\\nGARDENLINUX_VERSION=1592.13\\nGARDENLINUX_COMMIT_ID=2b302ec2\\nGARDENLINUX_COMMIT_ID_LONG=2b302ec2abc9275921e1321074b9d6f566860fd1\\nuname: Linux 6.14.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug  7 18:32:38 UTC 2025 x86_64\\nlibc: glibc 2.39 NPTL 2.39 \\n,AMD Zen (HT) SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 SSE4A AMD64,128,128,1,Brand: AMD Ryzen Threadripper PRO 3995WX 64-Cores     \\, Vendor: AuthenticAMD\\nFamily: Zen (0x17)\\, Model: <unknown> (0x31)\\, Stepping: 0x0\\nExt. family: 0x8\\, Ext. model: 0x3\\, Type: 0x0\\, Signature: 0x00830f10\\nFeatures: ebx: 0x10800800\\, ecx: 0x7ef8320b\\, edx: 0x178bfbff\\nExt. features: eax: 0x00830f10\\, ebx: 0x40000000\\, ecx: 0x75c237ff\\, edx: 0x2fd3fbff\\nSupports: On-Chip FPU\\, Virtual Mode Extensions\\, Debugging Extensions\\, Page Size Extensions\\, Time Stamp Counter\\, Model Specific Registers\\, Physical Address Extension\\, Machine Check Exceptions\\, CMPXCHG8B Instruction\\, On-Chip APIC\\, Fast System Call\\, Memory Type Range Registers\\, Page Global Enable\\, Machine Check Architecture\\, Conditional Mov Instruction\\, Page Attribute Table\\, 36-bit Page Size Extension\\, CLFLUSH Instruction\\, Intel Architecture MMX Technology\\, Fast Float Point Save and Restore\\, Streaming SIMD extensions\\, Streaming SIMD extensions 2\\, Hyper Threading\\, Streaming SIMD Extensions 3\\, PCLMULQDQ\\, MONITOR/MWAIT instructions\\, Supplemental Streaming SIMD Extensions 3\\, Fused Multiply-Add\\, CMPXCHG16B\\, Streaming SIMD extensions 4.1\\, Streaming SIMD extensions 4.2\\, x2APIC\\, MOVBE\\, Popcount instruction\\, AESNI\\, XSAVE\\, OSXSAVE\\, AVX\\, F16C\\, LAHF/SAHF instruction support\\, Core multi-processor legacy mode\\, Advanced Bit Manipulations: LZCNT\\, SSE4A: MOVNTSS\\, MOVNTSD\\, EXTRQ\\, INSERTQ\\, Misaligned SSE mode\\, SYSCALL/SYSRET\\, Execute Disable Bit\\, RDTSCP\\, Intel 64 Architecture\\, Invariant TSC
+                                """, JFRFile.CONTAINER),
+                new ExpectedView("system-processes",
+                        """
+                                First Observed,Last Observed,PID,Command Line
+                                2025-09-29 17:44:47.331816,2025-09-29 17:44:47.331816,1,java -agentlib:jdwp=transport=dt_socket\\,server=y\\,suspend=n\\,address=5005 -javaagent:file.jfr\\,settings=/all.jfc\\,jdk.CPUTimeSample#enabled=true\\,dumponexit=true -jar /renaissance.jar dotty -r 1
+                                """, JFRFile.CONTAINER),
+                new ExpectedView("tlabs",
+                        """
+                                Inside Count,Inside Minimum Size,Inside Average Size,Inside Maximum Size,Inside Total Allocation,Outside Count,Outside Minimum Size,Outside Average Size,Outside Maximum Size,Outside Total Allocation
+                                15952,2.57 KB,30.29 KB,8.00 MB,471.82 MB,7467,56.00 B,6.53 KB,1.00 MB,47.62 MB
+                                """, JFRFile.CONTAINER),
+                new ExpectedView("thread-cpu-load",
+                        """
+                                Thread,System,User
+                                Thread-767,0.00%,0.78%
+                                Thread-732,0.00%,0.78%
+                                Thread-776,0.00%,0.78%
+                                ...
+                                """, JFRFile.METAL),
+                new ExpectedView("thread-start",
+                        """
+                                Start Time,Stack Trace,Thread,Duration
+                                2025-09-29 17:44:44.317597,,Notification Thread,infinity
+                                2025-09-29 17:44:56.102034,,DestroyJavaVM,infinity
+                                2025-09-29 17:44:56.1025,java.lang.ApplicationShutdownHooks.runHooks,Thread-2,infinity
+                                2025-09-29 17:44:56.102635,java.lang.ApplicationShutdownHooks.runHooks,JFR Shutdown Hook,infinity
+                                2025-09-29 17:44:44.317596,,main,11.78s
+                                ...
+                                """, JFRFile.CONTAINER),
+                new ExpectedView("vm-operations",
+                        """
+                                VM Operation,Average Duration,Longest Duration,Count,Total Duration
+                                G1CollectForAllocation,19.87ms,582.59ms,158,3.14s
+                                G1CollectFull,76.60ms,113.28ms,11,842.63ms
+                                G1PauseRemark,5.86ms,13.97ms,18,105.53ms
+                                ...
                                 """, JFRFile.METAL)
         );
     }

@@ -1539,6 +1539,361 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             FROM JavaThreadStatistics
                             ORDER BY startTime ASC
                             """),
+            /**
+             * [jvm.safepoints]
+             * label = "Safepoints"
+             * table = "COLUMN  'Start Time', 'Duration',
+             *                    'State Syncronization', 'Cleanup',
+             *                    'JNI Critical Threads', 'Total Threads'
+             *          SELECT    B.startTime,  DIFF([B|E].startTime),
+             *                    S.duration, C.duration,
+             *                    jniCriticalThreadCount, totalThreadCount
+             *          FROM SafepointBegin AS B, SafepointEnd AS E,
+             *               SafepointCleanup AS C, SafepointStateSynchronization AS S
+             *          GROUP BY safepointId ORDER BY B.startTime"
+             */
+            new View("safepoints", // TODO test
+                    "jvm",
+                    "Safepoints",
+                    "safepoints",
+                    """
+                            CREATE VIEW "safepoints" AS
+                            SELECT
+                                B.startTime AS "Start Time",
+                                format_duration(epoch(E.startTime - B.startTime)) AS "Duration",
+                                format_duration(S.duration) AS "State Synchronization",
+                                format_duration(C.duration) AS "Cleanup",
+                                jniCriticalThreadCount AS "JNI Critical Threads",
+                                totalThreadCount AS "Total Threads"
+                            FROM SafepointBegin B
+                            JOIN SafepointEnd E ON B.safepointId = E.safepointId
+                            LEFT JOIN SafepointStateSynchronization S ON B.safepointId = S.safepointId
+                            LEFT JOIN SafepointCleanup C ON B.safepointId = C.safepointId
+                            ORDER BY B.startTime ASC
+                            """),
+            /**
+             * [jvm.longest-compilations]
+             * label = "Longest Compilations"
+             * table = "SELECT startTime, duration AS D, method, compileLevel, succeded
+             *          FROM Compilation ORDER BY D LIMIT 25"
+             */
+            new View("longest-compilations",
+                    "jvm",
+                    "Longest Compilations",
+                    "longest-compilations",
+                    """
+                            CREATE VIEW "longest-compilations" AS
+                            SELECT
+                                startTime AS "Start Time",
+                                format_duration(duration) AS "Duration",
+                                (c.javaName || '.' || m.name) AS "Method",
+                                compileLevel AS "Compile Level",
+                                Compilation.succeded AS "Succeeded"
+                            FROM Compilation
+                            JOIN Method m ON Compilation.method = m._id
+                            JOIN Class c ON m.type = c._id
+                            ORDER BY duration DESC
+                            LIMIT 25
+                            """),
+            /**
+             * [application.longest-class-loading]
+             * label = "Longest Class Loading"
+             * table = "COLUMN 'Time', 'Loaded Class', 'Load Time'
+             *          SELECT startTime,loadedClass, duration AS D
+             *          FROM ClassLoad ORDER BY D DESC LIMIT 25"
+             */
+            new View("longest-class-loading",
+                    "application",
+                    "Longest Class Loading",
+                    "longest-class-loading",
+                    """
+                            CREATE VIEW "longest-class-loading" AS
+                            SELECT
+                                startTime AS "Time",
+                                c.javaName AS "Loaded Class",
+                                format_duration(duration) AS "Load Time"
+                            FROM ClassLoad cl
+                            JOIN Class c ON cl.loadedClass = c._id
+                            ORDER BY duration DESC
+                            LIMIT 25
+                            """),
+            /**
+             * [environment.system-properties]
+             * label = "System Properties at Startup"
+             * table = "FORMAT none, cell-height:25
+             *         SELECT key AS K, value FROM InitialSystemProperty GROUP BY key ORDER by K"
+             */
+            new View("system-properties",
+                    "environment",
+                    "System Properties at Startup",
+                    "system-properties",
+                    """
+                            CREATE VIEW "system-properties" AS
+                            SELECT
+                                key AS "Key",
+                                value AS "Value"
+                            FROM InitialSystemProperty
+                            GROUP BY key, value
+                            ORDER BY key ASC
+                            """),
+            /**
+             * [application.socket-writes-by-host]
+             * label = "Socket Writes by Host"
+             * table = "COLUMN 'Host', 'Writes', 'Total Written'
+             *          FORMAT cell-height:2, none, none
+             *          SELECT host, COUNT(*), SUM(bytesWritten) AS S FROM SocketWrite
+             *          GROUP BY host ORDER BY S DESC"
+             */
+            new View("socket-writes-by-host", // TODO test
+                    "application",
+                    "Socket Writes by Host",
+                    "socket-writes-by-host",
+                    """
+                            CREATE VIEW "socket-writes-by-host" AS
+                            SELECT
+                                host AS "Host",
+                                COUNT(*) AS "Writes",
+                                format_memory(SUM(bytesWritten)) AS "Total Written"
+                            FROM SocketWrite
+                            GROUP BY host
+                            ORDER BY SUM(bytesWritten) DESC
+                            """),
+            /**
+             * [application.socket-reads-by-host]
+             * label = "Socket Reads by Host"
+             * table = "COLUMN 'Host', 'Reads', 'Total Read'
+             *          FORMAT cell-height:2, none, none
+             *          SELECT host, COUNT(*), SUM(bytesRead) AS S FROM SocketRead
+             *          GROUP BY host ORDER BY S DESC"
+             */
+            new View("socket-reads-by-host", // TODO test
+                    "application",
+                    "Socket Reads by Host",
+                    "socket-reads-by-host",
+                    """
+                            CREATE VIEW "socket-reads-by-host" AS
+                            SELECT
+                                host AS "Host",
+                                COUNT(*) AS "Reads",
+                                format_memory(SUM(bytesRead)) AS "Total Read"
+                            FROM SocketRead
+                            GROUP BY host
+                            ORDER BY SUM(bytesRead) DESC
+                            """),
+            /**
+             * [environment.system-information]
+             * label = "System Information"
+             * form = "COLUMN 'Total Physical Memory Size', 'OS Version', 'CPU Type',
+             *                  'Number of Cores', 'Number of Hardware Threads',
+             *                  'Number of Sockets', 'CPU Description'
+             *         SELECT LAST(totalSize), LAST(osVersion), LAST(cpu),
+             *                LAST(cores), LAST(hwThreads),
+             *                LAST(sockets), LAST(description)
+             *         FROM CPUInformation, PhysicalMemory, OSInformation"
+             */
+            new View("system-information",
+                    "environment",
+                    "System Information",
+                    "system-information",
+                    """
+                            CREATE VIEW "system-information" AS
+                            SELECT
+                                format_memory(LAST(pm.totalSize)) AS "Total Physical Memory Size",
+                                LAST(osi.osVersion) AS "OS Version",
+                                LAST(cii.cpu) AS "CPU Type",
+                                LAST(cii.cores) AS "Number of Cores",
+                                LAST(cii.hwThreads) AS "Number of Hardware Threads",
+                                LAST(cii.sockets) AS "Number of Sockets",
+                                LAST(cii.description) AS "CPU Description"
+                            FROM PhysicalMemory pm, OSInformation osi, CPUInformation cii
+                            """),
+            /**
+             * [environment.system-processes]
+             * label = "System Processes"
+             * table = "COLUMN 'First Observed', 'Last Observed', 'PID', 'Command Line'
+             *          SELECT FIRST(startTime), LAST(startTime),
+             *                 FIRST(pid), FIRST(commandLine)
+             *          FROM SystemProcess GROUP BY pid"
+             */
+            new View("system-processes",
+                    "environment",
+                    "System Processes",
+                    "system-processes",
+                    """
+                            CREATE VIEW "system-processes" AS
+                            SELECT
+                                FIRST(startTime) AS "First Observed",
+                                LAST(startTime) AS "Last Observed",
+                                pid AS "PID",
+                                FIRST(commandLine) AS "Command Line"
+                            FROM SystemProcess
+                            GROUP BY pid
+                            ORDER BY FIRST(startTime) ASC
+                            """),
+            /**
+             * [jvm.tlabs]
+             * label = "Thread Local Allocation Buffers"
+             * form = "COLUMN 'Inside TLAB Count', 'Inside TLAB Minimum Size', 'Inside TLAB Average Size',
+             *                'Inside TLAB Maximum Size', 'Inside TLAB Total Allocation',
+             *                'Outside TLAB Count',  'OutSide TLAB Minimum Size', 'Outside TLAB Average Size',
+             *                'Outside TLAB Maximum Size', 'Outside TLAB Total Allocation'
+             *         SELECT  COUNT(I.tlabSize), MIN(I.tlabSize), AVG(I.tlabSize),
+             *                 MAX(I.tlabSize), SUM(I.tlabSize),
+             *                 COUNT(O.allocationSize), MIN(O.allocationSize), AVG(O.allocationSize),
+             *                 MAX(O.allocationSize), SUM(O.allocationSize)
+             *         FROM ObjectAllocationInNewTLAB AS I, ObjectAllocationOutsideTLAB AS O"
+             */
+            new View("tlabs",
+                    "jvm",
+                    "Thread Local Allocation Buffers",
+                    "tlabs",
+                    """
+                            CREATE VIEW "tlabs" AS
+                            SELECT * FROM (SELECT
+                                COUNT(tlabSize) AS "Inside Count",
+                                format_memory(MIN(tlabSize)) AS "Inside Minimum Size",
+                                format_memory(AVG(tlabSize)) AS "Inside Average Size",
+                                format_memory(MAX(tlabSize)) AS "Inside Maximum Size",
+                                format_memory(SUM(tlabSize)) AS "Inside Total Allocation"
+                            FROM ObjectAllocationInNewTLAB),
+                            (SELECT
+                                COUNT(allocationSize) AS "Outside Count",
+                                format_memory(MIN(allocationSize)) AS "Outside Minimum Size",
+                                format_memory(AVG(allocationSize)) AS "Outside Average Size",
+                                format_memory(MAX(allocationSize)) AS "Outside Maximum Size",
+                                format_memory(SUM(allocationSize)) AS "Outside Total Allocation"
+                            FROM ObjectAllocationOutsideTLAB)
+                            """),
+            /**
+             * [application.thread-allocation]
+             * label = "Thread Allocation Statistics"
+             * table = "COLUMN 'Thread', 'Allocated', 'Percentage'
+             *          FORMAT none, none, normalized
+             *          SELECT thread, LAST(allocated), LAST(allocated) AS A FROM ThreadAllocationStatistics
+             *          GROUP BY thread ORDER BY A DESC"
+             */
+            new View("thread-allocation", // TODO test
+                    "application",
+                    "Thread Allocation Statistics",
+                    "thread-allocation",
+                    """
+                            CREATE VIEW thread_allocation_statistics AS
+                            SELECT
+                                thread AS "Thread",
+                                LAST(allocated) AS "Allocated",
+                                format_percentage(
+                                    LAST(allocated) * 1.0 / SUM(LAST(allocated)) OVER ()
+                                ) AS "Percentage"
+                            FROM ThreadAllocationStatistics
+                            GROUP BY thread
+                            ORDER BY "Allocated" DESC
+                            """),
+            /**
+             * [application.thread-cpu-load]
+             * label = "Thread CPU Load"
+             * table = "COLUMN 'Thread', 'System', 'User'
+             *          SELECT eventThread AS E, LAST(system), LAST(user) AS U
+             *          FROM ThreadCPULoad GROUP BY E ORDER BY U DESC"
+             */
+            new View("thread-cpu-load",
+                    "application",
+                    "Thread CPU Load",
+                    "thread-cpu-load",
+                    """
+                            CREATE VIEW "thread-cpu-load" AS
+                            SELECT
+                                t.javaName AS "Thread",
+                                format_percentage(LAST(system)) AS "System",
+                                format_percentage(LAST(user)) AS "User"
+                            FROM ThreadCPULoad
+                            JOIN Thread t ON ThreadCPULoad.eventThread = t._id
+                            GROUP BY t.javaName
+                            ORDER BY LAST(user) DESC, LAST(system) DESC
+                            """),
+            /**
+             * [application.thread-start]
+             * label = "Platform Thread Start by Method"
+             * table = "COLUMN 'Start Time','Stack Trace', 'Thread', 'Duration'
+             *          SELECT S.startTime, S.stackTrace, eventThread, DIFF(startTime) AS D
+             *          FROM ThreadStart AS S, ThreadEnd AS E GROUP
+             *          by eventThread ORDER BY D DESC"
+             */
+            new View("thread-start",
+                    "application",
+                    "Platform Thread Start by Method",
+                    "thread-start",
+                    """
+                            CREATE VIEW "thread-start" AS
+                            SELECT
+                                CASE
+                                    WHEN j.ts_start IS NOT NULL THEN j.ts_start
+                                    ELSE NULL
+                                END AS "Start Time",
+                                CASE
+                                    WHEN c.javaName IS NULL THEN j.stackTrace$topMethod
+                                    ELSE (c.javaName || '.' || j.stackTrace$topMethod)
+                                END AS "Stack Trace",
+                                t.javaName AS "Thread",
+                                CASE
+                                    WHEN j.ts_start IS NULL THEN 'unknown'        -- only End, can't compute
+                                    WHEN j.te_start IS NULL THEN 'infinity'      -- no End → infinite
+                                    ELSE format_duration(epoch(j.te_start - j.ts_start))
+                                END AS "Duration"
+                            FROM Thread t
+                            JOIN (
+                                SELECT
+                                    COALESCE(ts.eventThread, te.eventThread) AS eventThread,
+                                    ts.startTime AS ts_start,
+                                    te.startTime AS te_start,
+                                    ts.stackTrace$topMethod,
+                                    ts.stackTrace$topClass
+                                FROM ThreadStart ts
+                                FULL OUTER JOIN ThreadEnd te\s
+                                  ON ts.eventThread = te.eventThread
+                            ) j ON j.eventThread = t._id
+                            LEFT JOIN Class c ON j.stackTrace$topClass = c._id
+                            WHERE t.javaName IS NOT NULL
+                            QUALIFY ROW_NUMBER() OVER (
+                                PARTITION BY j.eventThread
+                                ORDER BY
+                                    CASE
+                                        WHEN j.ts_start IS NOT NULL AND j.te_start IS NOT NULL\s
+                                             AND j.te_start >= j.ts_start THEN 0  -- prefer valid duration
+                                        WHEN j.ts_start IS NOT NULL AND j.te_start IS NULL THEN 1 -- infinity
+                                        WHEN j.ts_start IS NULL AND j.te_start IS NOT NULL THEN 2 -- only end
+                                        ELSE 3
+                                    END
+                            ) = 1
+                            ORDER BY
+                                CASE
+                                    WHEN j.te_start IS NULL AND j.ts_start IS NOT NULL THEN 0 -- infinity first
+                                    ELSE 1
+                                END,
+                                (j.te_start - j.ts_start) DESC NULLS LAST, j.ts_start ASC;
+                            """),
+            /**
+             * [jvm.vm-operations]
+             * label = "VM Operations"
+             * table = "COLUMN 'VM Operation', 'Average Duration', 'Longest Duration', 'Count' , 'Total Duration'
+             *          SELECT operation,  AVG(duration), MAX(duration), COUNT(*), SUM(duration)
+             *          FROM jdk.ExecuteVMOperation GROUP BY operation"
+             */
+            new View("vm-operations",
+                    "jvm",
+                    "VM Operations",
+                    "vm-operations",
+                    """
+                            CREATE VIEW "vm-operations" AS
+                            SELECT
+                                operation AS "VM Operation",
+                                format_duration(AVG(duration)) AS "Average Duration",
+                                format_duration(MAX(duration)) AS "Longest Duration",
+                                COUNT(*) AS "Count",
+                                format_duration(SUM(duration)) AS "Total Duration"
+                            FROM ExecuteVMOperation
+                            GROUP BY operation
+                            ORDER BY SUM(duration) DESC
+                            """)
     };
 
     public static List<View> getViews() {
