@@ -24,7 +24,7 @@ D SELECT * FROM CPULoad;
 ...
 ```
 Limitations:
-- Durations are stores as milliseconds.
+- Durations are stores as nanoseconds.
 - Stack traces are stored a fixed size (100 frames by default) but are slow to import, so avoid if possible.
 
 Lessons learned on duckdb
@@ -43,14 +43,8 @@ TODO
 - generate description of all tables and views in a database, that contains the relationships (like class ids)
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 
-Add support for
-```
-label = "Recording Information"
-form = "COLUMN 'Event Count', 'First Recorded Event', 'Last Recorded Event',
-                 'Length of Recorded Events', 'Dump Reason'
-        SELECT   COUNT(startTime), FIRST(startTime), LAST(startTime),
-                 DIFF(startTime), LAST(jdk.Shutdown.reason)
-```
+Features
+- supports all JFR views (most of them are tested, of view.ini till 25. September)
 
 Write basic blog post
 

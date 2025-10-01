@@ -38,7 +38,7 @@ import static me.bechberger.jfr.duckdb.util.SQLUtil.getReferencedTables;
 import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
 
 /**
- * Implement a subset of JFR views as DuckDB views.
+ * Implement all JFR views as defined in the OpenJDK (till 25. September 2025).
  */
 public class ViewCollection {
 
@@ -821,44 +821,36 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
             ),
             /**
              * [jvm.gc]
-             label = "Garbage Collections"
-             table = "COLUMN 'Start', 'GC ID', 'Type', 'Heap Before GC', 'Heap After GC', 'Longest Pause'
-             FORMAT none, none, missing:Unknown, none, none, none
-             SELECT G.startTime, gcId, [Y|O].eventType.label,
-             B.heapUsed, A.heapUsed, longestPause
-             FROM
-             GarbageCollection AS G,
-             GCHeapSummary AS B,
-             GCHeapSummary AS A,
-             OldGarbageCollection AS O,
-             YoungGarbageCollection AS Y
-             WHERE B.when = 'Before GC' AND A.when = 'After GC'
-             GROUP BY gcId ORDER BY G.startTime"
+             * label = "Garbage Collections"
+             * table = "COLUMN 'Start', 'GC ID', 'GC Name', 'Heap Before GC', 'Heap After GC', 'Longest Pause'
+             *          FORMAT none, none, missing:Unknown, none, none, none
+             *          SELECT G.startTime, gcId, G.name,
+             *                 B.heapUsed, A.heapUsed, longestPause
+             *          FROM
+             *                 GarbageCollection AS G,
+             *                 GCHeapSummary AS B,
+             *                 GCHeapSummary AS A
+             *          WHERE B.when = 'Before GC' AND A.when = 'After GC'
+             *          GROUP BY gcId ORDER BY gcId"
              */
             new View("gc",
                     "jvm",
                     "Garbage Collections",
                     "gc",
                     """
-                                CREATE VIEW "gc" AS
-                                SELECT
-                                    G.startTime AS "Start",
-                                    G.gcId AS "GC ID",
-                                    T.type AS "Type",
-                                    format_memory(B.heapUsed) AS "Heap Before GC",
-                                    format_memory(A.heapUsed) AS "Heap After GC",
-                                    format_duration(G.longestPause) AS "Longest Pause"
-                                FROM GarbageCollection G
-                                JOIN GCHeapSummary B ON G.gcId = B.gcId AND B.when = 'Before GC'
-                                JOIN GCHeapSummary A ON G.gcId = A.gcId AND A.when = 'After GC'
-                                LEFT JOIN (
-                                    SELECT gcId, 'Young Garbage Collection' AS type FROM YoungGarbageCollection
-                                    UNION ALL
-                                    SELECT gcId, 'Old Garbage Collection' AS type FROM OldGarbageCollection
-                                ) T ON G.gcId = T.gcId
-                                ORDER BY G.startTime
-                                """,
-                    "GarbageCollection", "GCHeapSummary", "YoungGarbageCollection", "OldGarbageCollection"
+                            CREATE VIEW "gc" AS
+                            SELECT
+                                G.startTime                          AS "Start",
+                                G.gcId                               AS "GC ID",
+                                COALESCE(G.name, 'Unknown')          AS "GC Name",
+                                format_memory(B.heapUsed)            AS "Heap Before GC",
+                                format_memory(A.heapUsed)            AS "Heap After GC",
+                                format_duration(G.longestPause)      AS "Longest Pause"
+                            FROM GarbageCollection G
+                            JOIN GCHeapSummary B ON G.gcId = B.gcId AND B.when = 'Before GC'
+                            JOIN GCHeapSummary A ON G.gcId = A.gcId AND A.when = 'After GC'
+                            ORDER BY G.gcId;
+                            """
             ).addUnionAlternatives(),
             /**
              * [jvm.gc-concurrent-phases]
@@ -1540,6 +1532,35 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY startTime ASC
                             """),
             /**
+             * [environment.recording]
+             * label = "Recording Information"
+             * form = "COLUMN 'Event Count', 'First Recorded Event', 'Last Recorded Event',
+             *                  'Length of Recorded Events', 'Dump Reason'
+             *         SELECT   COUNT(startTime), FIRST(startTime), LAST(startTime),
+             *                  DIFF(startTime), LAST(jdk.Shutdown.reason)
+             *         FROM *
+             *
+             *                    new Table.Column("eventCount", "INTEGER", null),
+             *                     new Table.Column("firstEvent", "TIMESTAMP", null),
+             *                     new Table.Column("lastEvent", "TIMESTAMP", null),
+             *                     new Table.Column("eventDurationSeconds", "DOUBLE", null),
+             *                     new Table.Column("dumpReason", "VARCHAR", null)
+             */
+            new View("recording",
+                    "environment",
+                    "Recording Information",
+                    "recording",
+                    """
+                            CREATE VIEW "recording" AS
+                            SELECT
+                                eventCount AS "Event Count",
+                                firstEvent AS "First Recorded Event",
+                                lastEvent AS "Last Recorded Event",
+                                format_duration(eventDurationSeconds) AS "Length of Recorded Events",
+                                dumpReason AS "Dump Reason"
+                            FROM RecordingInfo
+                            """),
+            /**
              * [jvm.safepoints]
              * label = "Safepoints"
              * table = "COLUMN  'Start Time', 'Duration',
@@ -1836,7 +1857,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 t.javaName AS "Thread",
                                 CASE
                                     WHEN j.ts_start IS NULL THEN 'unknown'        -- only End, can't compute
-                                    WHEN j.te_start IS NULL THEN 'infinity'      -- no End → infinite
+                                    WHEN j.te_start IS NULL THEN 'infinity'      -- no End -> infinite
                                     ELSE format_duration(epoch(j.te_start - j.ts_start))
                                 END AS "Duration"
                             FROM Thread t
@@ -1848,7 +1869,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                     ts.stackTrace$topMethod,
                                     ts.stackTrace$topClass
                                 FROM ThreadStart ts
-                                FULL OUTER JOIN ThreadEnd te\s
+                                FULL OUTER JOIN ThreadEnd te
                                   ON ts.eventThread = te.eventThread
                             ) j ON j.eventThread = t._id
                             LEFT JOIN Class c ON j.stackTrace$topClass = c._id
@@ -1857,7 +1878,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 PARTITION BY j.eventThread
                                 ORDER BY
                                     CASE
-                                        WHEN j.ts_start IS NOT NULL AND j.te_start IS NOT NULL\s
+                                        WHEN j.ts_start IS NOT NULL AND j.te_start IS NOT NULL
                                              AND j.te_start >= j.ts_start THEN 0  -- prefer valid duration
                                         WHEN j.ts_start IS NOT NULL AND j.te_start IS NULL THEN 1 -- infinity
                                         WHEN j.ts_start IS NULL AND j.te_start IS NOT NULL THEN 2 -- only end
@@ -1893,7 +1914,8 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             FROM ExecuteVMOperation
                             GROUP BY operation
                             ORDER BY SUM(duration) DESC
-                            """)
+                            """),
+
     };
 
     public static List<View> getViews() {

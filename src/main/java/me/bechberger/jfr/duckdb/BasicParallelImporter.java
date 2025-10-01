@@ -7,6 +7,7 @@ import jdk.jfr.FlightRecorder;
 import jdk.jfr.Timespan;
 import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.*;
+import jdk.management.jfr.RecordingInfo;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 import me.bechberger.jfr.duckdb.util.SQLUtil;
@@ -27,6 +28,7 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
+import static me.bechberger.jfr.duckdb.util.SQLUtil.append;
 
 /**
  * Imports a JFR recording into a DuckDB database and creates the database tables
@@ -177,9 +179,53 @@ public class BasicParallelImporter extends AbstractImporter {
         }
     }
 
+    private static class RecordingInfo {
+        private int eventCount;
+        private Instant firstEvent;
+        private Instant lastEvent;
+        private String dumpReason;
+        private Instant dumpTime;
+        private long eventDurationNs;
+
+        void processEvent(RecordedEvent event) {
+            eventCount++;
+            Instant startTime = event.getStartTime();
+            if (firstEvent == null || startTime.isBefore(firstEvent)) {
+                firstEvent = startTime;
+            }
+            if (lastEvent == null || startTime.isAfter(lastEvent)) {
+                lastEvent = startTime;
+            }
+            eventDurationNs += event.getDuration().toNanos();
+            if (event.getEventType().getName().equals("jdk.Shutdown") && (dumpTime == null || startTime.isAfter(dumpTime))) {
+                dumpReason = event.getString("reason");
+                dumpTime = event.getStartTime();
+            }
+        }
+
+        void store(ConnectionSupplier connectionSupplier) throws SQLException {
+            Table table = new Table("RecordingInfo", List.of(
+                    new Table.Column("eventCount", "INTEGER", null),
+                    new Table.Column("firstEvent", "TIMESTAMP", null),
+                    new Table.Column("lastEvent", "TIMESTAMP", null),
+                    new Table.Column("eventDurationSeconds", "DOUBLE", null),
+                    new Table.Column("dumpReason", "VARCHAR", null)
+            ), connectionSupplier, null);
+            table.appender.beginRow();
+            table.appender.append(eventCount);
+            append(table.appender, firstEvent);
+            append(table.appender, lastEvent);
+            table.appender.append(eventDurationNs / 1_000_000_000.0);
+            table.appender.append(dumpReason);
+            table.appender.endRow();
+            table.close();
+        }
+    }
+
     private final Map<EventType, Table> eventTypeToTable = new HashMap<>();
     private final Map<String, Table> structTypeToTable = new HashMap<>();
     private final Map<EventType, Integer> eventCount = new HashMap<>();
+    private final RecordingInfo recordingInfo = new RecordingInfo();
 
     public BasicParallelImporter(ConnectionSupplier connectionSupplier, Options options) {
         super(connectionSupplier, options);
@@ -228,10 +274,10 @@ public class BasicParallelImporter extends AbstractImporter {
                     col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
                             var instant = getBaseObject.apply(obj).getInstant(fieldName);
                             if (instant.getEpochSecond() < 0) {
-                                SQLUtil.append(app, Instant.EPOCH);
+                                append(app, Instant.EPOCH);
                                 return;
                             }
-                            SQLUtil.append(app, instant);
+                            append(app, instant);
                         });
                     } else if (descriptor.getContentType().equals("jdk.jfr.Timespan") || timespanAnnotation != null) {
                         col = new Table.Column(fieldName, "DOUBLE", (obj, app) -> {
@@ -628,6 +674,7 @@ public class BasicParallelImporter extends AbstractImporter {
             Table table = getTableForEventType(event.getEventType());
             table.insertInto(event);
             eventCount.merge(event.getEventType(), 1, Integer::sum);
+            recordingInfo.processEvent(event);
         });
         writeEventCounts();
         writeEventLabels();
@@ -641,6 +688,11 @@ public class BasicParallelImporter extends AbstractImporter {
             addMacrosAndViews(connectionSupplier.get());
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to get a connection", e);
+        }
+        try {
+            recordingInfo.store(connectionSupplier);
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to store recording info", e);
         }
     }
 

@@ -317,10 +317,10 @@ public class ViewsTest {
                                 """, JFRFile.CONTAINER)*/
                 new ExpectedView("gc",
                         """
-                                Start,GC ID,Type,Heap Before GC,Heap After GC,Longest Pause
-                                2025-09-29 18:09:58.034023,1,Young Garbage Collection,49.62 MB,8.79 MB,7.52ms
-                                2025-09-29 18:09:58.267352,2,Young Garbage Collection,40.79 MB,14.43 MB,7.37ms
-                                2025-09-29 18:09:58.35344,3,Young Garbage Collection,62.43 MB,27.98 MB,18.05ms
+                                Start,GC ID,GC Name,Heap Before GC,Heap After GC,Longest Pause
+                                2025-09-29 18:09:58.034023,1,G1New,49.62 MB,8.79 MB,7.52ms
+                                2025-09-29 18:09:58.267352,2,G1New,40.79 MB,14.43 MB,7.37ms
+                                2025-09-29 18:09:58.35344,3,G1New,62.43 MB,27.98 MB,18.05ms
                                 ...
                                 """, JFRFile.METAL),
                 new ExpectedView("gc-concurrent-phases",
@@ -491,6 +491,11 @@ public class ViewsTest {
                                 2025-09-29 18:10:01.85013,202,201,205,202
                                 ...
                                 """, JFRFile.METAL),
+                new ExpectedView("recording",
+                        """
+                                Event Count,First Recorded Event,Last Recorded Event,Length of Recorded Events,Dump Reason
+                                86335,2024-05-24 18:19:43.125774,2024-05-24 18:20:50.589537,19.18s,No remaining non-daemon Java threads
+                                """),
                 new ExpectedView("longest-compilations",
                         """
                                 Start Time,Duration,Method,Compile Level,Succeeded

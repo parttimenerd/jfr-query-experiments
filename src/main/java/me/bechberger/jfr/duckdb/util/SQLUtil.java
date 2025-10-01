@@ -92,6 +92,10 @@ public class SQLUtil {
     }
 
     public static void append(DuckDBAppender appender, Instant value) throws SQLException {
+        if (value == null) {
+            appender.appendNull();
+            return;
+        }
         appender.append(value.atOffset(OffsetTime.now().getOffset()).toLocalDateTime());
     }
 

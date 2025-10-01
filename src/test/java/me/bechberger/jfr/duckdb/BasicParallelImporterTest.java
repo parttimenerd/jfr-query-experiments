@@ -97,7 +97,7 @@ class BasicParallelImporterTest {
     @Test
     public void testEmptyRecording() throws SQLException, IOException {
         var conn = createDatabaseAndGetConnection(new Options(), () -> {});
-        assertThat(conn.request("SHOW TABLES;").build()).hasNumberOfRows(7);
+        assertThat(conn.request("SHOW TABLES;").build()).hasNumberOfRows(8);
         var table = conn.request("SELECT * FROM Events").build();
         assertThat(table).hasNumberOfRows(0);
     }
