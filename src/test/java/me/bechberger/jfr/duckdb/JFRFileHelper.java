@@ -16,7 +16,7 @@ class JFRFileHelper {
     private final Path dbFile;
     private final List<DuckDBConnection> openConnections = new ArrayList<>();
 
-    public JFRFileHelper(ViewsTest.JFRFile jfrFile) throws IOException, SQLException {
+    public JFRFileHelper(JFRFile jfrFile) throws IOException, SQLException {
         if (!Files.exists(jfrFile.getPath())) {
             throw new IOException("Test file not found: " + jfrFile.getPath().toAbsolutePath());
         }

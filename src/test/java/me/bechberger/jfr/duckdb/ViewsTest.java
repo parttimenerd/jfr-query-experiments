@@ -9,7 +9,6 @@ import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.HashMap;
 import java.util.Map;
@@ -20,23 +19,6 @@ import java.util.stream.Stream;
  * Idea: Compare the view output with expected output, uses CSV output and ignores spaces
  */
 public class ViewsTest {
-
-    enum JFRFile {
-        /** Small default.jfc recording */
-        DEFAULT("default.jfr"),
-        /** Recording from a container */
-        CONTAINER("container.jfr"),
-        /** Recording with lots of enabled events and a class modifying agent on Linux */
-        METAL("metal.jfr");
-        private final Path path;
-        JFRFile(String fileName) {
-            this.path = Path.of("jfr_files").resolve(fileName);
-        }
-
-        public Path getPath() {
-            return path;
-        }
-    }
 
     private static final Map<JFRFile, JFRFileHelper> jfrFileHelpers = new HashMap<>();
 

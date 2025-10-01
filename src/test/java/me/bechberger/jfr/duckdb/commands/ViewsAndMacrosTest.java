@@ -1,7 +1,5 @@
-package me.bechberger.jfr.duckdb;
+package me.bechberger.jfr.duckdb.commands;
 
-import me.bechberger.jfr.duckdb.commands.MacrosCommand;
-import me.bechberger.jfr.duckdb.commands.ViewsCommand;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 import org.junit.jupiter.api.Test;

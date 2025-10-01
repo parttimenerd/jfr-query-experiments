@@ -685,14 +685,14 @@ public class BasicParallelImporter extends AbstractImporter {
             table.close();
         }
         try {
-            addMacrosAndViews(connectionSupplier.get());
-        } catch (SQLException e) {
-            throw new RuntimeSQLException("Failed to get a connection", e);
-        }
-        try {
             recordingInfo.store(connectionSupplier);
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to store recording info", e);
+        }
+        try {
+            addMacrosAndViews(connectionSupplier.get());
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to get a connection", e);
         }
     }
 
