@@ -4,7 +4,6 @@ import org.assertj.db.type.AssertDbConnection;
 import org.assertj.db.type.AssertDbConnectionFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,8 +13,7 @@ import java.sql.SQLException;
 
 import static org.assertj.db.api.Assertions.assertThat;
 
-@Nested
-class MacroTest {
+public class MacroTest {
 
     private static Path tmpDBFile = null;
     private static AssertDbConnection conn;
@@ -113,7 +111,7 @@ class MacroTest {
         var table = conn.request("""
                 SELECT value,
                        format_memory(value) AS formatted,
-                       format_memory(value, decimals := 0) AS formatted_0,
+                       format_memory(value, decimals := 0) AS formatted_0
                 FROM (VALUES (1023), (1024), (1024 * 1.5), (1024 * 1024)) AS T(value)
                 ORDER BY value
                 """).build();
@@ -133,7 +131,7 @@ class MacroTest {
     public void testFormatHumanDuration() {
         var table = conn.request("""
                 SELECT value,
-                       format_human_duration(value) AS formatted,
+                       format_human_duration(value) AS formatted
                 FROM (VALUES (0.999), (1), (1.5)) AS T(value)
                 ORDER BY value
                 """).build();
@@ -150,19 +148,20 @@ class MacroTest {
     public void testFormatDuration() {
         var table = conn.request("""
                 SELECT value,
-                       format_duration(value) AS formatted,
-                FROM (VALUES (0.999), (1), (1.5), (60)) AS T(value)
+                       format_duration(value) AS formatted
+                FROM (VALUES (0.999), (1), (1.5), (60), (0)) AS T(value)
                 ORDER BY value
                 """).build();
-        assertThat(table).hasNumberOfRows(4);
+        assertThat(table).hasNumberOfRows(5);
         assertThat(table).row(0)
-                .value("formatted").isEqualTo("999.00ms")
-                .row(1)
-                .value("formatted").isEqualTo("1.00s")
-                .row(2)
-                .value("formatted").isEqualTo("1.50s")
-                .row(3)
+                .value("formatted").isEqualTo("0s");
+        assertThat(table).row(1)
+                .value("formatted").isEqualTo("999.00ms");
+        assertThat(table).row(2)
+                .value("formatted").isEqualTo("1.00s");
+        assertThat(table).row(3)
+                .value("formatted").isEqualTo("1.50s");
+        assertThat(table).row(4)
                 .value("formatted").isEqualTo("60.00s");
-
     }
 }

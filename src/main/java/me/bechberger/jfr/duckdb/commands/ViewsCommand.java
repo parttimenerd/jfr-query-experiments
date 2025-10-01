@@ -1,5 +1,6 @@
 package me.bechberger.jfr.duckdb.commands;
 
+import me.bechberger.jfr.duckdb.definitions.View;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 import picocli.CommandLine;
 
@@ -23,7 +24,7 @@ public class ViewsCommand implements Runnable {
         out.println();
         ViewCollection.getViewsByCategory().forEach((category, views) -> {
             out.println(category + ":");
-            List<ViewCollection.View> sortedViews = views.stream().sorted((v1, v2) -> v1.name().compareTo(v2.name())).toList();
+            List<View> sortedViews = views.stream().sorted((v1, v2) -> v1.name().compareTo(v2.name())).toList();
             int maxLength = sortedViews.stream().mapToInt(v -> v.name().length()).max().orElse(0) + 2;
             int columns = 3;
             int rowsNeeded = (sortedViews.size() + columns - 1) / columns; // ceiling division

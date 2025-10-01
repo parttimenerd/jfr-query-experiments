@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import jdk.jfr.EventType;
 import jdk.jfr.FlightRecorder;
+import jdk.jfr.Timespan;
 import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.*;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
@@ -16,10 +17,10 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.OffsetTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -221,9 +222,10 @@ public class BasicParallelImporter extends AbstractImporter {
                     col = defaultCol;
                     break;
                 }
-                switch (descriptor.getContentType()) {
-                    case "jdk.jfr.Timestamp" -> {
-                        col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
+                var timespanAnnotation = descriptor.getAnnotation(Timespan.class);
+                var timestampAnnotation = descriptor.getAnnotation(jdk.jfr.Timestamp.class);
+                if (descriptor.getContentType().equals("jdk.jfr.Timestamp") || timestampAnnotation != null) {
+                    col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
                             var instant = getBaseObject.apply(obj).getInstant(fieldName);
                             if (instant.getEpochSecond() < 0) {
                                 SQLUtil.append(app, Instant.EPOCH);
@@ -231,8 +233,7 @@ public class BasicParallelImporter extends AbstractImporter {
                             }
                             SQLUtil.append(app, instant);
                         });
-                    }
-                    case "jdk.jfr.Timespan" -> {
+                    } else if (descriptor.getContentType().equals("jdk.jfr.Timespan") || timespanAnnotation != null) {
                         col = new Table.Column(fieldName, "DOUBLE", (obj, app) -> {
                             var duration = getBaseObject.apply(obj).getDuration(fieldName);
                             if (duration.toHours() > 24 * 365 * 10) {
@@ -242,14 +243,9 @@ public class BasicParallelImporter extends AbstractImporter {
                             }
                             app.append(duration.toMinutes() * 60.0 + duration.toSecondsPart() + duration.toMillisPart() / 1000.0 + (duration.toNanosPart() % 1_000_000) / 1_000_000_000.0);
                         });
+                    } else{
+                    col = defaultCol;
                     }
-                    case "jdk.jfr.Unsigned", "jdk.jfr.Frequency" -> {
-                        col = defaultCol; // -1 is a valid value here
-                    }
-                    default -> {
-                        col = defaultCol;
-                    }
-                }
             }
             case "byte" -> {
                 col = new Table.Column(fieldName, "TINYINT", (obj, app) -> app.append(getBaseObject.apply(obj).getByte(fieldName)));
@@ -272,7 +268,7 @@ public class BasicParallelImporter extends AbstractImporter {
             case "float" -> {
                 col = new Table.Column(fieldName, "FLOAT", (obj, app) -> app.append(getBaseObject.apply(obj).getFloat(fieldName)));
             }
-            case "jdk.types.Timestamp", "jdk.types.TickSpan", "jdk.types.Ticks" -> {
+            case "jdk.types.Timestamp" -> {
                 col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
                     var instant = getBaseObject.apply(obj).getInstant(fieldName);
                     app.append(instant != null ? instant.toString() : null);
@@ -406,6 +402,47 @@ public class BasicParallelImporter extends AbstractImporter {
                 app.appendNull();
             } else {
                 RecordedFrame topFrame = getTopApplicationFrame.apply(stackTrace);
+                if (topFrame == null) {
+                    app.appendNull();
+                    return;
+                }
+                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
+            }
+        })));
+        Function<RecordedStackTrace, RecordedFrame> getTopNonInitFrame = (stackTrace) -> {
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                return null;
+            }
+            return stackTrace.getFrames().stream().filter(f -> {
+                if (f.isJavaFrame()) {
+                    return !"<init>".equals(f.getMethod().getName());
+                }
+                return false;
+            }).findFirst().orElse(null);
+        };
+        cols.addAll(List.of(new Table.Column(fieldName + "$topNonInitClass", "INTEGER", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = getTopNonInitFrame.apply(stackTrace);
+                if (topFrame == null) {
+                    app.appendNull();
+                    return;
+                }
+                RecordedMethod topMethod = topFrame.getMethod();
+                if (topMethod == null) {
+                    app.appendNull();
+                    return;
+                }
+                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
+            }
+        }), new Table.Column(fieldName + "$topNonInitMethod", "VARCHAR", (obj, app) -> {
+            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                app.appendNull();
+            } else {
+                RecordedFrame topFrame = getTopNonInitFrame.apply(stackTrace);
                 if (topFrame == null) {
                     app.appendNull();
                     return;
@@ -601,14 +638,9 @@ public class BasicParallelImporter extends AbstractImporter {
             table.close();
         }
         try {
-            MacroCollection.addToDatabase(connectionSupplier.get());
+            addMacrosAndViews(connectionSupplier.get());
         } catch (SQLException e) {
-            throw new RuntimeSQLException("Failed to add macros to database", e);
-        }
-        try {
-            ViewCollection.addToDatabase(connectionSupplier.get());
-        } catch (SQLException e) {
-            throw new RuntimeSQLException("Failed to add views to database", e);
+            throw new RuntimeSQLException("Failed to get a connection", e);
         }
     }
 
@@ -641,6 +673,19 @@ public class BasicParallelImporter extends AbstractImporter {
         }, options).importRecording(jfrFile);
         for (DuckDBConnection duckDBConnection : conns) {
             duckDBConnection.close();
+        }
+    }
+
+    public static void addMacrosAndViews(DuckDBConnection connection) {
+        try {
+            MacroCollection.addToDatabase(connection);
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to add macros to database", e);
+        }
+        try {
+            ViewCollection.addToDatabase(connection);
+        } catch (SQLException e) {
+            throw new RuntimeSQLException("Failed to add views to database", e);
         }
     }
 }

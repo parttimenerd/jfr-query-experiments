@@ -119,7 +119,7 @@ public class MacroCollection {
                     "SELECT format_percentage(0.123456, 2);",
                     """
                     CREATE MACRO format_percentage(num, decimals := 2) AS (
-                      format_decimals(num * 100.0, decimals) || ' %'
+                      format_decimals(num * 100.0, decimals) || '%'
                     )
                     """
             ),
@@ -195,23 +195,30 @@ public class MacroCollection {
                                   )
                               """, true),
             new Macro("format_duration",
-                    "Format seconds using SI units (s, ms, μs, ns) with specified decimal places. Does not go larger than seconds.",
+                    "Format seconds using SI units (s, ms, us, ns) with specified decimal places. Does not go larger than seconds.",
                     "SELECT format_duration(40), format_duration(0.4), format_duration(0.0004), format_duration(0.0000004);",
                     """
                     CREATE MACRO format_duration(seconds, decimals := 2) AS (
                       CASE
                         WHEN seconds IS NULL THEN NULL
+                        WHEN abs(seconds) > 1000.0 * 365 * 24 * 3600 THEN NULL  -- more than 1000 years
                         ELSE
                           (CASE WHEN seconds < 0 THEN '-' ELSE '' END) ||
                           (CASE
-                             WHEN abs(seconds) >= 1 THEN format_decimals(abs(seconds), decimals) || 's'
+                             WHEN seconds = 0 THEN '0s'
+                             WHEN abs(seconds) >= 1 THEN format_decimals(abs(seconds) * 1.0, decimals) || 's'
                              WHEN abs(seconds) >= 0.001 THEN format_decimals(abs(seconds) * 1000.0, decimals) || 'ms'
-                             WHEN abs(seconds) >= 0.000001 THEN format_decimals(abs(seconds) * 1000000.0, decimals) || 'μs'
+                             WHEN abs(seconds) >= 0.000001 THEN format_decimals(abs(seconds) * 1000000.0, decimals) || 'us'
                              ELSE format_decimals(abs(seconds) * 1000000000.0, decimals) || 'ns'
                           END)
                       END
                     )
                     """, true),
+            new Macro("format_hex",
+                    "Format integer as hex string (with 0x prefix).",
+                    "SELECT format_hex(255), format_hex(-255);",
+                    "CREATE MACRO format_hex(i) AS format('0x{:x}', i)"
+            ),
 
             // ==========================================
             // GARBAGE COLLECTION ANALYSIS
@@ -332,6 +339,17 @@ public class MacroCollection {
 
     public static void addToDatabase(DuckDBConnection connection) throws SQLException {
         Set<String> tableNames = getTableNames(connection);
+        // remove all existing macros
+        try (ResultSet rs = connection.createStatement().executeQuery("SELECT function_name FROM duckdb_functions() WHERE function_type = 'macro' and not internal")) {
+            while (rs.next()) {
+                String macroName = rs.getString(1);
+                try (var dropStmt = connection.createStatement()) {
+                    dropStmt.execute("DROP MACRO IF EXISTS " + macroName + ";");
+                } catch (SQLException e) {
+                    throw new RuntimeSQLException("Error dropping existing macro " + macroName + ": " + e.getMessage(), e);
+                }
+            }
+        }
         try (var stmt = connection.createStatement()) {
             for (Macro macro : macros) {
                 try {

@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetTime;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -91,7 +92,7 @@ public class SQLUtil {
     }
 
     public static void append(DuckDBAppender appender, Instant value) throws SQLException {
-        appender.append(value.atOffset(java.time.ZoneOffset.UTC).toLocalDateTime());
+        appender.append(value.atOffset(OffsetTime.now().getOffset()).toLocalDateTime());
     }
 
     public static void append(DuckDBAppender appender, Duration value) throws SQLException {

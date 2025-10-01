@@ -632,8 +632,8 @@ function parseValueWithUnit(value) {
         return pureNumber;
     }
 
-    // Handle time units (ns, μs, ms, s, m, h, d)
-    const timeMatch = value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
+    // Handle time units (ns, us, ms, s, m, h, d)
+    const timeMatch = value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|us|ms|s|m|h|d)$/i);
     if (timeMatch) {
         const num = parseFloat(timeMatch[1]);
         const unit = timeMatch[2].toLowerCase();
@@ -641,7 +641,7 @@ function parseValueWithUnit(value) {
         // Convert to consistent unit (milliseconds)
         switch (unit) {
             case 'ns': return num / 1000000;
-            case 'μs': return num / 1000;
+            case 'us': return num / 1000;
             case 'ms': return num;
             case 's': return num * 1000;
             case 'm': return num * 60000;
@@ -1216,7 +1216,7 @@ function detectColumnType(values) {
     const sample = values.filter(v => v && v !== '-').slice(0, 10);
 
     for (const value of sample) {
-        if (value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i)) {
+        if (value.match(/^(\d+(?:[.,]\d+)?)\s*(ns|us|ms|s|m|h|d)$/i)) {
             return 'time';
         }
         if (value.match(/^(\d+(?:[.,]\d+)?)\s*(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$/i)) {
@@ -1275,7 +1275,7 @@ function parseTimeValue(timeStr) {
     }
 
     // Relative time format: 12.345s, 1.2ms, etc.
-    const relativeMatch = timeStr.match(/^(\d+(?:[.,]\d+)?)\s*(ns|μs|ms|s|m|h|d)$/i);
+    const relativeMatch = timeStr.match(/^(\d+(?:[.,]\d+)?)\s*(ns|us|ms|s|m|h|d)$/i);
     if (relativeMatch) {
         const num = parseFloat(relativeMatch[1]);
         const unit = relativeMatch[2].toLowerCase();
@@ -1283,7 +1283,7 @@ function parseTimeValue(timeStr) {
         let milliseconds = 0;
         switch (unit) {
             case 'ns': milliseconds = num / 1000000; break;
-            case 'μs': milliseconds = num / 1000; break;
+            case 'us': milliseconds = num / 1000; break;
             case 'ms': milliseconds = num; break;
             case 's': milliseconds = num * 1000; break;
             case 'm': milliseconds = num * 60000; break;

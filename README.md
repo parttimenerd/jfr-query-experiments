@@ -43,6 +43,15 @@ TODO
 - generate description of all tables and views in a database, that contains the relationships (like class ids)
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 
+Add support for
+```
+label = "Recording Information"
+form = "COLUMN 'Event Count', 'First Recorded Event', 'Last Recorded Event',
+                 'Length of Recorded Events', 'Dump Reason'
+        SELECT   COUNT(startTime), FIRST(startTime), LAST(startTime),
+                 DIFF(startTime), LAST(jdk.Shutdown.reason)
+```
+
 Write basic blog post
 
 Old

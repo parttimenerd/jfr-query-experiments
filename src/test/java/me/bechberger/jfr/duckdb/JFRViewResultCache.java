@@ -1,5 +1,6 @@
 package me.bechberger.jfr.duckdb;
 
+import me.bechberger.jfr.duckdb.definitions.View;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 
 import java.io.FileInputStream;
@@ -30,7 +31,7 @@ public class JFRViewResultCache {
     }
 
     public String execute(String viewName) throws IOException, InterruptedException {
-        ViewCollection.View view = ViewCollection.getView(viewName);
+        View view = ViewCollection.getView(viewName);
         if (view == null) {
             throw new IllegalArgumentException("View not found: " + viewName);
         }
@@ -41,14 +42,37 @@ public class JFRViewResultCache {
             return cached;
         }
 
-        Process process = Runtime.getRuntime().exec(new String[]{
+        System.out.println("Executing jfr view for the first time, caching result: jfr view " + viewName + " " + jfrFile.toAbsolutePath());
+
+        // Use ProcessBuilder for better process management
+        ProcessBuilder processBuilder = new ProcessBuilder(
                 "jfr", "view", view.relatedJFRView(), jfrFile.toAbsolutePath().toString()
-        });
+        );
+
+        Process process = processBuilder.start();
+
+        // Read stdout while the process is running
+        StringBuilder outputBuilder = new StringBuilder();
+        try (var reader = process.inputReader()) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                outputBuilder.append(line).append("\n");
+            }
+        }
+
         int exit = process.waitFor();
         if (exit != 0) {
-            throw new IOException("Error executing jfr view command, exit code: " + exit);
+            // Also read stderr for error information
+            String errorOutput;
+            try (var errorReader = process.errorReader()) {
+                errorOutput = errorReader.lines()
+                        .reduce("", (a, b) -> a + b + "\n");
+            }
+            throw new IOException("Error executing jfr view command, exit code: " + exit +
+                    ", stderr: " + errorOutput);
         }
-        String result = new String(process.getInputStream().readAllBytes());
+
+        String result = outputBuilder.toString();
 
         props.setProperty(key, result);
         try (FileOutputStream out = new FileOutputStream(cachePath.toFile())) {
