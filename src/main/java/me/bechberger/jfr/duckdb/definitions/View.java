@@ -3,23 +3,14 @@ package me.bechberger.jfr.duckdb.definitions;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-
-import static me.bechberger.jfr.duckdb.util.SQLUtil.getReferencedTables;
+import java.util.stream.Stream;
 
 public final class View {
 
-    record Alternative(String query, String... referencedTables) {
-
-        public List<String> properlyReferencedTables() {
-            if (referencedTables != null && referencedTables.length > 0) {
-                return Arrays.asList(referencedTables);
-            } else {
-                return getReferencedTables(query).stream().toList();
-            }
-        }
+    record Alternative(String query, List<String> referencedTables) {
 
         public boolean isValid(Set<String> existingTables) {
-            return existingTables.containsAll(properlyReferencedTables());
+            return existingTables.containsAll(referencedTables);
         }
 
     }
@@ -29,33 +20,26 @@ public final class View {
     private final String label;
     private final @Nullable String relatedJFRView;
     private final String definition;
-    private final String[] referencedTables;
+    private final List<String> referencedTables;
     private final List<Alternative> alternatives = new ArrayList<>();
     private boolean hasUnionAlternatives = false;
 
-    public View(String name, String category, String label, @Nullable String relatedJFRView, String definition, String... referencedTables) {
+    public View(String name, String category, String label, @Nullable String relatedJFRView, String definition, String referencedTable, String... referencedTables) {
         this.name = name;
         this.category = category;
         this.label = label;
         this.relatedJFRView = relatedJFRView;
         this.definition = definition;
-        this.referencedTables = referencedTables;
+        this.referencedTables = Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables))
+                .toList();
     }
 
     String viewName() {
         return "jfr$" + name;
     }
 
-    public List<String> properlyReferencedTables() {
-        if (referencedTables != null && referencedTables.length > 0) {
-            return Arrays.asList(referencedTables);
-        } else {
-            return getReferencedTables(definition).stream().toList();
-        }
-    }
-
     public boolean isValid(Set<String> existingTables) {
-        return existingTables.containsAll(properlyReferencedTables());
+        return existingTables.containsAll(referencedTables);
     }
 
     /**
@@ -71,7 +55,7 @@ public final class View {
         // return the first alternative that is valid, preferring those with more referenced tables
         var alt = alternatives.stream()
                 .filter(a -> a.isValid(existingTables))
-                .sorted((a1, a2) -> Integer.compare(a2.properlyReferencedTables().size(), a1.properlyReferencedTables().size()))
+                .sorted((a1, a2) -> Integer.compare(a2.referencedTables.size(), a1.referencedTables.size()))
                 .map(Alternative::query)
                 .findFirst()
                 .orElse(null);
@@ -267,7 +251,7 @@ public final class View {
         return definition;
     }
 
-    public String[] referencedTables() {
+    public List<String> referencedTables() {
         return referencedTables;
     }
 
@@ -300,8 +284,8 @@ public final class View {
                "referencedTables=" + referencedTables + ']';
     }
 
-    public View addAlternative(String query, String... referencedTables) {
-        alternatives.add(new Alternative(query, referencedTables));
+    public View addAlternative(String query, String referencedTable, String... referencedTables) {
+        alternatives.add(new Alternative(query, Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables)).toList()));
         return this;
     }
 

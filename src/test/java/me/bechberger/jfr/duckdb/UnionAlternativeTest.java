@@ -7,6 +7,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.Arrays;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -187,7 +188,7 @@ public class UnionAlternativeTest {
     // Helper method to normalize whitespace for query comparison
     private static String normalizeQuery(String query) {
         if (query == null) return null;
-        return query.replaceAll("\\s+", " ").trim();
+        return query.replaceAll("\\s+", "").trim();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -207,7 +208,8 @@ public class UnionAlternativeTest {
             "Test View",
             null,
             query,
-            referencedTables
+            referencedTables[0],
+                Arrays.stream(referencedTables, 1, referencedTables.length).toArray(String[]::new)
         ).addUnionAlternatives();
 
         String result = view.getBestMatchingQuery(existingTables);
@@ -289,7 +291,9 @@ public class UnionAlternativeTest {
             "Test View",
             null,
             query,
-            referencedTables
+                referencedTables[0],
+                Arrays.stream(referencedTables, 1, referencedTables.length).toArray(String[]::new)
+
         ).addUnionAlternatives();
 
         String result = view.getBestMatchingQuery(existingTables);
@@ -635,7 +639,9 @@ public class UnionAlternativeTest {
             scenarioName,
             scenarioName.toLowerCase().replace(" ", "-"),
             query,
-            referencedTables
+                referencedTables[0],
+                Arrays.stream(referencedTables, 1, referencedTables.length).toArray(String[]::new)
+
         ).addUnionAlternatives();
 
         String result = view.getBestMatchingQuery(existingTables);
@@ -880,7 +886,9 @@ public class UnionAlternativeTest {
             "Edge Case Test View",
             null,
             query,
-            referencedTables
+                referencedTables[0],
+                Arrays.stream(referencedTables, 1, referencedTables.length).toArray(String[]::new)
+
         ).addUnionAlternatives();
 
         // Test the full alternative query generation

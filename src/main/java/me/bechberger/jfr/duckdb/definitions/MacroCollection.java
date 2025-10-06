@@ -5,13 +5,11 @@ import org.duckdb.DuckDBConnection;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import static me.bechberger.jfr.duckdb.util.SQLUtil.getReferencedTables;
 import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
 
 public class MacroCollection {
@@ -23,14 +21,10 @@ public class MacroCollection {
      * @param sampleUsages example usages of the macro
      * @param definition SQL definition of the macro (including "CREATE MACRO ... AS ...")
      */
-    public record Macro(String name, String description, String sampleUsages, String definition, boolean referencesNoTables) {
-
-        public Macro(String name, String description, String sampleUsages, String definition) {
-            this(name, description, sampleUsages, definition, false);
-        }
+    public record Macro(String name, String description, String sampleUsages, String definition, String... referencedTables) {
 
         public boolean isValid(Set<String> availableTables) {
-            return referencesNoTables || availableTables.containsAll(getReferencedTables(definition));
+            return availableTables.containsAll(List.of(referencedTables));
         }
 
         public String nameWithArgs() {
@@ -193,7 +187,7 @@ public class MacroCollection {
                                     )
                                 END
                                   )
-                              """, true),
+                              """),
             new Macro("format_duration",
                     "Format seconds using SI units (s, ms, us, ns) with specified decimal places. Does not go larger than seconds.",
                     "SELECT format_duration(40), format_duration(0.4), format_duration(0.0004), format_duration(0.0000004);",
@@ -213,7 +207,7 @@ public class MacroCollection {
                           END)
                       END
                     )
-                    """, true),
+                    """),
             new Macro("format_hex",
                     "Format integer as hex string (with 0x prefix).",
                     "SELECT format_hex(255), format_hex(-255);",
@@ -239,7 +233,8 @@ public class MacroCollection {
                         -1
                       )
                     )
-                    """
+                    """,
+                    "GarbageCollection"
             ),
             new Macro(
                     "after_gc",
@@ -256,7 +251,8 @@ public class MacroCollection {
                         -1
                       )
                     )
-                    """
+                    """,
+                    "GarbageCollection"
             ),
             new Macro(
                     "duration_since_last_gc",
@@ -273,7 +269,8 @@ public class MacroCollection {
                         -1
                       )
                     )
-                    """
+                    """,
+                    "GarbageCollection"
             ),
             new Macro(
                     "HEAP_BEFORE_GC",
@@ -286,7 +283,8 @@ public class MacroCollection {
                        WHERE gcId = gc_id AND "when" = 'Before GC'
                        LIMIT 1)
                     )
-                    """
+                    """,
+                    "GCHeapSummary"
             ),
             new Macro(
                     "HEAP_AFTER_GC",
@@ -295,11 +293,12 @@ public class MacroCollection {
                     """
                     CREATE MACRO HEAP_AFTER_GC(gc_id) AS (
                       (SELECT heapUsed
-                       FROM GCHeapSummary 
+                       FROM GCHeapSummary
                        WHERE gcId = gc_id AND "when" = 'After GC'
                        LIMIT 1)
                     )
-                    """
+                    """,
+                    "GCHeapSummary"
             ),
             new Macro(
                     "GC_TYPE",
@@ -313,7 +312,8 @@ public class MacroCollection {
                         'Unknown'
                       )
                     )
-                    """
+                    """,
+                    "YoungGarbageCollection", "OldGarbageCollection"
             ),
 
             // ==========================================
@@ -324,12 +324,14 @@ public class MacroCollection {
                     "EVENT_TYPE_LABEL",
                     "Get the event label for the event table name.",
                     "SELECT EVENT_TYPE_LABEL('GarbageCollection');",
-                    "CREATE MACRO EVENT_TYPE_LABEL(et) AS (SELECT label FROM EventLabels WHERE name = et LIMIT 1)"
+                    "CREATE MACRO EVENT_TYPE_LABEL(et) AS (SELECT label FROM EventLabels WHERE name = et LIMIT 1)",
+                    "EventLabels"
             ),
             new Macro("EVENT_NAME_FOR_ID",
                     "Get the event table name for the event ID.",
                     "SELECT EVENT_NAME_FOR_ID(1);",
-                    "CREATE MACRO EVENT_NAME_FOR_ID(_id) AS (SELECT name FROM EventIDs event WHERE id = _id LIMIT 1)"
+                    "CREATE MACRO EVENT_NAME_FOR_ID(_id) AS (SELECT name FROM EventIDs event WHERE id = _id LIMIT 1)",
+                    "EventIDs"
             )
     };
 
@@ -355,7 +357,7 @@ public class MacroCollection {
                 try {
                     if (!macro.isValid(tableNames)) {
                         System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
-                                getReferencedTables(macro.definition()).stream()
+                                           Arrays.stream(macro.referencedTables)
                                         .filter(t -> !tableNames.contains(t))
                                         .collect(Collectors.joining(", ")));
                         continue;

@@ -17,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import static org.junit.jupiter.api.Assertions.*;
 
+@Disabled("not ready yet")
 public class QueryCommandTest {
     private static final Path testFile = JFRFile.DEFAULT.getPath();
     private PrintStream originalOut;

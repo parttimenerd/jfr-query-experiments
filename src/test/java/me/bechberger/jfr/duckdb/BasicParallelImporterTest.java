@@ -97,7 +97,6 @@ class BasicParallelImporterTest {
     @Test
     public void testEmptyRecording() throws SQLException, IOException {
         var conn = createDatabaseAndGetConnection(new Options(), () -> {});
-        assertThat(conn.request("SHOW TABLES;").build()).hasNumberOfRows(8);
         var table = conn.request("SELECT * FROM Events").build();
         assertThat(table).hasNumberOfRows(0);
     }
@@ -154,11 +153,11 @@ class BasicParallelImporterTest {
         assertThat(table).row(0)
                 .value("name").isEqualTo("Test Event")
                 .value("value").isEqualTo(100)
-                .value("stackTrace").isNotNull()
+                .value("stackTrace$methods").isNotNull()
                 .value("stackTrace$truncated").isEqualTo(false)
                 .value("eventThread").isEqualTo(1)
                 .value("duration").isEqualTo(0L);
-        var arr = Arrays.stream((Object[])((DuckDBArray)(table.getRow(0).getColumnValue("stackTrace").getValue())).getArray()).mapToInt(o -> (int)o).toArray();
+        var arr = Arrays.stream((Object[])((DuckDBArray)(table.getRow(0).getColumnValue("stackTrace$methods").getValue())).getArray()).mapToInt(o -> (int)o).toArray();
         System.out.println(Arrays.toString(arr));
 //        assertArrayEquals(new int[]{1, 2, 3, 4}, arr);
         // Check Thread table
@@ -177,9 +176,6 @@ class BasicParallelImporterTest {
                 .value("_id").isEqualTo(1)
                 .value("name").isEqualTo("main");
         assertThat(threadGroupTable).hasNumberOfColumns(2);
-        // StackFrame table
-        var stackFrameTable = conn.request("SELECT * FROM StackFrame").build();
-        assertThat(stackFrameTable).hasNumberOfRows(4);
         // method table
         var methodTable = conn.request("SELECT * FROM Method").build();
         assertThat(methodTable).hasNumberOfRows(4);

@@ -1,7 +1,5 @@
 package me.bechberger.jfr.duckdb;
 
-import it.unimi.dsi.fastutil.longs.Long2IntMap;
-import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import jdk.jfr.EventType;
 import jdk.jfr.FlightRecorder;
 import jdk.jfr.Timespan;
@@ -16,6 +14,7 @@ import org.duckdb.DuckDBConnection;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -24,6 +23,7 @@ import java.time.Instant;
 import java.time.OffsetTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -32,15 +32,6 @@ import static me.bechberger.jfr.duckdb.util.SQLUtil.append;
 
 /**
  * Imports a JFR recording into a DuckDB database and creates the database tables
- * <p/>
- * Creates one table per event type and one table per struct type (if needed).
- * Uses one connection per table type to use appenders in parallel.
- * <p/>
- * Does no advanced checking and reads the recording sequentially once. Doesn't store the events.
- * <p/>
- * <b>Limitations: Does not support non StackFrame arrays and breaks recursive objects</b>
- * <p/>
- * Durations are stored as long (microseconds)
  */
 public class BasicParallelImporter extends AbstractImporter {
 
@@ -58,13 +49,6 @@ public class BasicParallelImporter extends AbstractImporter {
         void appendTo(RecordedObject object, DuckDBAppender appender) throws SQLException;
     }
 
-    @FunctionalInterface
-    interface ObjectCacheFunction {
-        ObjectCacheFunction IDENTITY_BASED = System::identityHashCode;
-
-        long getCachedId(RecordedObject object);
-    }
-
     /**
      * Represents a table in the database with its columns and an appender to insert data into it
      */
@@ -73,21 +57,68 @@ public class BasicParallelImporter extends AbstractImporter {
         final List<Column> columns;
         final DuckDBAppender appender;
         private final AtomicInteger counter = new AtomicInteger(0);
-        private final Long2IntMap longToIndex = new Long2IntOpenHashMap();
-        private final @Nullable ObjectCacheFunction cacheFunction;
 
-        Table(String name, List<Column> columns, ConnectionSupplier connectionSupplier, @Nullable ObjectCacheFunction cacheFunction) throws SQLException {
+        /**
+         * Wrapper for {@link RecordedObject} that implements {@link Object#hashCode()} and {@link Object#equals(Object)}
+         * properly
+         * <p>
+         * Problem: There is no hashCode/equals implementation for RecordedObject that takes the actual content
+         * into account. There the caching doesn't work properly.
+         * <p>
+         * Downside of this approach: Users need to pass <code>--add-opens jdk.jfr/jdk.jfr.consumer=ALL-UNNAMED</code>
+         * to the JVM to allow access to the package private fields.
+         * @param object
+         */
+        record Wrapper(RecordedObject object) {
+
+            private static final Field objectContextField;
+            private static final Field objectsField;
+
+            static {
+                try {
+                    objectContextField = RecordedObject.class.getDeclaredField("objectContext");
+                    objectContextField.setAccessible(true);
+                    objectsField = RecordedObject.class.getDeclaredField("objects");
+                    objectsField.setAccessible(true);
+                } catch (NoSuchFieldException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public int hashCode() {
+                try {
+                    return objectContextField.get(object).hashCode() ^ objectsField.get(object).hashCode();
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                try {
+                    return this == obj || (obj instanceof Wrapper other && (
+                            (objectContextField.get(object).equals(objectContextField.get(other.object)) &&
+                            objectsField.get(object).equals(objectsField.get(other.object)))
+                            || object.equals(other.object)
+                    ));
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+
+        private final HashMap<Wrapper, Integer> objToIndex = new HashMap<>();
+        private final boolean cache;
+
+        Table(String name, List<Column> columns, ConnectionSupplier connectionSupplier, boolean cache) throws SQLException {
             this.name = name;
             this.columns = columns;
             var connection = connectionSupplier.get();
-            this.cacheFunction = cacheFunction;
+            this.cache = cache;
             createTable(connection);
             // Always use DuckDBAppenderWrapper
             this.appender = connection.createAppender(name);
-        }
-
-        boolean hasVariableLengthArrayType() {
-            return columns.stream().anyMatch(Column::hasVariableLengthArrayType);
         }
 
         /**
@@ -98,6 +129,7 @@ public class BasicParallelImporter extends AbstractImporter {
          * @param append a function that appends the value of the field to the DuckDBAppender
          */
         record Column(String name, String type, AppendFunction append) {
+
             @Override
             public String toString() {
                 return "\"" + name + "\" " + type;
@@ -105,10 +137,6 @@ public class BasicParallelImporter extends AbstractImporter {
 
             public Column prependName(String prefix) {
                 return new Column(prefix + name, type, append);
-            }
-
-            boolean hasVariableLengthArrayType() {
-                return type.endsWith("[]");
             }
         }
 
@@ -132,13 +160,16 @@ public class BasicParallelImporter extends AbstractImporter {
          * @return index of the inserted object (or the cached index if already present)
          */
         public int insertInto(RecordedObject object) {
-            if (cacheFunction != null) {
-                long cachedId = cacheFunction.getCachedId(object);
-                if (longToIndex.containsKey(cachedId)) {
-                    return longToIndex.get(cachedId);
-                }
-                int index = counter.incrementAndGet();
-                longToIndex.put(cachedId, index);
+            if (cache) {
+                return objToIndex.computeIfAbsent(new Wrapper(object), (obj) -> {
+                    int id = counter.incrementAndGet();
+                    try {
+                        insertIntoWithoutCaching(object);
+                    } catch (SQLException e) {
+                        throw new RuntimeSQLException("Failed to insert into table " + name + " at row " + id, e);
+                    }
+                    return id;
+                });
             }
             try {
                 insertIntoWithoutCaching(object);
@@ -149,7 +180,7 @@ public class BasicParallelImporter extends AbstractImporter {
         }
 
         public boolean doesUseCaching() {
-            return cacheFunction != null;
+            return cache;
         }
 
         public Table assumeCaching() {
@@ -162,10 +193,18 @@ public class BasicParallelImporter extends AbstractImporter {
         private void insertIntoWithoutCaching(RecordedObject object) throws SQLException {
             appender.beginRow();
             if (doesUseCaching()) {
-                appender.append(counter.get());
+                try {
+                    appender.append(counter.get());
+                } catch (SQLException e) {
+                    throw new RuntimeSQLException("Failed to append ID for table " + name + " at row " + counter.get(), e);
+                }
             }
             for (Column column : columns) {
-                column.append.appendTo(object, appender);
+                try {
+                    column.append.appendTo(object, appender);
+                } catch (SQLException e) {
+                    throw new RuntimeSQLException("Failed to append column " + column.name + " for table " + name + " at row " + counter.get(), e);
+                }
             }
             appender.endRow();
         }
@@ -210,7 +249,7 @@ public class BasicParallelImporter extends AbstractImporter {
                     new Table.Column("lastEvent", "TIMESTAMP", null),
                     new Table.Column("eventDurationSeconds", "DOUBLE", null),
                     new Table.Column("dumpReason", "VARCHAR", null)
-            ), connectionSupplier, null);
+            ), connectionSupplier, false);
             table.appender.beginRow();
             table.appender.append(eventCount);
             append(table.appender, firstEvent);
@@ -323,22 +362,7 @@ public class BasicParallelImporter extends AbstractImporter {
             case "jdk.types.StackTrace" -> {
                 return createStackTraceColumns(descriptor, getBaseObject);
             }
-            case "java.lang.ThreadGroup" -> {
-                if (options.isExcluded(Options.ExcludableItems.THREAD_GROUPS)) {
-                    return List.of();
-                }
-                return createStructColumns(descriptor, getBaseObject);
-            }
-            case "jdk.types.Module" -> {
-                if (options.isExcluded(Options.ExcludableItems.MODULES)) {
-                    return List.of();
-                }
-                return createStructColumns(descriptor, getBaseObject);
-            }
-            case "jdk.types.ClassLoader" -> {
-                if (options.isExcluded(Options.ExcludableItems.CLASS_LOADERS)) {
-                    return List.of();
-                }
+            case "java.lang.ThreadGroup", "jdk.types.Module", "jdk.types.ClassLoader" -> {
                 return createStructColumns(descriptor, getBaseObject);
             }
             case "jdk.types.Package" -> {
@@ -391,32 +415,26 @@ public class BasicParallelImporter extends AbstractImporter {
     private List<Table.Column> createStackTraceColumns(ValueDescriptor field, Function<RecordedObject, RecordedObject> getBaseObject) {
         String fieldName = field.getName();
         List<Table.Column> cols = new ArrayList<>();
-        cols.addAll(List.of(new Table.Column(fieldName + "$topClass", "INTEGER", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = stackTrace.getFrames().getFirst();
-                RecordedMethod topMethod = topFrame.getMethod();
-                if (topMethod == null) {
-                    app.appendNull();
+        BiConsumer<Function<RecordedStackTrace, RecordedFrame>, String> addFrameColumn = (frameObtainer, name) -> {
+            cols.add(new Table.Column(fieldName + "$" + name, "INTEGER", (obj, app) -> {
+                RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
+                if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
+                    app.append(0);
                     return;
                 }
-                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
-            }
-        }), new Table.Column(fieldName + "$topMethod", "VARCHAR", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = stackTrace.getFrames().getFirst();
-                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
-            }
-        })));
-        Function<RecordedStackTrace, RecordedFrame> getTopApplicationFrame = (stackTrace) -> {
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                return null;
-            }
+                RecordedFrame frame = frameObtainer.apply(stackTrace);
+                if (frame == null) {
+                    app.append(0);
+                } else {
+                    int id = getTableForMiscType(getField(frame, "method")).assumeCaching().insertInto(frame.getMethod());
+                    app.append(id);
+                }
+            }));
+        };
+        addFrameColumn.accept((stackTrace) -> {
+            return stackTrace.getFrames().getFirst();
+        }, "topMethod");
+        addFrameColumn.accept((stackTrace) -> {
             return stackTrace.getFrames().stream().filter(f -> {
                 if (f.isJavaFrame()) {
                     RecordedClassLoader cl = f.getMethod().getType().getClassLoader();
@@ -424,113 +442,37 @@ public class BasicParallelImporter extends AbstractImporter {
                 }
                 return false;
             }).findFirst().orElse(null);
-        };
-        cols.addAll(List.of(new Table.Column(fieldName + "$topApplicationClass", "INTEGER", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = getTopApplicationFrame.apply(stackTrace);
-                if (topFrame == null) {
-                    app.appendNull();
-                    return;
-                }
-                RecordedMethod topMethod = topFrame.getMethod();
-                if (topMethod == null) {
-                    app.appendNull();
-                    return;
-                }
-                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
-            }
-        }), new Table.Column(fieldName + "$topApplicationMethod", "VARCHAR", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = getTopApplicationFrame.apply(stackTrace);
-                if (topFrame == null) {
-                    app.appendNull();
-                    return;
-                }
-                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
-            }
-        })));
-        Function<RecordedStackTrace, RecordedFrame> getTopNonInitFrame = (stackTrace) -> {
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                return null;
-            }
+        }, "topApplicationMethod");
+        addFrameColumn.accept((stackTrace) -> {
             return stackTrace.getFrames().stream().filter(f -> {
                 if (f.isJavaFrame()) {
                     return !"<init>".equals(f.getMethod().getName());
                 }
                 return false;
             }).findFirst().orElse(null);
-        };
-        cols.addAll(List.of(new Table.Column(fieldName + "$topNonInitClass", "INTEGER", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = getTopNonInitFrame.apply(stackTrace);
-                if (topFrame == null) {
-                    app.appendNull();
-                    return;
-                }
-                RecordedMethod topMethod = topFrame.getMethod();
-                if (topMethod == null) {
-                    app.appendNull();
-                    return;
-                }
-                app.append(getTableForMiscType(getField(topMethod, "type")).assumeCaching().insertInto(topMethod.getType()));
-            }
-        }), new Table.Column(fieldName + "$topNonInitMethod", "VARCHAR", (obj, app) -> {
-            RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null || stackTrace.getFrames().isEmpty()) {
-                app.appendNull();
-            } else {
-                RecordedFrame topFrame = getTopNonInitFrame.apply(stackTrace);
-                if (topFrame == null) {
-                    app.appendNull();
-                    return;
-                }
-                app.append(topFrame.getMethod() != null ? topFrame.getMethod().getName() : null);
-            }
-        })));
-        if (options.isExcluded(Options.ExcludableItems.STACK_TRACES)) {
-            return cols;
-        }
-        var frames = getTableForMiscType(getField(field, "frames")).assumeCaching();
-        cols.addAll(List.of(new Table.Column(fieldName + "$length", "SHORT", (obj, app) -> {
+        }, "topNonInitMethod");
+        cols.add(new Table.Column(fieldName + "$length", "SHORT", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
             app.append(stackTrace != null ? (short) stackTrace.getFrames().size() : 0);
-        }), new Table.Column(fieldName + "$truncated", "BOOLEAN", (obj, app) -> {
+        }));
+        cols.add(new Table.Column(fieldName + "$truncated", "BOOLEAN", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            app.append(stackTrace != null && (stackTrace.isTruncated() || stackTrace.getFrames().size() > options.limitStackTraceDepth));
-        }), new Table.Column(fieldName, "INTEGER[" + options.limitStackTraceDepth + "]", (obj, app) -> {
+            app.append(stackTrace != null && (stackTrace.isTruncated() || stackTrace.getFrames().size() > options.getMaxStackTraceDepth()));
+        }));
+        cols.add(new Table.Column(fieldName + "$methods", "INTEGER[" + options.getMaxStackTraceDepth() + "]", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
-            if (stackTrace == null) {
-                app.appendNull();
-            } else {
-                List<RecordedFrame> stackFrames = new ArrayList<>();
-                if (options.limitStackTraceDepth < stackTrace.getFrames().size()) {
-                    if (options.limitFromTop) {
-                        stackFrames.addAll(stackTrace.getFrames().subList(0, options.limitStackTraceDepth));
-                    } else {
-                        stackFrames.addAll(stackTrace.getFrames().subList(stackTrace.getFrames().size() - options.limitStackTraceDepth, stackTrace.getFrames().size()));
-                    }
-                } else {
-                    stackFrames = stackTrace.getFrames();
-                }
-                int[] arr = new int[options.limitStackTraceDepth];
-                for (int i = 0; i < stackFrames.size(); i++) {
-                    arr[i] = frames.insertInto(stackFrames.get(i));
-                }
-                for (int i = stackFrames.size(); i < options.limitStackTraceDepth; i++) {
+            int[] arr = new int[options.getMaxStackTraceDepth()];
+            for (int i = 0; i < options.getMaxStackTraceDepth(); i++) {
+                if (stackTrace == null || i >= stackTrace.getFrames().size()) {
                     arr[i] = 0;
+                } else {
+                    RecordedFrame frame = stackTrace.getFrames().get(i);
+                    int id = getTableForMiscType(getField(frame, "method")).assumeCaching().insertInto(frame.getMethod());
+                    arr[i] = id;
                 }
-                app.append(arr);
             }
-        })));
+            app.append(arr);
+        }));
         return cols;
     }
 
@@ -566,6 +508,9 @@ public class BasicParallelImporter extends AbstractImporter {
     }
 
     private Table getTableForMiscType(ValueDescriptor descriptor) {
+        if (descriptor.getTypeName().contains("StackFrame")) {
+            throw new IllegalArgumentException("StackFrame types should be handled separately");
+        }
         if (!structTypeToTable.containsKey(descriptor.getTypeName())) {
             structTypeToTable.put(descriptor.getTypeName(), null);
             structTypeToTable.put(descriptor.getTypeName(), createTable(descriptor.getTypeName(), descriptor.getFields(), true));
@@ -610,7 +555,7 @@ public class BasicParallelImporter extends AbstractImporter {
         }
         String tableName = normalizeTableName(name);
         try {
-            return new Table(tableName, columns, connectionSupplier, cache ? ObjectCacheFunction.IDENTITY_BASED : null);
+            return new Table(tableName, columns, connectionSupplier, cache);
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to create table for type " + name, e);
         }
@@ -627,7 +572,7 @@ public class BasicParallelImporter extends AbstractImporter {
             Table table = new Table("Events", List.of(
                     new Table.Column("name", "VARCHAR", null),
                     new Table.Column("count", "INTEGER", null)
-            ), connectionSupplier, null);
+            ), connectionSupplier, false);
             for (Map.Entry<EventType, Integer> entry : eventCount.entrySet().stream().sorted(Comparator.comparing(e -> -e.getValue())).toList()) {
                 table.appender.beginRow();
                 table.appender.append(normalizeTableName(entry.getKey().getName()));
@@ -637,7 +582,7 @@ public class BasicParallelImporter extends AbstractImporter {
             Table eventIdTable = new Table("EventIDs", List.of(
                     new Table.Column("name", "VARCHAR", null),
                     new Table.Column("id", "LONG", null)
-            ), connectionSupplier, null);
+            ), connectionSupplier, false);
             Set<EventType> eventTypes = new HashSet<>(eventTypeToTable.keySet());
             eventTypes.addAll(FlightRecorder.getFlightRecorder().getEventTypes());
             for (EventType eventType : eventTypes) {
@@ -656,7 +601,7 @@ public class BasicParallelImporter extends AbstractImporter {
             Table table = new Table("EventLabels", List.of(
                     new Table.Column("name", "VARCHAR", null),
                     new Table.Column("label", "VARCHAR", null)
-            ), connectionSupplier, null);
+            ), connectionSupplier, false);
             for (EventType eventType : eventTypeToTable.keySet()) {
                 table.appender.beginRow();
                 table.appender.append(normalizeTableName(eventType.getName()));

@@ -24,8 +24,9 @@ D SELECT * FROM CPULoad;
 ...
 ```
 Limitations:
-- Durations are stores as nanoseconds.
-- Stack traces are stored a fixed size (100 frames by default) but are slow to import, so avoid if possible.
+- Stack traces are stored a fixed size (10 frames by default) and only have methods in their frames
+   - so no line number, bytecode index or the type of the frame
+   - this saves a lot of space and makes queries faster
 
 Lessons learned on duckdb
 -------------------------
@@ -33,15 +34,17 @@ Lessons learned on duckdb
   - so fixed arrays instead of varlen are a good idea
 
 TODO
+- add option to only use simplified descriptors (no package names), enable by default, but disable in ViewTests
 - simple "query" command that 
   - shows errors better
   - implement another table view that is closer to the original JFR view
-  - investigate why allocation-by-class differs between jfr and duckdb
 - generate description of all tables and views in a database, that contains the relationships (like class ids)
+- if java option not passed, start another Java process
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 
 Features
 - supports all JFR views (most of them are tested, of view.ini till 25. September)
+- supports custom queries (like `SELECT * FROM CPULoad WHERE jvmUser > 0.5`)
 
 Write basic blog post
 

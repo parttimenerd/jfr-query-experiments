@@ -80,11 +80,21 @@ public class ViewsTest {
                 new ExpectedView("allocation-by-site",
                         """
                                 Method,Allocation Pressure
-                                java.lang.invoke.DirectMethodHandleallocateInstance,6.75%
-                                java.util.ArrayscopyOfRange,5.18%
-                                dotty.tools.dotc.util.PerfectHashingallocate,3.89%
+                                java.lang.invoke.DirectMethodHandleallocateInstance(Ljava/lang/Object;)Ljava/lang/Object;,6.75%
+                                java.util.ArrayscopyOfRange([BII)[B,5.18%
+                                dotty.tools.dotc.util.PerfectHashingallocate(I)V,3.89%
+                                dotty.tools.dotc.core.Contexts$ContextfreshOver(Ldotty/tools/dotc/core/Contexts$Context;)Ldotty/tools/dotc/core/Contexts$FreshContext;,3.73%
                                 ...
                                 """),
+                new ExpectedView("blocked-by-system-gc",
+                        """
+                                Time,Duration,Stack Trace
+                                2025-09-29 18:10:34.231323,113.52ms,org.renaissance.harness.ExecutionPlugins$ForceGcPlugin.collectGarbage(Ljava/lang/String;)V
+                                2025-09-29 18:10:44.169286,100.55ms,org.renaissance.harness.ExecutionPlugins$ForceGcPlugin.collectGarbage(Ljava/lang/String;)V
+                                2025-09-29 18:10:50.191524,89.30ms,org.renaissance.harness.ExecutionPlugins$ForceGcPlugin.collectGarbage(Ljava/lang/String;)V
+                                2025-09-29 18:10:55.181959,86.50ms,org.renaissance.harness.ExecutionPlugins$ForceGcPlugin.collectGarbage(Ljava/lang/String;)V
+                                ...
+                                """, JFRFile.METAL),
                 new ExpectedView("class-loaders",
                         """
                                 Class Loader,Hidden Classes,Classes
@@ -113,8 +123,8 @@ public class ViewsTest {
                         """
                                 Level,Phase,Average,P95,Longest,Count,Total
                                 1,Final Code,394.31us,1.34ms,163.73ms,3335,1.32s
-                                1,After Parsing,114.55us,545.80us,3.68ms,3360,384.90ms
-                                1,Before matching,106.50us,431.90us,7.98ms,3360,357.85ms
+                                1,After Parsing,114.55us,545.67us,3.68ms,3360,384.90ms
+                                1,Before matching,106.50us,431.75us,7.98ms,3360,357.85ms
                                 1,End,14.86us,1.74us,4.90ms,3361,49.95ms
                                 ...
                                 """,
@@ -164,9 +174,10 @@ public class ViewsTest {
                 new ExpectedView("contention-by-site",
                         """
                                 StackTrace,Count,Avg.,Max.
-                                java.lang.ClassValue$ClassValueMap.associateAccess,8,162.09ms,178.22ms
-                                java.lang.ClassValue$ClassValueMap.readAccess,2172,21.99ms,178.19ms
-                                java.lang.ClassValue$ClassValueMap.removeAccess,5,163.59ms,177.64ms
+                                java.lang.ClassValue$ClassValueMap.associateAccess(Ljava/lang/ClassValue;Ljava/lang/ClassValue$RemovalToken;Ljava/lang/Object;)Ljava/lang/Object;,8,162.09ms,178.22ms
+                                java.lang.ClassValue$ClassValueMap.readAccess(Ljava/lang/ClassValue;)Ljava/lang/Object;,2172,21.99ms,178.19ms
+                                java.lang.ClassValue$ClassValueMap.removeAccess(Ljava/lang/ClassValue;)V,5,163.59ms,177.64ms
+                                edu.rice.habanero.actors.AkkaActorState$actorLatch$.countUp()V,10469,15.60ms,142.83ms
                                 ...
                                 """, JFRFile.METAL),
                 new ExpectedView("contention-by-address", // maybe check why if differs from JFR
@@ -176,6 +187,11 @@ public class ViewsTest {
                                 0x76ab624a2620,edu.rice.habanero.actors.AkkaActorState$actorLatch$,1903,142.83ms
                                 ...
                                 """, JFRFile.METAL),
+                new ExpectedView("deprecated-methods-for-removal",
+                        """
+                                Deprecated Method,Called from Class
+                                java.lang.System.getSecurityManager()Ljava/lang/SecurityManager;,[dotty.tools.dotc.transform.MegaPhase\\, org.renaissance.scala.dotty.Dotty$CompilationResult]
+                                """),
                 new ExpectedView("cpu-information",
                         """
                                 CPU,Sockets,Cores,Hardware Threads,Description
@@ -270,9 +286,9 @@ public class ViewsTest {
                 new ExpectedView("exception-by-site",
                         """
                                 Method,Count
-                                jdk.internal.loader.BuiltinClassLoader.loadClass,5158
-                                java.lang.invoke.MethodHandleNatives.resolve,1018
-                                java.io.ObjectInputStream$BlockDataInputStream.peekByte,931
+                                jdk.internal.loader.BuiltinClassLoader.loadClass(Ljava/lang/String;Z)Ljava/lang/Class;,5158
+                                java.lang.invoke.MethodHandleNatives.resolve(Ljava/lang/invoke/MemberName;Ljava/lang/Class;IZ)Ljava/lang/invoke/MemberName;,1018
+                                java.io.ObjectInputStream$BlockDataInputStream.peekByte()B,931
                                 ...
                                 """, JFRFile.METAL),
                 new ExpectedView("file-reads-by-path",
@@ -299,7 +315,7 @@ public class ViewsTest {
                                 """, JFRFile.CONTAINER)*/
                 new ExpectedView("gc",
                         """
-                                Start,GC ID,GC Name,Heap Before GC,Heap After GC,Longest Pause
+                                Start,GC ID,Type,Heap Before GC,Heap After GC,Longest Pause
                                 2025-09-29 18:09:58.034023,1,G1New,49.62 MB,8.79 MB,7.52ms
                                 2025-09-29 18:09:58.267352,2,G1New,40.79 MB,14.43 MB,7.37ms
                                 2025-09-29 18:09:58.35344,3,G1New,62.43 MB,27.98 MB,18.05ms
@@ -311,6 +327,14 @@ public class ViewsTest {
                                 Concurrent Mark From Roots,26.10ms,63.34ms,63.34ms,18,469.73ms
                                 Concurrent Rebuild Remembered Sets and Scrub Regions,19.12ms,119.16ms,119.16ms,18,344.13ms
                                 Concurrent Scan Root Regions,10.56ms,42.79ms,42.79ms,18,190.03ms
+                                ...
+                                """, JFRFile.METAL),
+                new ExpectedView("gc-parallel-phases",
+                        """
+                                Name,Average,P95,Longest,Count,Total
+                                Termination,165.59us,561.63us,4.41ms,449866,74.49s
+                                ObjCopy,88.81us,208.76us,34.21ms,472669,41.98s
+                                ScanHR,1.51ms,6.39ms,40.02ms,7007,10.60s
                                 ...
                                 """, JFRFile.METAL),
                 new ExpectedView("gc-configuration",
@@ -344,10 +368,9 @@ public class ViewsTest {
                 new ExpectedView("gc-allocation-trigger",
                         """
                                 Trigger Method (Non-JDK),Count,Total Requested
-                                dotty.tools.dotc.Compiler.frontendPhases,2,824.00 B
-                                dotty.tools.dotc.core.Types$ApproximatingTypeMap.derivedAppliedType,1,8.00 MB
-                                scala.tools.asm.tree.MethodNode.visitVarInsn,1,1.10 MB
-                                scala.collection.immutable.Map$.from,1,773.28 KB
+                                dotty.tools.dotc.Compiler.frontendPhases()Lscala/collection/immutable/List;,2,824.00 B
+                                dotty.tools.dotc.core.Types$ApproximatingTypeMap.derivedAppliedType(Ldotty/tools/dotc/core/Types$AppliedType;Ldotty/tools/dotc/core/Types$Type;Lscala/collection/immutable/List;)Ldotty/tools/dotc/core/Types$Type;,1,8.00 MB
+                                scala.tools.asm.tree.MethodNode.visitVarInsn(II)V,1,1.10 MB
                                 ...
                                 """, JFRFile.CONTAINER),
                 new ExpectedView("gc-cpu-time",
@@ -363,10 +386,29 @@ public class ViewsTest {
                 new ExpectedView("hot-methods",
                         """
                                 Method,Samples,Percent
-                                java.util.concurrent.ForkJoinPool.deactivate,1066,8.09%
-                                scala.collection.immutable.RedBlackTree$.lookup,695,5.27%
-                                akka.actor.dungeon.Children.initChild,678,5.14%
+                                java.util.concurrent.ForkJoinPool.deactivate(Ljava/util/concurrent/ForkJoinPool$WorkQueue;I)I,1066,8.09%
+                                scala.collection.immutable.RedBlackTree$.lookup(Lscala/collection/immutable/RedBlackTree$Tree;Ljava/lang/Object;Lscala/math/Ordering;)Lscala/collection/immutable/RedBlackTree$Tree;,695,5.27%
+                                akka.actor.dungeon.Children.initChild(Lakka/actor/ActorRef;)Lscala/Option;,678,5.14%
                                 ...
+                                """, JFRFile.METAL),
+                new ExpectedView("cpu-time-hot-methods",
+                        """
+                                Method,Samples,Percent
+                                akka.actor.dungeon.Children.initChild(Lakka/actor/ActorRef;)Lscala/Option;,13075,15.51%
+                                scala.collection.immutable.RedBlackTree$.upd(Lscala/collection/immutable/RedBlackTree$Tree;Ljava/lang/Object;Ljava/lang/Object;ZLscala/math/Ordering;)Lscala/collection/immutable/RedBlackTree$Tree;,6308,7.48%
+                                scala.collection.immutable.RedBlackTree$.lookup(Lscala/collection/immutable/RedBlackTree$Tree;Ljava/lang/Object;Lscala/math/Ordering;)Lscala/collection/immutable/RedBlackTree$Tree;,5998,7.12%
+                                akka.actor.dungeon.Children.reserveChild(Ljava/lang/String;)Z,5958,7.07%
+                                ...
+                                """, JFRFile.METAL),
+                new ExpectedView("cpu-time-statistics",
+                        """
+                                Successful Samples,Failed Samples,Biased Samples,Total Samples,Lost Samples
+                                84280,0,4457,84280,6632
+                                """, JFRFile.METAL),
+                new ExpectedView("jdk-agents",
+                        """
+                                Time,Initialization,Name,Options
+                                2025-09-29 18:09:57.538461,0s,/home/i560383/code/experiments/record-all-events/tiny-agent/target/tiny-agent-1.0-shaded.jar,
                                 """, JFRFile.METAL),
                 new ExpectedView("jvm-flags",
                         """
@@ -408,9 +450,10 @@ public class ViewsTest {
                 new ExpectedView("memory-leaks-by-site",
                         """
                                 Alloc. Time,Application Method,Object Age,Heap Usage
-                                2025-09-29 18:10:00.240224,org.renaissance.apache.spark.SparkUtil.setUpSparkContext,85.75s,91.65 MB
-                                2025-09-29 18:10:01.402116,org.apache.logging.log4j.spi.AbstractLogger.createDefaultFlowMessageFactory,84.59s,93.46 MB
-                                2025-09-29 18:10:03.988607,org.apache.spark.serializer.JavaSerializationStream.writeObject,82.00s,462.39 MB
+                                2025-09-29 18:10:00.262748,org.renaissance.apache.spark.SparkUtil.setUpSparkContext(Lorg/renaissance/BenchmarkContext;Z)V,85.73s,91.65 MB
+                                2025-09-29 18:10:01.402116,org.apache.logging.log4j.spi.AbstractLogger.createDefaultFlowMessageFactory()Lorg/apache/logging/log4j/message/FlowMessageFactory;,84.59s,93.46 MB
+                                2025-09-29 18:10:03.988607,org.apache.spark.serializer.JavaSerializationStream.writeObject(Ljava/lang/Object;Lscala/reflect/ClassTag;)Lorg/apache/spark/serializer/SerializationStream;,82.00s,462.39 MB
+                                2025-09-29 18:10:06.105506,org.apache.spark.util.kvstore.KVTypeInfo.<init>(Ljava/lang/Class;)V,79.88s,36.11 MB
                                 ...
                                 """, JFRFile.METAL),
                 new ExpectedView("modules",
@@ -420,20 +463,15 @@ public class ViewsTest {
                                 java.compiler
                                 java.datatransfer
                                 java.desktop
-                                java.desktop
                                 ...
                                 """),
                 new ExpectedView("monitor-inflation",
                         """
                                 Method,Monitor Class,Count,Total Duration
-                                java.util.zip.ZipFile$CleanableResource.getInflater,int[],15,16.94us
-                                java.util.zip.ZipFile$CleanableResource.getInflater,java.lang.Object,13,8.00us
-                                java.lang.Object.wait0,java.lang.Thread,3,3.51us
-                                java.lang.Object.wait0,dotty.tools.dotc.util.concurrent$Executor,1,2.00us
-                                java.io.PrintStream.write,java.io.PrintStream,1,1.35us
-                                java.util.zip.ZipFile$CleanableResource.getInflater,scala.collection.immutable.LazyList,1,1.20us
-                                jdk.jfr.internal.PlatformRecorder.periodicTask,jdk.jfr.internal.PlatformRecorder,1,1.00us
-                                java.util.zip.ZipFile$CleanableResource.getInflater,scala.collection.mutable.HashMap,1,441.00ns
+                                java.lang.Object.wait0(J)V,java.lang.Thread,2,2.55us
+                                java.util.zip.ZipFile$CleanableResource.getInflater()Ljava/util/zip/Inflater;,int[],1,2.28us
+                                java.lang.Object.wait0(J)V,dotty.tools.dotc.util.concurrent$Executor,1,2.00us
+                                ...
                                 """, JFRFile.CONTAINER),
                 new ExpectedView("native-libraries",
                         """
@@ -447,10 +485,15 @@ public class ViewsTest {
                 new ExpectedView("native-methods",
                         """
                                 Method,Samples,Percent
-                                sun.nio.ch.EPoll.wait,863,36.61%
-                                sun.nio.fs.LinuxWatchService.poll,693,29.40%
+                                sun.nio.ch.EPoll.wait(IJII)I,863,36.61%
+                                sun.nio.fs.LinuxWatchService.poll(II)I,693,29.40%
+                                sun.nio.ch.EPoll.wait(IJII)I,437,18.54%
                                 ...
                                 """, JFRFile.METAL),
+                new ExpectedView("native-library-failures",
+                        """
+                                Operation,Library,Error Message
+                                """, JFRFile.CONTAINER),
                 new ExpectedView("network-utilization",
                         """
                                 Network Interface,Avg. Read Rate,Max. Read Rate,Avg. Write Rate,Max. Write Rate
@@ -505,8 +548,8 @@ public class ViewsTest {
                                 """, JFRFile.METAL),
                 new ExpectedView("system-information",
                         """
-                                Total Physical Memory Size,OS Version,CPU Type,Number of Cores,Number of Hardware Threads,Number of Sockets,CPU Description
-                                123.59 GB,ID=gardenlinux\\nNAME=""Garden Linux""\\nPRETTY_NAME=""Garden Linux 1592.13""\\nHOME_URL=""https://gardenlinux.io""\\nSUPPORT_URL=""https://github.com/gardenlinux/gardenlinux""\\nBUG_REPORT_URL=""https://github.com/gardenlinux/gardenlinux/issues""\\nGARDENLINUX_CNAME=container-amd64-1592.13\\nGARDENLINUX_FEATURES=_slim\\,base\\,container\\nGARDENLINUX_VERSION=1592.13\\nGARDENLINUX_COMMIT_ID=2b302ec2\\nGARDENLINUX_COMMIT_ID_LONG=2b302ec2abc9275921e1321074b9d6f566860fd1\\nuname: Linux 6.14.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug  7 18:32:38 UTC 2025 x86_64\\nlibc: glibc 2.39 NPTL 2.39 \\n,AMD Zen (HT) SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 SSE4A AMD64,128,128,1,Brand: AMD Ryzen Threadripper PRO 3995WX 64-Cores     \\, Vendor: AuthenticAMD\\nFamily: Zen (0x17)\\, Model: <unknown> (0x31)\\, Stepping: 0x0\\nExt. family: 0x8\\, Ext. model: 0x3\\, Type: 0x0\\, Signature: 0x00830f10\\nFeatures: ebx: 0x10800800\\, ecx: 0x7ef8320b\\, edx: 0x178bfbff\\nExt. features: eax: 0x00830f10\\, ebx: 0x40000000\\, ecx: 0x75c237ff\\, edx: 0x2fd3fbff\\nSupports: On-Chip FPU\\, Virtual Mode Extensions\\, Debugging Extensions\\, Page Size Extensions\\, Time Stamp Counter\\, Model Specific Registers\\, Physical Address Extension\\, Machine Check Exceptions\\, CMPXCHG8B Instruction\\, On-Chip APIC\\, Fast System Call\\, Memory Type Range Registers\\, Page Global Enable\\, Machine Check Architecture\\, Conditional Mov Instruction\\, Page Attribute Table\\, 36-bit Page Size Extension\\, CLFLUSH Instruction\\, Intel Architecture MMX Technology\\, Fast Float Point Save and Restore\\, Streaming SIMD extensions\\, Streaming SIMD extensions 2\\, Hyper Threading\\, Streaming SIMD Extensions 3\\, PCLMULQDQ\\, MONITOR/MWAIT instructions\\, Supplemental Streaming SIMD Extensions 3\\, Fused Multiply-Add\\, CMPXCHG16B\\, Streaming SIMD extensions 4.1\\, Streaming SIMD extensions 4.2\\, x2APIC\\, MOVBE\\, Popcount instruction\\, AESNI\\, XSAVE\\, OSXSAVE\\, AVX\\, F16C\\, LAHF/SAHF instruction support\\, Core multi-processor legacy mode\\, Advanced Bit Manipulations: LZCNT\\, SSE4A: MOVNTSS\\, MOVNTSD\\, EXTRQ\\, INSERTQ\\, Misaligned SSE mode\\, SYSCALL/SYSRET\\, Execute Disable Bit\\, RDTSCP\\, Intel 64 Architecture\\, Invariant TSC
+                                Total Physical Memory Size,OS Version,Virtualization,CPU Type,Number of Cores,Number of Hardware Threads,Number of Sockets,CPU Description
+                                123.59 GB,ID=gardenlinux\\nNAME=""Garden Linux""\\nPRETTY_NAME=""Garden Linux 1592.13""\\nHOME_URL=""https://gardenlinux.io""\\nSUPPORT_URL=""https://github.com/gardenlinux/gardenlinux""\\nBUG_REPORT_URL=""https://github.com/gardenlinux/gardenlinux/issues""\\nGARDENLINUX_CNAME=container-amd64-1592.13\\nGARDENLINUX_FEATURES=_slim\\,base\\,container\\nGARDENLINUX_VERSION=1592.13\\nGARDENLINUX_COMMIT_ID=2b302ec2\\nGARDENLINUX_COMMIT_ID_LONG=2b302ec2abc9275921e1321074b9d6f566860fd1\\nuname: Linux 6.14.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Thu Aug  7 18:32:38 UTC 2025 x86_64\\nlibc: glibc 2.39 NPTL 2.39 \\n,No virtualization detected,AMD Zen (HT) SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 SSE4A AMD64,128,128,1,Brand: AMD Ryzen Threadripper PRO 3995WX 64-Cores     \\, Vendor: AuthenticAMD\\nFamily: Zen (0x17)\\, Model: <unknown> (0x31)\\, Stepping: 0x0\\nExt. family: 0x8\\, Ext. model: 0x3\\, Type: 0x0\\, Signature: 0x00830f10\\nFeatures: ebx: 0x10800800\\, ecx: 0x7ef8320b\\, edx: 0x178bfbff\\nExt. features: eax: 0x00830f10\\, ebx: 0x40000000\\, ecx: 0x75c237ff\\, edx: 0x2fd3fbff\\nSupports: On-Chip FPU\\, Virtual Mode Extensions\\, Debugging Extensions\\, Page Size Extensions\\, Time Stamp Counter\\, Model Specific Registers\\, Physical Address Extension\\, Machine Check Exceptions\\, CMPXCHG8B Instruction\\, On-Chip APIC\\, Fast System Call\\, Memory Type Range Registers\\, Page Global Enable\\, Machine Check Architecture\\, Conditional Mov Instruction\\, Page Attribute Table\\, 36-bit Page Size Extension\\, CLFLUSH Instruction\\, Intel Architecture MMX Technology\\, Fast Float Point Save and Restore\\, Streaming SIMD extensions\\, Streaming SIMD extensions 2\\, Hyper Threading\\, Streaming SIMD Extensions 3\\, PCLMULQDQ\\, MONITOR/MWAIT instructions\\, Supplemental Streaming SIMD Extensions 3\\, Fused Multiply-Add\\, CMPXCHG16B\\, Streaming SIMD extensions 4.1\\, Streaming SIMD extensions 4.2\\, x2APIC\\, MOVBE\\, Popcount instruction\\, AESNI\\, XSAVE\\, OSXSAVE\\, AVX\\, F16C\\, LAHF/SAHF instruction support\\, Core multi-processor legacy mode\\, Advanced Bit Manipulations: LZCNT\\, SSE4A: MOVNTSS\\, MOVNTSD\\, EXTRQ\\, INSERTQ\\, Misaligned SSE mode\\, SYSCALL/SYSRET\\, Execute Disable Bit\\, RDTSCP\\, Intel 64 Architecture\\, Invariant TSC
                                 """, JFRFile.CONTAINER),
                 new ExpectedView("system-processes",
                         """
@@ -531,9 +574,7 @@ public class ViewsTest {
                                 Start Time,Stack Trace,Thread,Duration
                                 2025-09-29 17:44:44.317597,,Notification Thread,infinity
                                 2025-09-29 17:44:56.102034,,DestroyJavaVM,infinity
-                                2025-09-29 17:44:56.1025,java.lang.ApplicationShutdownHooks.runHooks,Thread-2,infinity
-                                2025-09-29 17:44:56.102635,java.lang.ApplicationShutdownHooks.runHooks,JFR Shutdown Hook,infinity
-                                2025-09-29 17:44:44.317596,,main,11.78s
+                                2025-09-29 17:44:56.1025,java.lang.ApplicationShutdownHooks.runHooks()V,Thread-2,infinity
                                 ...
                                 """, JFRFile.CONTAINER),
                 new ExpectedView("vm-operations",

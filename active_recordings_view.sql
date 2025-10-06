@@ -3,12 +3,12 @@
 
 CREATE OR REPLACE VIEW environment_active_recordings AS
 SELECT
-    LAST(recordingStart) AS "Start",
-    LAST(recordingDuration) AS "Duration",
-    LAST(name) AS "Name",
-    LAST(destination) AS "Destination",
-    LAST(maxAge) AS "Max Age",
-    LAST(maxSize) AS "Max Size"
+    LAST(recordingStart, ActiveRecording) AS "Start",
+    LAST(recordingDuration, ActiveRecording) AS "Duration",
+    LAST(name, ActiveRecording) AS "Name",
+    LAST(destination, ActiveRecording) AS "Destination",
+    LAST(maxAge, ActiveRecording) AS "Max Age",
+    LAST(maxSize, ActiveRecording) AS "Max Size"
 FROM ActiveRecording
 GROUP BY id
 ORDER BY "Start";
