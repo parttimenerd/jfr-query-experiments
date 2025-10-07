@@ -322,7 +322,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "GC Pause Phases View",
                 """
-                CREATE VIEW "gc-pause-phases" AS
+                CREATE VIEW "view" AS
                 SELECT 
                     eventType.label AS "Type", 
                     name AS "Name", 
@@ -345,7 +345,7 @@ public class UnionAlternativeTest {
                 new String[]{"GCPhasePause", "GCPhasePauseLevel1", "GCPhasePauseLevel2", "GCPhasePauseLevel3", "GCPhasePauseLevel4", "EventType"},
                 Set.of("GCPhasePause", "GCPhasePauseLevel1", "EventType"),
                 """
-                CREATE VIEW "gc-pause-phases" AS
+                CREATE VIEW "view" AS
                 SELECT
                     eventType.label AS "Type",
                     name AS "Name",
@@ -361,7 +361,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Complex Query with Multiple Joins",
                 """
-                CREATE VIEW "complex-view" AS
+                CREATE VIEW "view" AS
                 SELECT 
                     e.label AS "Type",
                     p.name AS "Name",
@@ -383,7 +383,7 @@ public class UnionAlternativeTest {
                 new String[]{"TableA", "TableB", "TableC", "EventType", "SomeOtherTable"},
                 Set.of("TableA", "TableC", "EventType", "SomeOtherTable"),
                 """
-                CREATE VIEW "complex-view" AS
+                CREATE VIEW "view" AS
                 SELECT
                     e.label AS "Type",
                     p.name AS "Name",
@@ -402,7 +402,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Class Modifications Real-World View",
                 """
-                CREATE VIEW "class-modifications" AS
+                CREATE VIEW "view" AS
                 SELECT
                     format_duration(duration) AS "Time",
                     (c.javaName || combined.stackTrace$topApplicationMethod) AS "Requested By",
@@ -437,7 +437,7 @@ public class UnionAlternativeTest {
                 new String[]{"RedefineClasses", "RetransformClasses", "Class"},
                 Set.of("RedefineClasses", "Class"),
                 """
-                CREATE VIEW "class-modifications" AS
+                CREATE VIEW "view" AS
                 SELECT
                     format_duration(duration) AS "Time",
                     (c.javaName || combined.stackTrace$topApplicationMethod) AS "Requested By",
@@ -462,7 +462,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Exception by Site Real-World View",
                 """
-                CREATE VIEW "exception-by-site" AS
+                CREATE VIEW "view" AS
                 SELECT
                     (c.javaName || '.' || combined.stackTrace$topNonInitMethod) AS "Method",
                     COUNT(*) AS "Count"
@@ -478,7 +478,7 @@ public class UnionAlternativeTest {
                 new String[]{"JavaErrorThrow", "JavaExceptionThrow", "Class"},
                 Set.of("JavaExceptionThrow", "Class"),
                 """
-                CREATE VIEW "exception-by-site" AS
+                CREATE VIEW "view" AS
                 SELECT
                     (c.javaName || '.' || combined.stackTrace$topNonInitMethod) AS "Method",
                     COUNT(*) AS "Count"
@@ -491,7 +491,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "GC Analysis Real-World View",
                 """
-                CREATE VIEW "gc" AS
+                CREATE VIEW "view" AS
                 SELECT
                     G.startTime AS "Start",
                     G.gcId AS "GC ID",
@@ -508,7 +508,7 @@ public class UnionAlternativeTest {
                 new String[]{"GarbageCollection", "GCHeapSummary", "YoungGarbageCollection"},
                 Set.of("GarbageCollection", "GCHeapSummary", "YoungGarbageCollection"),
                 """
-                CREATE VIEW "gc" AS
+                CREATE VIEW "view" AS
                 SELECT
                     G.startTime AS "Start",
                     G.gcId AS "GC ID",
@@ -526,7 +526,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Object Statistics with Aggregations",
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -543,7 +543,7 @@ public class UnionAlternativeTest {
                 new String[]{"ObjectCountAfterGC", "ObjectCount", "Class"},
                 Set.of("ObjectCountAfterGC", "Class"),
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -557,7 +557,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Object Statistics - Both Tables Available",
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -574,7 +574,7 @@ public class UnionAlternativeTest {
                 new String[]{"ObjectCountAfterGC", "ObjectCount", "Class"},
                 Set.of("ObjectCountAfterGC", "ObjectCount", "Class"),
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -592,7 +592,7 @@ public class UnionAlternativeTest {
             Arguments.of(
                 "Object Statistics - Only ObjectCount Available",
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -609,7 +609,7 @@ public class UnionAlternativeTest {
                 new String[]{"ObjectCountAfterGC", "ObjectCount", "Class"},
                 Set.of("ObjectCount", "Class"),
                 """
-                CREATE VIEW "object-statistics" AS
+                CREATE VIEW "view" AS
                 SELECT
                     c.javaName AS "Class",
                     LAST(count) AS "Count",
@@ -634,7 +634,7 @@ public class UnionAlternativeTest {
             String expectedQuery) {
 
         var view = new View(
-            scenarioName.toLowerCase().replace(" ", "-"),
+            "view",
             "test",
             scenarioName,
             scenarioName.toLowerCase().replace(" ", "-"),
@@ -662,7 +662,7 @@ public class UnionAlternativeTest {
     // Test data for edge cases and comprehensive scenarios
     static Stream<Arguments> edgeCaseScenarios() {
         String queryWithMultipleJoins = """
-            CREATE VIEW "edge-case-view" AS
+            CREATE VIEW "view" AS
             SELECT 
                 et.label AS "Event Type", 
                 p.name AS "Phase Name",
@@ -685,7 +685,7 @@ public class UnionAlternativeTest {
             """;
 
         String queryWithComplexStructure = """
-            CREATE VIEW "complex-structure" AS
+            CREATE VIEW "view" AS
             WITH phase_data AS (
                 SELECT eventType, name, duration FROM (
                     SELECT eventType, name, duration FROM TableX
@@ -713,7 +713,7 @@ public class UnionAlternativeTest {
                 Set.of("GCPhase", "GCPhaseL1", "GCPhaseL2"),
                 true,
                 """
-                CREATE VIEW "edge-case-view" AS
+                CREATE VIEW "view" AS
                 SELECT
                     et.label AS "Event Type",
                     p.name AS "Phase Name",
@@ -740,7 +740,7 @@ public class UnionAlternativeTest {
                 Set.of("GCPhase", "GCPhaseL1", "GCPhaseL2", "EventType"),
                 true,
                 """
-                CREATE VIEW "edge-case-view" AS
+                CREATE VIEW "view" AS
                 SELECT
                     et.label AS "Event Type",
                     p.name AS "Phase Name",
@@ -767,7 +767,7 @@ public class UnionAlternativeTest {
                 Set.of("GCPhase", "GCPhaseL1", "GCPhaseL2", "EventType", "ThreadInfo", "ProcessInfo"),
                 true,
                 """
-                CREATE VIEW "edge-case-view" AS
+                CREATE VIEW "view" AS
                 SELECT
                     et.label AS "Event Type",
                     p.name AS "Phase Name",
@@ -796,7 +796,7 @@ public class UnionAlternativeTest {
                 Set.of("GCPhase", "GCPhaseL2", "EventType", "ThreadInfo", "ProcessInfo"),
                 true,
                 """
-                CREATE VIEW "edge-case-view" AS
+                CREATE VIEW "view" AS
                 SELECT
                     et.label AS "Event Type",
                     p.name AS "Phase Name",
@@ -821,7 +821,7 @@ public class UnionAlternativeTest {
                 Set.of("TableX", "TableZ", "EventType"),
                 true,
                 """
-                CREATE VIEW "complex-structure" AS
+                CREATE VIEW "view" AS
                 WITH phase_data AS (
                     SELECT eventType, name, duration FROM (SELECT eventType, name, duration FROM TableX
                                         UNION ALL
@@ -852,7 +852,7 @@ public class UnionAlternativeTest {
                 Set.of("TableY", "EventType"),
                 true,
                 """
-                CREATE VIEW "complex-structure" AS
+                CREATE VIEW "view" AS
                 WITH phase_data AS (
                     SELECT eventType, name, duration FROM (SELECT eventType, name, duration FROM TableY) union_data
                 )
@@ -881,7 +881,7 @@ public class UnionAlternativeTest {
             String expectedQuery) {
 
         var view = new View(
-            "edge-case-view",
+            "view",
             "test",
             "Edge Case Test View",
             null,

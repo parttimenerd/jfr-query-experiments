@@ -8,6 +8,7 @@ import jdk.jfr.consumer.*;
 import jdk.management.jfr.RecordingInfo;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
+import me.bechberger.jfr.duckdb.query.QueryExecutor;
 import me.bechberger.jfr.duckdb.util.SQLUtil;
 import org.duckdb.DuckDBAppender;
 import org.duckdb.DuckDBConnection;
@@ -25,6 +26,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
@@ -127,8 +129,9 @@ public class BasicParallelImporter extends AbstractImporter {
          * @param name   the name of the column (and the field in the RecordedObject)
          * @param type   the SQL type of the column
          * @param append a function that appends the value of the field to the DuckDBAppender
+         * @param referencedTable optional SQL reference to other tables (for foreign keys)
          */
-        record Column(String name, String type, AppendFunction append) {
+        record Column(String name, String type, AppendFunction append, @Nullable String referencedTable) {
 
             @Override
             public String toString() {
@@ -138,12 +141,23 @@ public class BasicParallelImporter extends AbstractImporter {
             public Column prependName(String prefix) {
                 return new Column(prefix + name, type, append);
             }
+            public Column(String name, String type, AppendFunction append) {
+                this(name, type, append, null);
+            }
         }
 
         @Override
         public String toString() {
             String idPrefix = doesUseCaching() ? "_id INTEGER PRIMARY KEY, " : "";
             return "CREATE TABLE IF NOT EXISTS \"" + name + "\" (" + idPrefix + String.join(", ", columns.stream().map(Column::toString).toList()) + ");";
+        }
+
+        public String getLLMDescription() {
+            String idPrefix = doesUseCaching() ? "_id INTEGER PRIMARY KEY,\n  " : "";
+            return "CREATE TABLE \"" + name + "\" (" + idPrefix +
+                   String.join(",\n  ", columns.stream()
+                           .map(c -> c.toString() +
+                                     (c.referencedTable != null ? " -- references " + c.referencedTable + "(_id) if != 0" : "")).toList()) + "\n);";
         }
 
         private void createTable(DuckDBConnection conn) {
@@ -429,7 +443,7 @@ public class BasicParallelImporter extends AbstractImporter {
                     int id = getTableForMiscType(getField(frame, "method")).assumeCaching().insertInto(frame.getMethod());
                     app.append(id);
                 }
-            }));
+            }, "Method"));
         };
         addFrameColumn.accept((stackTrace) -> {
             return stackTrace.getFrames().getFirst();
@@ -472,7 +486,7 @@ public class BasicParallelImporter extends AbstractImporter {
                 }
             }
             app.append(arr);
-        }));
+        }, "Method"));
         return cols;
     }
 
@@ -488,7 +502,7 @@ public class BasicParallelImporter extends AbstractImporter {
         if (isObjectReference) {
             Table table = getTableForMiscType(descriptor);
             if (table == null) {
-                System.out.println("Breaking recursion for type " + descriptor.getTypeName());
+                //System.out.println("Breaking recursion for type " + descriptor.getTypeName());
                 return List.of();
             }
             // create a table for the struct type, that does use caching, like with stack frames
@@ -499,7 +513,7 @@ public class BasicParallelImporter extends AbstractImporter {
                 } else {
                     app.append(table.insertInto(struct));
                 }
-            }));
+            }, table.name) );
         }
         return descriptor.getFields().stream()
                 .flatMap(f -> createColumnsForType(f, (o) -> getBaseObject.apply(o).getValue(descriptor.getName())).stream())
@@ -641,9 +655,11 @@ public class BasicParallelImporter extends AbstractImporter {
         }
     }
 
-    public static void createFile(Path jfrFile, Path dbFile, Options options) throws IOException, SQLException {
+    public record CreationResult(String llmDescription) {}
+
+    public static CreationResult createFile(Path jfrFile, Path dbFile, Options options) throws IOException, SQLException {
         List<DuckDBConnection> conns = new ArrayList<>();
-        new BasicParallelImporter(() -> {
+        var importer = new BasicParallelImporter(() -> {
             try {
                 DuckDBConnection duckDBConnection = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:" + dbFile);
                 conns.add(duckDBConnection);
@@ -651,15 +667,18 @@ public class BasicParallelImporter extends AbstractImporter {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }, options).importRecording(jfrFile);
+        }, options);
+        importer.importRecording(jfrFile);
+        String llmDescription = importer.getLLMDescription(options.useExamplesForLLM());
         for (DuckDBConnection duckDBConnection : conns) {
             duckDBConnection.close();
         }
+        return new CreationResult(llmDescription);
     }
 
-    public static void importIntoConnection(Path jfrFile, DuckDBConnection connection, Options options) throws IOException, SQLException {
+    public static CreationResult importIntoConnection(Path jfrFile, DuckDBConnection connection, Options options) throws IOException, SQLException {
         List<DuckDBConnection> conns = new ArrayList<>();
-        new BasicParallelImporter(() -> {
+        var importer = new BasicParallelImporter(() -> {
             try {
                 DuckDBConnection duckDBConnection = (DuckDBConnection) connection.duplicate();
                 conns.add(duckDBConnection);
@@ -667,10 +686,13 @@ public class BasicParallelImporter extends AbstractImporter {
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
-        }, options).importRecording(jfrFile);
+        }, options);
+        importer.importRecording(jfrFile);
+        String llmDescription = importer.getLLMDescription(options.useExamplesForLLM());
         for (DuckDBConnection duckDBConnection : conns) {
             duckDBConnection.close();
         }
+        return new CreationResult(llmDescription);
     }
 
     public static void addMacrosAndViews(DuckDBConnection connection) {
@@ -684,5 +706,33 @@ public class BasicParallelImporter extends AbstractImporter {
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to add views to database", e);
         }
+    }
+
+    /**
+     * Returns a description of the database schema in SQL format, suitable for LLM input.
+     *
+     * @param addExamples whether to add example queries and results for each table
+     *                    (this should improve LLM performance, see <a href="https://arxiv.org/abs/2204.00498">Rajkumar et al</a>)
+     */
+    public String getLLMDescription(boolean addExamples) throws SQLException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("There are the following tables in the database (described via the SQL definitions):\n\n");
+        List<Table> tables = new ArrayList<>(eventTypeToTable.values());
+        tables.addAll(structTypeToTable.values());
+        var connection = connectionSupplier.get();
+        for (Table table : tables) {
+            sb.append(table.getLLMDescription()).append("\n");
+            if (addExamples) {
+                String query = "SELECT * FROM '" + table.name + "' LIMIT 1";
+                sb.append("  Example query: ").append(query).append("\n");
+                String result = new QueryExecutor(connection).executeQuery(query, QueryExecutor.OutputFormat.CSV, 10);
+                sb.append("  Example result csv:\n").append(result.lines().map(l -> "    " + l).collect(Collectors.joining("\n"))).append("\n");
+            }
+        }
+        sb.append("\nAdditionally, there are the following views and macros:\n\n");
+        DuckDBConnection conn = connectionSupplier.get();
+        sb.append(MacroCollection.getLLMDescription(conn)).append("\n\n");
+        sb.append(ViewCollection.getLLMDescription(conn, addExamples));
+        return sb.toString();
     }
 }

@@ -332,6 +332,20 @@ public class MacroCollection {
                     "SELECT EVENT_NAME_FOR_ID(1);",
                     "CREATE MACRO EVENT_NAME_FOR_ID(_id) AS (SELECT name FROM EventIDs event WHERE id = _id LIMIT 1)",
                     "EventIDs"
+            ),
+            // ============================================
+            // Misc database utility functions
+            // ============================================
+            new Macro("macro_sql",
+                    "Get the SQL definition of a macro by name.",
+                    "SELECT macro_sql('P90');",
+                    "CREATE MACRO macro_sql(macro_name) AS (SELECT macro_definition FROM duckdb_functions() WHERE function_name = macro_name AND function_type = 'macro' AND NOT internal LIMIT 1)"
+            ),
+            new Macro("view_sql",
+                    "Get the SQL definition of a view by name.",
+                    "SELECT view_sql('SomeView');",
+                    "CREATE MACRO view_sql(name) AS (SELECT sql FROM duckdb_views() WHERE view_name = name LIMIT 1)",
+                    "information_schema.views"
             )
     };
 
@@ -356,14 +370,14 @@ public class MacroCollection {
             for (Macro macro : macros) {
                 try {
                     if (!macro.isValid(tableNames)) {
-                        System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
+                        /*System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
                                            Arrays.stream(macro.referencedTables)
                                         .filter(t -> !tableNames.contains(t))
-                                        .collect(Collectors.joining(", ")));
+                                        .collect(Collectors.joining(", ")));*/
                         continue;
                     }
                     stmt.execute(macro.definition());
-                    System.out.println("Created macro " + macro.nameWithArgs() + ": " + macro.description());
+                    //System.out.println("Created macro " + macro.nameWithArgs() + ": " + macro.description());
                 } catch (SQLException e) {
                     throw new RuntimeSQLException("Error creating macro " + macro.name() + ": " + e.getMessage(), e);
                 }
@@ -386,5 +400,22 @@ public class MacroCollection {
                 appender.endRow();
             }
         }
+    }
+
+    /**
+     * Get a description of all available macros for use in LLM prompts.
+     */
+    public static String getLLMDescription(DuckDBConnection connection) throws SQLException {
+        var tables = getTableNames(connection);
+        StringBuilder sb = new StringBuilder();
+        sb.append("The following SQL macros are available for use in queries:\n");
+        for (Macro macro : macros) {
+            if (!macro.isValid(tables)) {
+                continue;
+            }
+            sb.append("- ").append(macro.nameWithArgs()).append(": ").append(macro.description()).append("\n");
+        }
+        sb.append("Use these macros to simplify your SQL queries on JFR data. Use 'macro_sql(macro_name)' to get the SQL definition of a macro.");
+        return sb.toString();
     }
 }

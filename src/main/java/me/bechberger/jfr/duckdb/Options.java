@@ -23,6 +23,8 @@ public class Options {
     @CommandLine.Option(names = {"--complex-descriptors"}, description = "Use package names in descriptors", defaultValue = "false")
     private boolean complexDecorators = false;
 
+    private boolean useExamplesForLLM = false;
+
     public boolean isExcluded(ExcludableItems item) {
         for (ExcludableItems ex : exclude) {
             if (ex == item) {
@@ -45,5 +47,13 @@ public class Options {
 
     public boolean useComplexDecorators() {
         return complexDecorators;
+    }
+
+    public boolean useExamplesForLLM() {
+        return useExamplesForLLM;
+    }
+
+    public void setUseExamplesForLLM(boolean useExamplesForLLM) {
+        this.useExamplesForLLM = useExamplesForLLM;
     }
 }

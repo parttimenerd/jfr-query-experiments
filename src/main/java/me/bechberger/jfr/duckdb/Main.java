@@ -1,9 +1,6 @@
 package me.bechberger.jfr.duckdb;
 
-import me.bechberger.jfr.duckdb.commands.ImportCommand;
-import me.bechberger.jfr.duckdb.commands.MacrosCommand;
-import me.bechberger.jfr.duckdb.commands.QueryCommand;
-import me.bechberger.jfr.duckdb.commands.ViewsCommand;
+import me.bechberger.jfr.duckdb.commands.*;
 import picocli.CommandLine;
 
 /**
@@ -23,6 +20,7 @@ import picocli.CommandLine;
                 QueryCommand.class,
                 MacrosCommand.class,
                 ViewsCommand.class,
+                LLMCommand.class,
                 CommandLine.HelpCommand.class
         }
 )

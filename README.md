@@ -33,7 +33,27 @@ Lessons learned on duckdb
 - not using the appender is a terrible idea, it is much, much slower
   - so fixed arrays instead of varlen are a good idea
 
+LLM Idea
+- add SELECT statements for all views and tables with examples: see paper referenced in https://blog.langchain.com/llms-and-sql/
+- use qwen3:30b (https://www.docker.com/blog/local-llm-tool-calling-a-practical-evaluation/ suggests that qwen3 models are best for local use)
+  - check performance and compare with qwen3:14b and qwen2:8b
+- use langchain4j and tool calling: https://docs.langchain4j.dev/tutorials/tools
+- create the following tools:
+  - query_database(sql: String, format: csv|table) -> String
+- requires you to install a ollama
+   ```
+   brew install ollama
+   ollama serve & > /dev/null
+   ollama pull qwen/qwen3:8b
+   ```
+- verdict: local LLMs are not good enough for the task
+
+
 TODO
+- generate description of all tables and views in a database, that contains the relationships (like class ids)
+  - see https://blog.langchain.com/llms-and-sql/
+- remove local AI, and description generation
+- use foreign keys with duckdb (null method)
 - add option to only use simplified descriptors (no package names), enable by default, but disable in ViewTests
 - simple "query" command that 
   - shows errors better

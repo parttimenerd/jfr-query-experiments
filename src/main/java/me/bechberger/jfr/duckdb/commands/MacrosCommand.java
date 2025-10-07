@@ -10,7 +10,7 @@ import java.io.PrintWriter;
 public class MacrosCommand implements Runnable {
 
     @CommandLine.Spec
-    CommandLine.Model.CommandSpec spec; // injected by picocli
+    CommandLine.Model.CommandSpec spec;
 
     @Override
     public void run() {

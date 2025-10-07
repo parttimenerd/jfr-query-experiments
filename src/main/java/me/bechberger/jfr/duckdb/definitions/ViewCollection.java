@@ -27,6 +27,7 @@
 package me.bechberger.jfr.duckdb.definitions;
 
 import me.bechberger.jfr.duckdb.RuntimeSQLException;
+import me.bechberger.jfr.duckdb.query.QueryExecutor;
 import org.duckdb.DuckDBConnection;
 
 import java.sql.ResultSet;
@@ -60,7 +61,9 @@ public class ViewCollection {
                             GROUP BY id
                             """,
                     "ActiveRecording"
-            ),
+            ).description("""
+                    Shows all active recordings with their start, duration and name.
+                    """),
             new View(
                     "active-settings",
                     "environment",
@@ -81,7 +84,9 @@ public class ViewCollection {
                             ORDER BY "Event Type"
                             """,
                     "ActiveSetting"
-            ),
+            ).description("""
+                    Shows the active settings for all event types.
+                    """),
             new View(
                     "allocation-by-class",
                     "application",
@@ -100,7 +105,9 @@ public class ViewCollection {
                                  ORDER BY pressure DESC
                             """,
                     "ObjectAllocationSample", "Class"
-            ),
+            ).description("""
+                    Shows the classes which have the highest allocation pressure.
+                    """),
             new View("allocation-by-thread",
                     "application",
                     "Allocation by Thread",
@@ -118,7 +125,9 @@ public class ViewCollection {
                                  ORDER BY pressure DESC
                             """,
                     "ObjectAllocationSample", "Thread"
-            ),
+            ).description("""
+                    Shows the threads which have the highest allocation pressure.
+                    """),
             new View("allocation-by-site",
                     "application",
                     "Allocation by Method (disregarding line number and descriptor)",
@@ -139,7 +148,9 @@ public class ViewCollection {
                                  ORDER BY pressure DESC
                             """,
                     "ObjectAllocationSample", "Method", "Class"
-            ),
+            ).description("""
+                    Shows the methods which have the highest allocation pressure.
+                    """),
             /**
              * [jvm.blocked-by-system-gc]
              * label = "Blocked by System.gc()"
@@ -168,7 +179,9 @@ public class ViewCollection {
                                  LIMIT 25
                             """,
                     "SystemGC", "Method", "Class"
-            ),
+            ).description("""
+                    Shows the System.gc() calls which have blocked application threads the most.
+                    """),
             new View("class-loaders",
                     "application",
                     "Class Loaders",
@@ -185,7 +198,9 @@ public class ViewCollection {
                                  ORDER BY "Classes" DESC
                             """,
                     "ClassLoaderStatistics", "ClassLoader"
-            ),
+            ).description("""
+                    Shows all class loaders with their loaded class count and hidden class count.
+                    """),
             new View("class-modifications",
                     "jvm",
                     "Class Modifications",
@@ -221,7 +236,9 @@ public class ViewCollection {
                                  ORDER BY duration DESC
                             """,
                     "RedefineClasses", "RetransformClasses", "Method", "Class"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Shows all class redefinitions and retransforms with their duration, requested by and class count.
+                    """),
             new View("compiler-configuration",
                     "jvm",
                     "Compiler Configuration",
@@ -235,7 +252,9 @@ public class ViewCollection {
                                  FROM CompilerConfiguration
                             """,
                     "CompilerConfiguration"
-            ),
+            ).description("""
+                    Shows the configuration of the JIT compiler.
+                    """),
             new View("compiler-statistics",
                     "jvm",
                     "Compiler Statistics",
@@ -256,7 +275,9 @@ public class ViewCollection {
                                  FROM CompilerStatistics
                             """,
                     "CompilerStatistics"
-            ),
+            ).description("""
+                    Shows statistics about the JIT compiler.
+                    """),
             /**
              * [jvm.compiler-phases]
              * label = "Concurrent Compiler Phases"
@@ -288,7 +309,9 @@ public class ViewCollection {
                                  ORDER BY phaseLevel ASC, SUM(duration) DESC
                             """,
                     "CompilerPhase"
-            ),
+            ).description("""
+                    Shows the phases of the concurrent compiler with their average, p95, longest, count and total duration.
+                    """),
             /**
              * [environment.container-configuration]
              * label = "Container Configuration"
@@ -316,7 +339,9 @@ public class ViewCollection {
                                  FROM ContainerConfiguration
                             """,
                     "ContainerConfiguration"
-            ),
+            ).description("""
+                    Shows the configuration of the container in which the JVM is running.
+                    """),
             /**
              * [environment.container-cpu-usage]
              * label = "Container CPU Usage"
@@ -335,7 +360,9 @@ public class ViewCollection {
                                  FROM ContainerCPUUsage
                             """,
                     "ContainerCPUUsage"
-            ),
+            ).description("""
+                    Shows the CPU usage of the container in which the JVM is running.
+                    """),
             /**
              * [environment.container-memory-usage]
              * label = "Container Memory Usage"
@@ -354,7 +381,9 @@ public class ViewCollection {
                                  FROM ContainerMemoryUsage
                             """,
                     "ContainerMemoryUsage"
-            ),
+            ).description("""
+                    Shows the memory usage of the container in which the JVM is running.
+                    """),
             /**
              * [environment.container-io-usage]
              * label = "Container I/O Usage"
@@ -372,7 +401,9 @@ public class ViewCollection {
                                  FROM ContainerIOUsage
                             """,
                     "ContainerIOUsage"
-            ),
+            ).description("""
+                    Shows the I/O usage of the container in which the JVM is running.
+                    """),
             /**
              * [environment.container-cpu-throttling]
              * label = "Container CPU Throttling"
@@ -391,7 +422,9 @@ public class ViewCollection {
                                  FROM ContainerCPUThrottling
                             """,
                     "ContainerCPUThrottling"
-            ),
+            ).description("""
+                    Shows the CPU throttling of the container in which the JVM is running.
+                    """),
             /**
              * [application.contention-by-thread]
              * label = "Contention by Thread"
@@ -417,7 +450,9 @@ public class ViewCollection {
                                  ORDER BY MAX(duration) DESC
                             """,
                     "JavaMonitorEnter", "Thread"
-            ),
+            ).description("""
+                    Shows the threads which have the highest contention time.
+                    """),
             /**
              * [application.contention-by-class]
              * label = "Contention by Lock Class"
@@ -443,7 +478,9 @@ public class ViewCollection {
                                  ORDER BY MAX(duration) DESC
                             """,
                     "JavaMonitorEnter", "Class"
-            ),
+            ).description("""
+                    Shows the classes which have the highest contention time.
+                    """),
             /**
              * [application.contention-by-site]
              * label = "Contention by Site"
@@ -469,7 +506,9 @@ public class ViewCollection {
                                  ORDER BY MAX(duration) DESC
                             """,
                     "JavaMonitorEnter", "Method", "Class"
-            ),
+            ).description("""
+                    Shows the stack traces which have the highest contention time.
+                    """),
             /**
              * [application.contention-by-address]
              * label = "Contention by Monitor Address"
@@ -495,7 +534,9 @@ public class ViewCollection {
                                  ORDER BY MAX(duration) DESC
                             """,
                     "JavaMonitorEnter", "Class"
-            ),
+            ).description("""
+                    Shows the monitor addresses which have the highest contention time.
+                    """),
             /**
              * [application.deprecated-methods-for-removal]
              * label = "Deprecated Methods for Removal"
@@ -524,7 +565,9 @@ public class ViewCollection {
                                  WHERE forRemoval = 'true'
                                  GROUP BY di.method, c.javaName, m.name, m.descriptor
                                  ORDER BY c.javaName, m.name, m.descriptor
-                            """, "DeprecatedInvocation", "Method", "Class"),
+                            """, "DeprecatedInvocation", "Method", "Class").description("""
+                    Shows all deprecated methods which are marked for removal and the classes from which they are called.
+                    """),
             /**
              *
             [environment.cpu-information]
@@ -547,7 +590,9 @@ public class ViewCollection {
                                  GROUP BY cpu, sockets, cores, hwThreads, description
                             """,
                     "CPUInformation"
-            ),
+            ).description("""
+                    Shows information about the CPU(s) on which the JVM is running.
+                    """),
             /**
              * [environment.cpu-load]
              * label = "CPU Load Statistics"
@@ -585,7 +630,9 @@ public class ViewCollection {
                                  FROM CPULoad
                             """,
                     "CPULoad"
-            ),
+            ).description("""
+                    Shows statistics about the CPU load of the JVM and the machine.
+                    """),
             /**
              * [environment.cpu-load-samples]
              * label = "CPU Load"
@@ -606,7 +653,9 @@ public class ViewCollection {
                                  ORDER BY startTime
                             """,
                     "CPULoad"
-            ),
+            ).description("""
+                    Shows the CPU load samples of the JVM and the machine over time.
+                    """),
             /*
             [environment.cpu-tsc]
 label ="CPU Time Stamp Counter"
@@ -628,7 +677,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM CPUTimeStampCounter
                             """,
                     "CPUTimeStampCounter"
-            ),
+            ).description("""
+                    Shows information about the CPU Time Stamp Counter (TSC).
+                    """),
             /**
              * [jvm.deoptimizations-by-reason]
              * label = "Deoptimization by Reason"
@@ -649,7 +700,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(reason) DESC
                             """,
                     "Deoptimization"
-            ),
+            ).description("""
+                    Shows the reasons for deoptimizations and their counts.
+                    """),
             /**
              * [jvm.deoptimizations-by-site]
              * label = "Deoptimization by Site"
@@ -674,7 +727,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(d.reason) DESC
                             """,
                     "Deoptimization", "Method", "Class"
-            ),
+            ).description("""
+                    Shows the methods where deoptimizations occurred and their counts.
+                    """),
             /**
              * [environment.events-by-count]
              * label = "Event Types by Count"
@@ -755,7 +810,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM ExceptionStatistics
                             """,
                     "ExceptionStatistics"
-            ),
+            ).description("Shows the total number of exceptions thrown during the JFR recording period."),
             /**
              * [application.exception-by-type]
              * label ="Exceptions by Type"
@@ -780,7 +835,8 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  JOIN Class c ON combined.thrownClass = c._id
                                  GROUP BY combined.thrownClass, c.javaName
                                     ORDER BY COUNT(*) DESC
-                            """, "JavaErrorThrow", "JavaExceptionThrow", "Class").addUnionAlternatives(),
+                            """, "JavaErrorThrow", "JavaExceptionThrow", "Class").addUnionAlternatives()
+                    .description("Categorizes all thrown exceptions and errors by their class type, ranked by frequency."),
             /**
              *
             [application.exception-by-message]
@@ -807,7 +863,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                             """,
                     "JavaErrorThrow", "JavaExceptionThrow"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("Groups exceptions by their specific error messages, revealing the most frequent error conditions in your application."),
             /**
              * [application.exception-by-site]
              * label ="Exceptions by Site"
@@ -835,7 +891,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                             """,
                     "JavaErrorThrow", "JavaExceptionThrow", "Method", "Class"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Shows the locations in the code (methods) where exceptions are thrown, along with the count of how many times exceptions were thrown at each location.
+                    """),
             /**
              * [application.file-reads-by-path]
              * label = "File Reads by Path"
@@ -859,7 +917,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(bytesRead) DESC
                             """,
                     "FileRead"
-            ),
+            ).description("Analyzes file system read operations grouped by file path, showing both operation frequency and total data volume."),
             /**
              * [application.file-writes-by-path]
              * label = "File Writes by Path"
@@ -883,7 +941,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(bytesWritten) DESC
                             """,
                     "FileWrite"
-            ),
+            ).description("""
+                    Shows the file write operations grouped by file path.
+                    """),
             /**
              *
             [application.finalizers]
@@ -907,7 +967,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY LAST(objects) DESC
                             """,
                     "FinalizerStatistics", "Class"
-            ),
+            ).description("""
+                    Shows statistics about finalizers grouped by the class of the objects being finalized.
+                    """),
             /**
              * [jvm.gc]
              * label = "Garbage Collections"
@@ -941,7 +1003,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY G.gcId;
                             """,
                     "GarbageCollection", "GCHeapSummary"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Provides a summary of all garbage collection events, including start time, type, heap usage before and after GC, and the longest pause duration.
+                    """),
             /**
              * [jvm.gc-concurrent-phases]
              * label = "Concurrent GC Phases"
@@ -970,7 +1034,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(duration) DESC
                             """,
                     "GCPhaseConcurrent"
-            ),
+            ).description("Shows how long each gc phase took on average."),
             /**
              * [jvm.gc-parallel-phases]
              * label = "Parallel GC Phases"
@@ -999,7 +1063,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(duration) DESC
                             """,
                     "GCPhaseParallel"
-            ),
+            ).description("Shows how long each parallel gc phase took on average."),
             /**
              * [jvm.gc-configuration]
              * label = 'GC Configuration'
@@ -1034,7 +1098,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM GCConfiguration
                             """,
                     "GCConfiguration"
-            ),
+            ).description("Shows the configuration of the garbage collector (including number of gc threads)."),
             /**
              * [jvm.gc-references]
              * label = "GC References"
@@ -1078,7 +1142,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY G.gcId ASC
                             """,
                     "GCReferenceStatistics"
-            ),
+            ).description("Shows reference processing statistics during garbage collection including soft, weak, phantom, and final reference counts."),
             /**
              * [jvm.gc-pause-phases]
              * label = "GC Pause Phases"
@@ -1088,7 +1152,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 P95(duration), MAX(duration), COUNT(*), SUM(duration) AS S
              *          FROM   GCPhasePause, GCPhasePauseLevel1, GCPhasePauseLevel2,
              *                 GCPhasePauseLevel3, GCPhasePauseLevel4 GROUP BY name
-             *          ORDER BY T ASC, S"
+             *          ORDER BY T ASC, S DESC"
              */
             new View("gc-pause-phases",
                     "jvm",
@@ -1119,7 +1183,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY eventTypeLabel ASC, SUM(duration) DESC;
                     """,
                     "GCPhasePause", "GCPhasePauseLevel1", "GCPhasePauseLevel2", "GCPhasePauseLevel3", "GCPhasePauseLevel4", "EventType"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Shows the pause phases of the garbage collector with their type, name, average, p95, longest, count, and total duration.
+                    """),
             /**
              * [jvm.gc-pauses]
              * label = "GC Pauses"
@@ -1153,7 +1219,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM GCPhasePause
                             """,
                     "GCPhasePause"
-            ),
+            ).description("""
+                    Shows statistics about the garbage collection pauses including total pause time and number of pauses.
+                    """),
             /**
              * [jvm.gc-allocation-trigger]
              * label = "GC Allocation Trigger"
@@ -1178,7 +1246,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC, SUM(ar.size) DESC
                             """,
                     "AllocationRequiringGC", "Class"
-            ),
+            ).description("""
+                    Identifies the application methods that most frequently trigger garbage collections due to memory allocation requests.
+                    """),
             /**
              * [jvm.gc-cpu-time]
              * label = "GC CPU Time"
@@ -1204,7 +1274,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM GCCPUTime
                             """,
                     "GCCPUTime"
-            ),
+            ).description("""
+                    Summarizes the CPU time consumed by garbage collection.
+                    """),
             /**
              * [jvm.heap-configuration]
              * label = "Heap Configuration"
@@ -1227,7 +1299,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  FROM GCHeapConfiguration
                             """,
                     "GCHeapConfiguration"
-            ),
+            ).description("""
+                    Displays the configuration settings of the JVM heap, including sizes and compressed oops usage.
+                    """),
             /**
              * [application.hot-methods]
              * label = "Java Methods that Execute the Most"
@@ -1254,7 +1328,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  LIMIT 25
                             """,
                     "ExecutionSample", "Method", "Class"
-            ),
+            ).description("""
+                    Identifies the top Java methods where the application spends the most execution time, based on sampling data.
+                    """),
             /**
              * [application.cpu-time-hot-methods]
              * label = "Java Methods that Execute the Most from CPU Time Sampler"
@@ -1281,7 +1357,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  LIMIT 25
                             """,
                     "CPUTimeSample", "Method", "Class"
-            ),
+            ).description("""
+                    Identifies the top Java methods where the application spends the most CPU time, based on CPU time sampling data.
+                    """),
             /**
              * [application.cpu-time-statistics]
              * label = "CPU Time Sample Statistics"
@@ -1312,7 +1390,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      (SELECT SUM(lostSamples) FROM CPUTimeSamplesLost) AS "Lost Samples"
                             """,
                     "CPUTimeSample", "CPUTimeSamplesLost"
-            ),
+            ).description("""
+                    Provides statistics about CPU time sampling, including counts of successful, failed, biased, total, and lost samples.
+                    """),
             /**
              * [jvm.jdk-agents]
              * label = "JDK Agents"
@@ -1341,7 +1421,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY t
                             """,
                     "JavaAgent", "NativeAgent"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Lists all JDK and native agents that were initialized, along with their initialization time and other info.
+                    """),
             /**
              * [environment.jvm-flags]
              * label = "Command Line Flags"
@@ -1397,7 +1479,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             """,
                     "IntFlag", "UnsignedIntFlag", "BooleanFlag", "LongFlag", "UnsignedLongFlag", "DoubleFlag", "StringFlag",
                     "IntFlagChanged", "UnsignedIntFlagChanged", "BooleanFlagChanged", "LongFlagChanged", "UnsignedLongFlagChanged", "DoubleFlagChanged", "StringFlagChanged"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Displays all JVM command line flags along with their current values.
+                    """),
             /**
              * [jvm.jvm-information]
              * label = "JVM Information"
@@ -1466,7 +1550,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(duration) DESC
                             """,
                     "JavaMonitorWait", "JavaMonitorEnter", "ThreadPark", "ThreadSleep", "SocketRead", "SocketWrite", "FileWrite", "FileRead"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Summarizes various latency events by type, including counts and duration statistics.
+                    """),
             /**
              * [application.memory-leaks-by-class]
              * label = "Memory Leak Candidates by Class"
@@ -1545,7 +1631,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY LAST(average) ASC
                             """,
                     "MethodTiming", "Method", "Class"
-            ),
+            ).description("""
+                    Provides timing statistics for methods, including invocation counts and time metrics.
+                    """),
             /**
              * [application.method-calls]
              * label = "Method Calls"
@@ -1572,7 +1660,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                             """,
                     "MethodTrace", "Method", "Class"
-            ),
+            ).description("""
+                    Displays method call relationships, showing which methods are called by which callers along with invocation counts.
+                    """),
             /**
              * [application.modules]
              * label = "Modules"
@@ -1618,7 +1708,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY SUM(jmi.duration) DESC
                             """,
                     "JavaMonitorInflate", "Class"
-            ),
+            ).description("""
+                    Identifies methods that caused monitor inflation, along with the associated monitor classes and duration statistics.
+                    """),
             /**
              * [environment.native-libraries]
              * label = "Native Libraries"
@@ -1669,7 +1761,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY eventType ASC, name ASC
                             """,
                     "NativeLibraryUnload", "NativeLibraryLoad"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Lists any failures that occurred during the loading or unloading of native libraries, along with error messages.
+                    """),
             /**
              * [jvm.native-memory-committed]
              * label = "Native Memory Committed"
@@ -1745,7 +1839,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                             """,
                     "NativeMethodSample", "Method", "Class"
-            ),
+            ).description("""
+                    Identifies the top native methods where the application spends the most time, based on sampling data.
+                    """),
             /**
              * [environment.network-utilization]
              * label = "Network Utilization"
@@ -1769,7 +1865,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY networkInterface ASC
                             """,
                     "NetworkUtilization"
-            ),
+            ).description("""
+                    Displays network utilization statistics for each network interface, including read and write rates.
+                    """),
             /**
              * [application.object-statistics]
              * label = "Objects Occupying More than 1%"
@@ -1805,7 +1903,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY h DESC
                             """,
                     "ObjectCountAfterGC", "ObjectCount", "Class"
-            ).addUnionAlternatives(),
+            ).addUnionAlternatives().description("""
+                    Summarizes object statistics by class, including counts, heap space usage, and increases over time.
+                    """),
             /**
              * [application.pinned-threads]
              * label = "Pinned Virtual Threads"
@@ -1832,7 +1932,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY SUM(vtp.duration) DESC
                             """,
                     "VirtualThreadPinned", "Class"
-            ),
+            ).description("""
+                    Identifies virtual threads that have been pinned, along with statistics on pinning duration and counts.
+                    """),
             /**
              * [application.thread-count]
              * label ="Java Thread Statistics"
@@ -1921,18 +2023,18 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                     "SafepointBegin", "SafepointEnd", "SafepointStateSynchronization", "SafepointCleanup"
             ).addAlternative("SafepointStateSynchronization", "SafepointBegin", "SafepointEnd",
                     """
-                          CREATE VIEW "safepoints" AS
-                            SELECT
-                                B.startTime AS "Start Time",
-                                format_duration(epoch(E.startTime - B.startTime)) AS "Duration",
-                                format_duration(S.duration) AS "State Synchronization",
-                                jniCriticalThreadCount AS "JNI Critical Threads",
-                                totalThreadCount AS "Total Threads"
-                            FROM SafepointBegin B
-                            JOIN SafepointEnd E ON B.safepointId = E.safepointId
-                            LEFT JOIN SafepointStateSynchronization S ON B.safepointId = S.safepointId
-                            ORDER BY B.startTime ASC
-                            """),
+                    CREATE VIEW "safepoints" AS
+                    SELECT
+                        B.startTime AS "Start Time",
+                        format_duration(epoch(E.startTime - B.startTime)) AS "Duration",
+                        format_duration(S.duration) AS "State Synchronization",
+                        jniCriticalThreadCount AS "JNI Critical Threads",
+                        totalThreadCount AS "Total Threads"
+                    FROM SafepointBegin B
+                    JOIN SafepointEnd E ON B.safepointId = E.safepointId
+                    LEFT JOIN SafepointStateSynchronization S ON B.safepointId = S.safepointId
+                    ORDER BY B.startTime ASC
+                    """),
             /**
              * [jvm.longest-compilations]
              * label = "Longest Compilations"
@@ -2156,7 +2258,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                     "Thread Allocation Statistics",
                     "thread-allocation",
                     """
-                            CREATE VIEW thread_allocation_statistics AS
+                            CREATE VIEW "thread-allocation" AS
                             SELECT
                                 thread AS "Thread",
                                 LAST(allocated) AS "Allocated",
@@ -2306,10 +2408,10 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                         throw new RuntimeSQLException(alternative, e);
                     }
                 } else {
-                    System.err.println("Skipping view " + view.name() + " because it references missing tables: " +
+                    /*System.err.println("Skipping view " + view.name() + " because it references missing tables: " +
                                        view.referencedTables().stream()
                                                .filter(t -> !existingTables.contains(t))
-                                               .collect(Collectors.joining(", ")));
+                                               .collect(Collectors.joining(", ")));*/
                 }
             } else {
                 try {
@@ -2349,5 +2451,28 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                 .filter(v -> v.name().equals(name))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No such view: " + name));
+    }
+
+    public static String getLLMDescription(DuckDBConnection connection, boolean addExamples) throws SQLException {
+        var tables = getTableNames(connection);
+        StringBuilder sb = new StringBuilder();
+        sb.append("The available views with their descriptions are:\n");
+        for (View view : getViews()) {
+            if (view.isValid(tables)) {
+                sb.append("- ").append(view.name());
+                if (view.description() != null) {
+                    sb.append(": ").append(view.description().trim());
+                }
+                sb.append("\n");
+                if (addExamples) {
+                    String query = "SELECT * FROM '" + view.name() + "' LIMIT 1";
+                    sb.append("  Example usage: ").append(query).append("\n");
+                    String result = new QueryExecutor(connection).executeQuery(query, QueryExecutor.OutputFormat.CSV, 10);
+                    sb.append("  Example result csv:\n").append(result.lines().map(l -> "    " + l).collect(Collectors.joining("\n"))).append("\n");
+                }
+            }
+        }
+        sb.append("To obtain the sql definition of a view, use 'view_sql(view_name)', to get the columns, use 'DESCRIBE <view_name>;'");
+        return sb.toString();
     }
 }

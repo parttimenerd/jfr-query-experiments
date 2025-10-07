@@ -23,6 +23,7 @@ public final class View {
     private final List<String> referencedTables;
     private final List<Alternative> alternatives = new ArrayList<>();
     private boolean hasUnionAlternatives = false;
+    private String description = null;
 
     public View(String name, String category, String label, @Nullable String relatedJFRView, String definition, String referencedTable, String... referencedTables) {
         this.name = name;
@@ -32,10 +33,22 @@ public final class View {
         this.definition = definition;
         this.referencedTables = Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables))
                 .toList();
+        // check that the definition starts with "CREATE VIEW name "
+        if (!definition.trim().toLowerCase().replaceAll("[\"']", "").startsWith("create view " + name.toLowerCase() + " ")) {
+            throw new IllegalArgumentException("Improper definition for view " + name + ": must start with \"CREATE VIEW \"" + name + "\" \"");
+        }
     }
 
-    String viewName() {
-        return "jfr$" + name;
+    @Nullable public String description() {
+        return description;
+    }
+
+    /**
+     * Description currently used for LLMs
+     */
+    public View description(String description) {
+        this.description = description;
+        return this;
     }
 
     public boolean isValid(Set<String> existingTables) {
