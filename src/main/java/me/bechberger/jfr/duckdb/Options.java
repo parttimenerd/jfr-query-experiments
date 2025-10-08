@@ -21,9 +21,7 @@ public class Options {
     private int maxStackTraceDepth = 10;
 
     @CommandLine.Option(names = {"--complex-descriptors"}, description = "Use package names in descriptors", defaultValue = "false")
-    private boolean complexDecorators = false;
-
-    private boolean useExamplesForLLM = false;
+    private boolean complexDescriptors = false;
 
     public boolean isExcluded(ExcludableItems item) {
         for (ExcludableItems ex : exclude) {
@@ -45,15 +43,12 @@ public class Options {
         return maxStackTraceDepth;
     }
 
-    public boolean useComplexDecorators() {
-        return complexDecorators;
+    public boolean useComplexDescriptors() {
+        return complexDescriptors;
     }
 
-    public boolean useExamplesForLLM() {
-        return useExamplesForLLM;
+    public void setComplexDescriptors(boolean complexDescriptors) {
+        this.complexDescriptors = complexDescriptors;
     }
 
-    public void setUseExamplesForLLM(boolean useExamplesForLLM) {
-        this.useExamplesForLLM = useExamplesForLLM;
-    }
 }

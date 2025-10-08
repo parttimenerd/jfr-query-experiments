@@ -35,7 +35,9 @@ class JFRFileHelper {
         } else {
             // Need full import
             Files.deleteIfExists(dbFile);
-            BasicParallelImporter.createFile(jfrFile.getPath(), dbFile.toAbsolutePath(), new Options());
+            Options options = new Options();
+            options.setComplexDescriptors(true); // Use complex descriptors for tests
+            BasicParallelImporter.createFile(jfrFile.getPath(), dbFile.toAbsolutePath(), options);
         }
 
         this.jfrViewResultCache = new JFRViewResultCache(jfrFile.getPath());

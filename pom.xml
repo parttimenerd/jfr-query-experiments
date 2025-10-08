@@ -95,7 +95,7 @@
                     <appendAssemblyId>false</appendAssemblyId>
                     <archive>
                         <manifestEntries>
-                            <Main-Class>me.bechberger.Main</Main-Class>
+                            <Main-Class>me.bechberger.jfr.duckdb.Main</Main-Class>
                         </manifestEntries>
                     </archive>
                 </configuration>

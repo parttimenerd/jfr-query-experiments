@@ -1,7 +1,12 @@
 package me.bechberger.jfr.duckdb.util;
 
+import me.bechberger.jfr.duckdb.JFRFile;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,5 +33,25 @@ class JFRUtilTest {
     void decodeBytecodeClassName(String input, String expected) {
         JFRUtil util = new JFRUtil();
         assertEquals(expected, util.decodeBytecodeClassName(input));
+    }
+
+    static Stream<Arguments> provideSimplifyBytecodeTests() {
+        return Stream.of(
+                Arguments.of(null, null),
+                Arguments.of("", ""),
+                Arguments.of("(L;)V", "(L;)V"),
+                Arguments.of("(I)V", "(int)"),
+                Arguments.of("(Ljava/lang/String;I)V", "(String, int)"),
+                Arguments.of("([I[[Ljava/lang/Object;)V", "(int[], Object[][])"),
+                Arguments.of("(D[FJ)V", "(double, float[], long)"),
+                Arguments.of("()V", "()"),
+                Arguments.of("(Ljava/util/List;[[[I)Ljava/lang/String;", "(List, int[][][])")
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideSimplifyBytecodeTests")
+    void simplifyMethodDescriptor(String input, String expected) {
+        assertEquals(expected, JFRUtil.simplifyDescriptor(input));
     }
 }

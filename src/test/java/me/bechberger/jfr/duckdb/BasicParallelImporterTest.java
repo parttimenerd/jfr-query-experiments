@@ -182,7 +182,7 @@ class BasicParallelImporterTest {
         assertThat(methodTable).row(0)
                 .value("_id").isEqualTo(1)
                 .value("name").isEqualTo("commitSimpleEventWithStackTraceEvent")
-                .value("descriptor").isEqualTo("()V")
+                .value("descriptor").isEqualTo("()")
                 .value("modifiers").isEqualTo(2)
                 .value("hidden").isFalse();
 

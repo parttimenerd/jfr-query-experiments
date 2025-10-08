@@ -148,14 +148,6 @@ public class BasicParallelImporter {
             return "CREATE TABLE IF NOT EXISTS \"" + name + "\" (" + idPrefix + String.join(", ", columns.stream().map(Column::toString).toList()) + ");";
         }
 
-        public String getLLMDescription() {
-            String idPrefix = doesUseCaching() ? "_id INTEGER PRIMARY KEY,\n  " : "";
-            return "CREATE TABLE \"" + name + "\" (" + idPrefix +
-                   String.join(",\n  ", columns.stream()
-                           .map(c -> c.toString() +
-                                     (c.referencedTable != null ? " -- references " + c.referencedTable + "(_id) if != 0" : "")).toList()) + "\n);";
-        }
-
         private void createTable(DuckDBConnection conn) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute(this.toString());
@@ -329,6 +321,14 @@ public class BasicParallelImporter {
         Table.Column col;
         switch (typeName) {
             case "java.lang.String" -> {
+                if (fieldName.equals("descriptor") && !options.useComplexDescriptors()) {
+                    // special handling for method descriptors
+                    col = new Table.Column(fieldName, "VARCHAR", (obj, app) -> {
+                        String d = getBaseObject.apply(obj).getString(fieldName);
+                        app.append(JFRUtil.simplifyDescriptor(d));
+                    });
+                    break;
+                }
                 col = new Table.Column(fieldName, "VARCHAR", (obj, app) -> app.append(getBaseObject.apply(obj).getString(fieldName)));
             }
             case "long" -> {
