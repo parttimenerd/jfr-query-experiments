@@ -30,8 +30,10 @@ import me.bechberger.jfr.duckdb.RuntimeSQLException;
 import me.bechberger.jfr.duckdb.query.QueryExecutor;
 import org.duckdb.DuckDBConnection;
 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -160,7 +162,7 @@ public class ViewCollection {
              *          WHERE invokedConcurrent = 'false'
              *          ORDER BY duration DESC
              *          LIMIT 25"
-             */
+            */
             new View("blocked-by-system-gc",
                     "jvm",
                     "Blocked by System.gc()",
@@ -547,7 +549,7 @@ public class ViewCollection {
              *          WHERE forRemoval = 'true'
              *          GROUP BY m
              *          ORDER BY m"
-             */
+            */
             new View("deprecated-methods-for-removal",
                     "application",
                     "Deprecated Methods for Removal",
@@ -983,7 +985,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 GCHeapSummary AS A
              *          WHERE B.when = 'Before GC' AND A.when = 'After GC'
              *          GROUP BY gcId ORDER BY gcId"
-             */
+            */
             new View("gc",
                     "jvm",
                     "Garbage Collections",
@@ -1015,7 +1017,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 MAX(duration), COUNT(*), SUM(duration) AS S
              *          FROM   GCPhaseConcurrent, GCPhaseConcurrentLevel1
              *          GROUP BY name ORDER BY S"
-             */
+            */
             new View("gc-concurrent-phases",
                     "jvm",
                     "Concurrent GC Phases",
@@ -1044,7 +1046,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 MAX(duration), COUNT(*), SUM(duration) AS S
              *          FROM   GCPhaseParallel
              *          GROUP BY name ORDER BY S"
-             */
+            */
             new View("gc-parallel-phases",
                     "jvm",
                     "Parallel GC Phases",
@@ -1078,7 +1080,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                LAST(isExplicitGCDisabled), LAST(pauseTarget),
              *                LAST(gcTimeRatio)
              *         FROM   GCConfiguration"
-             */
+            */
             new View("gc-configuration",
                     "jvm",
                     "GC Configuration",
@@ -1153,7 +1155,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FROM   GCPhasePause, GCPhasePauseLevel1, GCPhasePauseLevel2,
              *                 GCPhasePauseLevel3, GCPhasePauseLevel4 GROUP BY name
              *          ORDER BY T ASC, S DESC"
-             */
+            */
             new View("gc-pause-phases",
                     "jvm",
                     "GC Pause Phases",
@@ -1198,7 +1200,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                P95(duration), P99(duration), P999(duration),
              *                MAX(duration)
              *         FROM GCPhasePause"
-             */
+            */
             new View("gc-pauses",
                     "jvm",
                     "GC Pauses",
@@ -1228,7 +1230,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Trigger Method (Non-JDK)', 'Count', 'Total Requested'
              *          SELECT stackTrace.topApplicationFrame AS S, COUNT(*), SUM(size)
              *          FROM AllocationRequiringGC GROUP BY S"
-             */
+            */
             new View("gc-allocation-trigger",
                     "jvm",
                     "GC Allocation Trigger",
@@ -1258,7 +1260,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *         SELECT SUM(userTime), SUM(systemTime),
              *                SUM(realTime), DIFF(startTime), COUNT(*)
              *         FROM GCCPUTime"
-             */
+            */
             new View("gc-cpu-time",
                     "jvm",
                     "GC CPU Time",
@@ -1283,7 +1285,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * form = "SELECT LAST(initialSize), LAST(minSize), LAST(maxSize),
              *                LAST(usesCompressedOops), LAST(compressedOopsMode)
              *                FROM GCHeapConfiguration"
-             */
+            */
             new View("heap-configuration",
                     "jvm",
                     "Heap Configuration",
@@ -1309,7 +1311,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT none, none, normalized
              *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
              *          FROM ExecutionSample GROUP BY T LIMIT 25"
-             */
+            */
             new View("hot-methods",
                     "application",
                     "Java Methods that Execute the Most",
@@ -1338,7 +1340,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT none, none, normalized
              *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
              *          FROM CPUTimeSample GROUP BY T LIMIT 25"
-             */
+            */
             new View("cpu-time-hot-methods",
                     "application",
                     "Java Methods that Execute the Most from CPU Time Sampler",
@@ -1375,7 +1377,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *           S.failed = 'false' AND
              *           F.failed = 'true'  AND
              *           B.biased = 'true'"
-             */
+            */
             new View("cpu-time-statistics",
                     "application",
                     "CPU Time Sample Statistics",
@@ -1401,7 +1403,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          SELECT LAST(initializationTime) AS t, LAST(initializationDuration) AS d, LAST(name), LAST(JavaAgent.options)
              *          FROM JavaAgent, NativeAgent
              *          ORDER BY t"
-             */
+            */
             new View("jdk-agents",
                     "jvm",
                     "JDK Agents",
@@ -1435,7 +1437,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          LongFlagChanged, UnsignedLongFlagChanged,
              *          DoubleFlagChanged, StringFlagChanged
              *          GROUP BY name ORDER BY name ASC"
-             */
+            */
             new View("jvm-flags",
                     "environment",
                     "Command Line Flags",
@@ -1490,7 +1492,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                'VM Arguments', 'Program Arguments'
              *         SELECT LAST(pid), LAST(jvmStartTime), LAST(jvmName), LAST(jvmVersion),
              *                LAST(jvmArguments), LAST(javaArguments) FROM JVMInformation"
-             */
+            */
             new View("jvm-information",
                     "jvm",
                     "JVM Information",
@@ -1515,7 +1517,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          SELECT eventType.label AS T, COUNT(*), AVG(duration),  P99(duration), MAX(duration), SUM(duration)
              *          FROM JavaMonitorWait, JavaMonitorEnter, ThreadPark, ThreadSleep,
              *          SocketRead, SocketWrite, FileWrite, FileRead GROUP BY T"
-             */
+            */
             new View("latencies-by-type",
                     "application",
                     "Latencies by Type",
@@ -1559,7 +1561,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Alloc. Time', 'Object Class', 'Object Age', 'Heap Usage'
              *          SELECT LAST_BATCH(allocationTime), LAST_BATCH(object.type), LAST_BATCH(objectAge),
              *          LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP BY object.type ORDER BY allocationTime"
-             */
+            */
             new View("memory-leaks-by-class",
                     "application",
                     "Memory Leak Candidates by Class",
@@ -1584,7 +1586,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Alloc. Time', 'Application Method', 'Object Age', 'Heap Usage'
              *          SELECT LAST_BATCH(allocationTime), LAST_BATCH(stackTrace.topApplicationFrame), LAST_BATCH(objectAge),
              *          LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP BY stackTrace.topApplicationFrame ORDER BY allocationTime"
-             */
+            */
             new View("memory-leaks-by-site",
                     "application",
                     "Memory Leak Candidates by Site",
@@ -1611,7 +1613,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT none, none, ms-precision:6, ms-precision:6, ms-precision:6
              *          SELECT LAST_BATCH(method) AS M, LAST_BATCH(invocations), LAST_BATCH(minimum), LAST_BATCH(average), LAST_BATCH(maximum)
              *          FROM jdk.MethodTiming GROUP BY method ORDER BY average"
-             */
+            */
             new View("method-timing",
                     "application",
                     "Method Timing",
@@ -1640,7 +1642,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Traced Method', 'Caller', 'Invocations'
              *          SELECT method as M, stackTrace.topFrame.method AS S, COUNT(*) AS C
              *          FROM jdk.MethodTrace GROUP BY M, S ORDER BY C DESC"
-             */
+            */
             new View("method-calls",
                     "application",
                     "Method Calls",
@@ -1667,7 +1669,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * [application.modules]
              * label = "Modules"
              * table = "SELECT LAST(source.name) AS S FROM ModuleRequire GROUP BY source.name ORDER BY S"
-             */
+            */
             new View("modules",
                     "application",
                     "Modules",
@@ -1688,7 +1690,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * label = "Monitor Inflation"
              * table = "SELECT stackTrace, monitorClass, COUNT(*), SUM(duration) AS S
              *          FROM jdk.JavaMonitorInflate GROUP BY stackTrace, monitorClass ORDER BY S"
-             */
+            */
             new View("monitor-inflation",
                     "application",
                     "Monitor Inflation",
@@ -1716,7 +1718,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * label = "Native Libraries"
              * table = "FORMAT cell-height:2, none, none
              *          SELECT name AS N, baseAddress, topAddress FROM NativeLibrary GROUP BY name ORDER BY N"
-             */
+            */
             new View("native-libraries",
                     "environment",
                     "Native Libraries",
@@ -1741,7 +1743,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          SELECT eventType.label, name, errorMessage
              *          FROM NativeLibraryUnload, NativeLibraryLoad
              *          WHERE success = 'false'"
-             */
+            */
             new View("native-library-failures",
                     "environment",
                     "Native Library Load/Unload Failures",
@@ -1770,7 +1772,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum'
              *          SELECT type, FIRST(committed), AVG(committed), LAST(committed), MAX(committed) AS M
              *          FROM NativeMemoryUsage GROUP BY type ORDER BY M DESC"
-             */
+            */
             new View("native-memory-committed",
                     "jvm",
                     "Native Memory Committed",
@@ -1795,7 +1797,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum'
              *          SELECT type, FIRST(reserved), AVG(reserved), LAST(reserved), MAX(reserved) AS M
              *          FROM NativeMemoryUsage GROUP BY type ORDER BY M DESC"
-             */
+            */
             new View("native-memory-reserved",
                     "jvm",
                     "Native Memory Reserved",
@@ -1821,7 +1823,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT none, none, normalized
              *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
              *          FROM NativeMethodSample GROUP BY T"
-             */
+            */
             new View("native-methods",
                     "application",
                     "Waiting or Executing Native Methods",
@@ -1847,7 +1849,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * label = "Network Utilization"
              * table = "SELECT networkInterface, AVG(readRate), MAX(readRate), AVG(writeRate), MAX(writeRate)
              *          FROM NetworkUtilization GROUP BY networkInterface"
-             */
+            */
             new View("network-utilization",
                     "environment",
                     "Network Utilization",
@@ -1878,7 +1880,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FROM ObjectCountAfterGC, ObjectCount
              *          GROUP BY objectClass
              *          ORDER BY totalSize DESC"
-             */
+            */
             new View("object-statistics",
                     "application",
                     "Objects Occupying More than 1%",
@@ -1914,7 +1916,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 MAX(duration), SUM(duration) AS T FROM VirtualThreadPinned
              *          GROUP BY S
              *          ORDER BY T DESC"
-             */
+            */
             new View("pinned-threads", // TODO test
                     "application",
                     "Pinned Virtual Threads",
@@ -1939,7 +1941,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * [application.thread-count]
              * label ="Java Thread Statistics"
              * table = "SELECT * FROM JavaThreadStatistics"
-             */
+            */
             new View("thread-count",
                     "application",
                     "Java Thread Statistics",
@@ -1971,7 +1973,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                     new Table.Column("lastEvent", "TIMESTAMP", null),
              *                     new Table.Column("eventDurationSeconds", "DOUBLE", null),
              *                     new Table.Column("dumpReason", "VARCHAR", null)
-             */
+            */
             new View("recording",
                     "environment",
                     "Recording Information",
@@ -1998,9 +2000,9 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                    S.duration, C.duration,
              *                    jniCriticalThreadCount, totalThreadCount
              *          FROM SafepointBegin AS B, SafepointEnd AS E,
-               SafepointCleanup AS C, SafepointStateSynchronization AS S
+            SafepointCleanup AS C, SafepointStateSynchronization AS S
              *          GROUP BY safepointId ORDER BY B.startTime"
-             */
+            */
             new View("safepoints", // TODO test
                     "jvm",
                     "Safepoints",
@@ -2040,7 +2042,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * label = "Longest Compilations"
              * table = "SELECT startTime, duration AS D, method, compileLevel, succeded
              *          FROM Compilation ORDER BY D LIMIT 25"
-             */
+            */
             new View("longest-compilations",
                     "jvm",
                     "Longest Compilations",
@@ -2067,7 +2069,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Time', 'Loaded Class', 'Load Time'
              *          SELECT startTime,loadedClass, duration AS D
              *          FROM ClassLoad ORDER BY D DESC LIMIT 25"
-             */
+            */
             new View("longest-class-loading",
                     "application",
                     "Longest Class Loading",
@@ -2090,7 +2092,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * label = "System Properties at Startup"
              * table = "FORMAT none, cell-height:25
              *         SELECT key AS K, value FROM InitialSystemProperty GROUP BY key ORDER by K"
-             */
+            */
             new View("system-properties",
                     "environment",
                     "System Properties at Startup",
@@ -2113,7 +2115,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT cell-height:2, none, none
              *          SELECT host, COUNT(*), SUM(bytesWritten) AS S FROM SocketWrite
              *          GROUP BY host ORDER BY S DESC"
-             */
+            */
             new View("socket-writes-by-host",
                     "application",
                     "Socket Writes by Host",
@@ -2137,7 +2139,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT cell-height:2, none, none
              *          SELECT host, COUNT(*), SUM(bytesRead) AS S FROM SocketRead
              *          GROUP BY host ORDER BY S DESC"
-             */
+            */
             new View("socket-reads-by-host",
                     "application",
                     "Socket Reads by Host",
@@ -2164,7 +2166,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                LAST(cores), LAST(hwThreads),
              *                LAST(sockets), LAST(description)
              *         FROM CPUInformation, PhysicalMemory, OSInformation, VirtualizationInformation"
-             */
+            */
             new View("system-information",
                     "environment",
                     "System Information",
@@ -2191,7 +2193,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          SELECT FIRST(startTime), LAST(startTime),
              *                 FIRST(pid), FIRST(commandLine)
              *          FROM SystemProcess GROUP BY pid"
-             */
+            */
             new View("system-processes",
                     "environment",
                     "System Processes",
@@ -2221,7 +2223,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *                 COUNT(O.allocationSize), MIN(O.allocationSize), AVG(O.allocationSize),
              *                 MAX(O.allocationSize), SUM(O.allocationSize)
              *         FROM ObjectAllocationInNewTLAB AS I, ObjectAllocationOutsideTLAB AS O"
-             */
+            */
             new View("tlabs",
                     "jvm",
                     "Thread Local Allocation Buffers",
@@ -2252,7 +2254,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          FORMAT none, none, normalized
              *          SELECT thread, LAST(allocated), LAST(allocated) AS A FROM ThreadAllocationStatistics
              *          GROUP BY thread ORDER BY A DESC"
-             */
+            */
             new View("thread-allocation", // TODO test
                     "application",
                     "Thread Allocation Statistics",
@@ -2277,7 +2279,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'Thread', 'System', 'User'
              *          SELECT eventThread AS E, LAST(system), LAST(user) AS U
              *          FROM ThreadCPULoad GROUP BY E ORDER BY U DESC"
-             */
+            */
             new View("thread-cpu-load",
                     "application",
                     "Thread CPU Load",
@@ -2302,7 +2304,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              *          SELECT S.startTime, S.stackTrace, eventThread, DIFF(startTime) AS D
              *          FROM ThreadStart AS S, ThreadEnd AS E GROUP
              *          by eventThread ORDER BY D DESC"
-             */
+            */
             new View("thread-start",
                     "application",
                     "Platform Thread Start by Method",
@@ -2364,7 +2366,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
              * table = "COLUMN 'VM Operation', 'Average Duration', 'Longest Duration', 'Count' , 'Total Duration'
              *          SELECT operation,  AVG(duration), MAX(duration), COUNT(*), SUM(duration)
              *          FROM jdk.ExecuteVMOperation GROUP BY operation"
-             */
+            */
             new View("vm-operations",
                     "jvm",
                     "VM Operations",
@@ -2403,7 +2405,11 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                 String alternative = view.getBestMatchingQuery(existingTables);
                 if (alternative != null) {
                     try {
-                        connection.createStatement().execute(alternative);
+                        Statement stmt = connection.createStatement();
+                        stmt.execute(alternative);
+                        if (view.description() != null) {
+                            stmt.execute("COMMENT ON VIEW \"" + view.name() + "\" IS " + stmt.enquoteLiteral(view.description()) + ";");
+                        }
                     } catch (SQLException e) {
                         throw new RuntimeSQLException(alternative, e);
                     }
@@ -2451,28 +2457,5 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                 .filter(v -> v.name().equals(name))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No such view: " + name));
-    }
-
-    public static String getLLMDescription(DuckDBConnection connection, boolean addExamples) throws SQLException {
-        var tables = getTableNames(connection);
-        StringBuilder sb = new StringBuilder();
-        sb.append("The available views with their descriptions are:\n");
-        for (View view : getViews()) {
-            if (view.isValid(tables)) {
-                sb.append("- ").append(view.name());
-                if (view.description() != null) {
-                    sb.append(": ").append(view.description().trim());
-                }
-                sb.append("\n");
-                if (addExamples) {
-                    String query = "SELECT * FROM '" + view.name() + "' LIMIT 1";
-                    sb.append("  Example usage: ").append(query).append("\n");
-                    String result = new QueryExecutor(connection).executeQuery(query, QueryExecutor.OutputFormat.CSV, 10);
-                    sb.append("  Example result csv:\n").append(result.lines().map(l -> "    " + l).collect(Collectors.joining("\n"))).append("\n");
-                }
-            }
-        }
-        sb.append("To obtain the sql definition of a view, use 'view_sql(view_name)', to get the columns, use 'DESCRIBE <view_name>;'");
-        return sb.toString();
     }
 }

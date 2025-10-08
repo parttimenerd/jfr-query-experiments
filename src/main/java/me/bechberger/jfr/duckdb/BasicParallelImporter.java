@@ -5,11 +5,9 @@ import jdk.jfr.FlightRecorder;
 import jdk.jfr.Timespan;
 import jdk.jfr.ValueDescriptor;
 import jdk.jfr.consumer.*;
-import jdk.management.jfr.RecordingInfo;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
-import me.bechberger.jfr.duckdb.query.QueryExecutor;
-import me.bechberger.jfr.duckdb.util.SQLUtil;
+import me.bechberger.jfr.duckdb.util.JFRUtil;
 import org.duckdb.DuckDBAppender;
 import org.duckdb.DuckDBConnection;
 import org.jetbrains.annotations.Nullable;
@@ -21,12 +19,10 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
-import java.time.OffsetTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
@@ -35,7 +31,7 @@ import static me.bechberger.jfr.duckdb.util.SQLUtil.append;
 /**
  * Imports a JFR recording into a DuckDB database and creates the database tables
  */
-public class BasicParallelImporter extends AbstractImporter {
+public class BasicParallelImporter {
 
     static final Function<RecordedObject, RecordedObject> IDENTITY_FUNCTION = (o) -> o;
 
@@ -275,13 +271,33 @@ public class BasicParallelImporter extends AbstractImporter {
         }
     }
 
+    private final ConnectionSupplier connectionSupplier;
+    private final Options options;
     private final Map<EventType, Table> eventTypeToTable = new HashMap<>();
     private final Map<String, Table> structTypeToTable = new HashMap<>();
     private final Map<EventType, Integer> eventCount = new HashMap<>();
     private final RecordingInfo recordingInfo = new RecordingInfo();
 
+    @FunctionalInterface
+    public interface ConnectionSupplier {
+        DuckDBConnection get() throws SQLException;
+    }
+
     public BasicParallelImporter(ConnectionSupplier connectionSupplier, Options options) {
-        super(connectionSupplier, options);
+        this.connectionSupplier = connectionSupplier;
+        this.options = options;
+    }
+
+    public final void importRecording(Path path) throws IOException {
+        importRecording(JFRUtil.streamEvents(path));
+    }
+
+    public final void importRecording(List<RecordedEvent> events) throws IOException {
+        importRecording(events.stream());
+    }
+
+    public String normalizeTableName(String name) {
+        return name.replaceAll("^(java|jfr|jdk)(\\.[a-z]+)*\\.", "");
     }
 
     private Table getTableForEventType(EventType eventType) {
@@ -627,7 +643,6 @@ public class BasicParallelImporter extends AbstractImporter {
         }
     }
 
-    @Override
     public void importRecording(Stream<RecordedEvent> eventStream) throws IOException {
         eventStream.forEach(event -> {
             Table table = getTableForEventType(event.getEventType());
@@ -655,9 +670,7 @@ public class BasicParallelImporter extends AbstractImporter {
         }
     }
 
-    public record CreationResult(String llmDescription) {}
-
-    public static CreationResult createFile(Path jfrFile, Path dbFile, Options options) throws IOException, SQLException {
+    public static void createFile(Path jfrFile, Path dbFile, Options options) throws IOException, SQLException {
         List<DuckDBConnection> conns = new ArrayList<>();
         var importer = new BasicParallelImporter(() -> {
             try {
@@ -669,14 +682,12 @@ public class BasicParallelImporter extends AbstractImporter {
             }
         }, options);
         importer.importRecording(jfrFile);
-        String llmDescription = importer.getLLMDescription(options.useExamplesForLLM());
         for (DuckDBConnection duckDBConnection : conns) {
             duckDBConnection.close();
         }
-        return new CreationResult(llmDescription);
     }
 
-    public static CreationResult importIntoConnection(Path jfrFile, DuckDBConnection connection, Options options) throws IOException, SQLException {
+    public static void importIntoConnection(Path jfrFile, DuckDBConnection connection, Options options) throws IOException, SQLException {
         List<DuckDBConnection> conns = new ArrayList<>();
         var importer = new BasicParallelImporter(() -> {
             try {
@@ -688,11 +699,9 @@ public class BasicParallelImporter extends AbstractImporter {
             }
         }, options);
         importer.importRecording(jfrFile);
-        String llmDescription = importer.getLLMDescription(options.useExamplesForLLM());
         for (DuckDBConnection duckDBConnection : conns) {
             duckDBConnection.close();
         }
-        return new CreationResult(llmDescription);
     }
 
     public static void addMacrosAndViews(DuckDBConnection connection) {
@@ -706,33 +715,5 @@ public class BasicParallelImporter extends AbstractImporter {
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to add views to database", e);
         }
-    }
-
-    /**
-     * Returns a description of the database schema in SQL format, suitable for LLM input.
-     *
-     * @param addExamples whether to add example queries and results for each table
-     *                    (this should improve LLM performance, see <a href="https://arxiv.org/abs/2204.00498">Rajkumar et al</a>)
-     */
-    public String getLLMDescription(boolean addExamples) throws SQLException {
-        StringBuilder sb = new StringBuilder();
-        sb.append("There are the following tables in the database (described via the SQL definitions):\n\n");
-        List<Table> tables = new ArrayList<>(eventTypeToTable.values());
-        tables.addAll(structTypeToTable.values());
-        var connection = connectionSupplier.get();
-        for (Table table : tables) {
-            sb.append(table.getLLMDescription()).append("\n");
-            if (addExamples) {
-                String query = "SELECT * FROM '" + table.name + "' LIMIT 1";
-                sb.append("  Example query: ").append(query).append("\n");
-                String result = new QueryExecutor(connection).executeQuery(query, QueryExecutor.OutputFormat.CSV, 10);
-                sb.append("  Example result csv:\n").append(result.lines().map(l -> "    " + l).collect(Collectors.joining("\n"))).append("\n");
-            }
-        }
-        sb.append("\nAdditionally, there are the following views and macros:\n\n");
-        DuckDBConnection conn = connectionSupplier.get();
-        sb.append(MacroCollection.getLLMDescription(conn)).append("\n\n");
-        sb.append(ViewCollection.getLLMDescription(conn, addExamples));
-        return sb.toString();
     }
 }

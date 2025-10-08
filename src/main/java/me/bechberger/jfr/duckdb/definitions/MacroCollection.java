@@ -3,8 +3,7 @@ package me.bechberger.jfr.duckdb.definitions;
 import me.bechberger.jfr.duckdb.RuntimeSQLException;
 import org.duckdb.DuckDBConnection;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -85,7 +84,7 @@ public class MacroCollection {
                     "CREATE MACRO diff(col) AS (col - LAG(col) OVER (ORDER BY col))"
             ),
             new Macro(
-                    "JFR_UNIQUE",
+                    "COUNT_UNIQUE",
                     "Count distinct values (JFR UNIQUE(x)).",
                     "SELECT COUNT_UNIQUE(eventThread) FROM JavaMonitorEnter; -- Contention analysis: GROUP BY monitorClass",
                     "CREATE MACRO COUNT_UNIQUE(x) AS count(DISTINCT x)"
@@ -377,6 +376,8 @@ public class MacroCollection {
                         continue;
                     }
                     stmt.execute(macro.definition());
+                    String description = macro.description() + "\nExample usage:\n" + macro.sampleUsages();
+                    stmt.execute("COMMENT ON MACRO " + macro.name() + " IS " + stmt.enquoteLiteral(description) + ";");
                     //System.out.println("Created macro " + macro.nameWithArgs() + ": " + macro.description());
                 } catch (SQLException e) {
                     throw new RuntimeSQLException("Error creating macro " + macro.name() + ": " + e.getMessage(), e);
@@ -400,22 +401,5 @@ public class MacroCollection {
                 appender.endRow();
             }
         }
-    }
-
-    /**
-     * Get a description of all available macros for use in LLM prompts.
-     */
-    public static String getLLMDescription(DuckDBConnection connection) throws SQLException {
-        var tables = getTableNames(connection);
-        StringBuilder sb = new StringBuilder();
-        sb.append("The following SQL macros are available for use in queries:\n");
-        for (Macro macro : macros) {
-            if (!macro.isValid(tables)) {
-                continue;
-            }
-            sb.append("- ").append(macro.nameWithArgs()).append(": ").append(macro.description()).append("\n");
-        }
-        sb.append("Use these macros to simplify your SQL queries on JFR data. Use 'macro_sql(macro_name)' to get the SQL definition of a macro.");
-        return sb.toString();
     }
 }

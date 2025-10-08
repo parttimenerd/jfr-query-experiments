@@ -20,7 +20,6 @@ import picocli.CommandLine;
                 QueryCommand.class,
                 MacrosCommand.class,
                 ViewsCommand.class,
-                LLMCommand.class,
                 CommandLine.HelpCommand.class
         }
 )
