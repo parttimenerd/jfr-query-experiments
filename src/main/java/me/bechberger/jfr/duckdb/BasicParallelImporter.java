@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
@@ -30,6 +31,8 @@ import static me.bechberger.jfr.duckdb.util.SQLUtil.append;
 
 /**
  * Imports a JFR recording into a DuckDB database and creates the database tables
+ * <p>
+ * It doesn't use foreign keys, but puts the relation in the table comments.
  */
 public class BasicParallelImporter {
 
@@ -45,6 +48,17 @@ public class BasicParallelImporter {
          * @throws SQLException if appending fails
          */
         void appendTo(RecordedObject object, DuckDBAppender appender) throws SQLException;
+    }
+
+    @FunctionalInterface
+    interface AppendDefaultValueFunction {
+        /**
+         * Appends the default value of the field to the DuckDBAppender
+         *
+         * @param appender the DuckDBAppender to append to
+         * @throws SQLException if appending fails
+         */
+        void appendDefault(DuckDBAppender appender) throws SQLException;
     }
 
     /**
@@ -115,8 +129,8 @@ public class BasicParallelImporter {
             var connection = connectionSupplier.get();
             this.cache = cache;
             createTable(connection);
-            // Always use DuckDBAppenderWrapper
             this.appender = connection.createAppender(name);
+            appendNullRowIfNeeded();
         }
 
         /**
@@ -125,20 +139,31 @@ public class BasicParallelImporter {
          * @param name   the name of the column (and the field in the RecordedObject)
          * @param type   the SQL type of the column
          * @param append a function that appends the value of the field to the DuckDBAppender
+         * @param appendDefault a function that appends the default value of the field to the DuckDBAppender
          * @param referencedTable optional SQL reference to other tables (for foreign keys)
          */
-        record Column(String name, String type, AppendFunction append, @Nullable String referencedTable) {
+        record Column(String name, String type, AppendFunction append, @Nullable AppendDefaultValueFunction appendDefault, @Nullable String referencedTable) {
 
             @Override
             public String toString() {
                 return "\"" + name + "\" " + type;
             }
 
-            public Column prependName(String prefix) {
-                return new Column(prefix + name, type, append);
+            public @Nullable String extraComment() {
+                if (referencedTable != null) {
+                    if (type.contains("[")) {
+                        return "Array of foreign keys to \"" + referencedTable + "\"(_id)";
+                    }
+                    return "FOREIGN KEY (\"" + name + "\") REFERENCES \"" + referencedTable + "\"(_id)";
+                }
+                return null;
             }
-            public Column(String name, String type, AppendFunction append) {
-                this(name, type, append, null);
+
+            public Column prependName(String prefix) {
+                return new Column(prefix + name, type, append, appendDefault, referencedTable);
+            }
+            public Column(String name, String type, AppendFunction append, @Nullable AppendDefaultValueFunction appendDefault) {
+                this(name, type, append, appendDefault, null);
             }
         }
 
@@ -151,8 +176,40 @@ public class BasicParallelImporter {
         private void createTable(DuckDBConnection conn) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute(this.toString());
+                // add comment
+                String comment = getComment();
+                if (!comment.isBlank()) {
+                    stmt.execute("COMMENT ON TABLE \"" + name + "\" IS " + stmt.enquoteLiteral(comment) + ";");
+                }
             } catch (Exception e) {
                 throw new RuntimeSQLException("Failed to create table " + name, e);
+            }
+        }
+
+        private String getComment() {
+            return columns.stream().map(Column::extraComment).filter(Objects::nonNull).collect(Collectors.joining(", "));
+        }
+
+        private void appendNullRowIfNeeded() {
+            if (doesUseCaching()) {
+                // add default row with ID 0
+                try {
+                    appender.beginRow();
+                    appender.append(0);
+                    for (Column column : columns) {
+                        if (column.appendDefault == null) {
+                            throw new IllegalStateException("Column " + column.name + " in table " + name + " does not have a default value function");
+                        }
+                        try {
+                            column.appendDefault.appendDefault(appender);
+                        } catch (SQLException e) {
+                            throw new RuntimeSQLException("Failed to append default value for column " + column.name, e);
+                        }
+                    }
+                    appender.endRow();
+                } catch (SQLException | RuntimeException e) {
+                    throw new RuntimeSQLException("Failed to append null row to table " + name + " with schema " + toString(), e);
+                }
             }
         }
 
@@ -194,6 +251,7 @@ public class BasicParallelImporter {
 
         private void insertIntoWithoutCaching(RecordedObject object) throws SQLException {
             appender.beginRow();
+            int c = counter.get();
             if (doesUseCaching()) {
                 try {
                     appender.append(counter.get());
@@ -208,7 +266,11 @@ public class BasicParallelImporter {
                     throw new RuntimeSQLException("Failed to append column " + column.name + " for table " + name + " at row " + counter.get(), e);
                 }
             }
-            appender.endRow();
+            try {
+                appender.endRow();
+            } catch (SQLException e) {
+                throw new RuntimeSQLException("Failed to end row for table " + name + " at row " + counter.get() + " with schema " + toString(), e);
+            }
         }
 
         public void close() {
@@ -246,11 +308,11 @@ public class BasicParallelImporter {
 
         void store(ConnectionSupplier connectionSupplier) throws SQLException {
             Table table = new Table("RecordingInfo", List.of(
-                    new Table.Column("eventCount", "INTEGER", null),
-                    new Table.Column("firstEvent", "TIMESTAMP", null),
-                    new Table.Column("lastEvent", "TIMESTAMP", null),
-                    new Table.Column("eventDurationSeconds", "DOUBLE", null),
-                    new Table.Column("dumpReason", "VARCHAR", null)
+                    new Table.Column("eventCount", "INTEGER", null, null),
+                    new Table.Column("firstEvent", "TIMESTAMP", null, null),
+                    new Table.Column("lastEvent", "TIMESTAMP", null, null),
+                    new Table.Column("eventDurationSeconds", "DOUBLE", null, null),
+                    new Table.Column("dumpReason", "VARCHAR", null, null)
             ), connectionSupplier, false);
             table.appender.beginRow();
             table.appender.append(eventCount);
@@ -326,13 +388,17 @@ public class BasicParallelImporter {
                     col = new Table.Column(fieldName, "VARCHAR", (obj, app) -> {
                         String d = getBaseObject.apply(obj).getString(fieldName);
                         app.append(JFRUtil.simplifyDescriptor(d));
-                    });
+                    }, DuckDBAppender::appendNull);
                     break;
                 }
-                col = new Table.Column(fieldName, "VARCHAR", (obj, app) -> app.append(getBaseObject.apply(obj).getString(fieldName)));
+                col = new Table.Column(fieldName, "VARCHAR",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getString(fieldName)),
+                        DuckDBAppender::appendNull);
             }
             case "long" -> {
-                var defaultCol = new Table.Column(fieldName, "BIGINT", (obj, app) -> app.append(getBaseObject.apply(obj).getLong(fieldName)));
+                var defaultCol = new Table.Column(fieldName, "BIGINT",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getLong(fieldName)),
+                        (app) -> app.append(0L));
                 if (descriptor.getContentType() == null) {
                     col = defaultCol;
                     break;
@@ -347,7 +413,7 @@ public class BasicParallelImporter {
                                 return;
                             }
                             append(app, instant);
-                        });
+                        }, (app) -> append(app, Instant.EPOCH));
                     } else if (descriptor.getContentType().equals("jdk.jfr.Timespan") || timespanAnnotation != null) {
                         col = new Table.Column(fieldName, "DOUBLE", (obj, app) -> {
                             var duration = getBaseObject.apply(obj).getDuration(fieldName);
@@ -357,37 +423,51 @@ public class BasicParallelImporter {
                                 return;
                             }
                             app.append(duration.toMinutes() * 60.0 + duration.toSecondsPart() + duration.toMillisPart() / 1000.0 + (duration.toNanosPart() % 1_000_000) / 1_000_000_000.0);
-                        });
+                        }, (app) -> app.append(Double.POSITIVE_INFINITY));
                     } else{
                     col = defaultCol;
                     }
             }
             case "byte" -> {
-                col = new Table.Column(fieldName, "TINYINT", (obj, app) -> app.append(getBaseObject.apply(obj).getByte(fieldName)));
+                col = new Table.Column(fieldName, "TINYINT",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getByte(fieldName)),
+                        (app) -> app.append((byte) 0));
             }
             case "short" -> {
-                col = new Table.Column(fieldName, "SMALLINT", (obj, app) -> app.append(getBaseObject.apply(obj).getShort(fieldName)));
+                col = new Table.Column(fieldName, "SMALLINT",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getShort(fieldName)),
+                        (app) -> app.append((short) 0));
             }
             case "char" -> {
-                col = new Table.Column(fieldName, "SMALLINT", (obj, app) -> app.append(getBaseObject.apply(obj).getChar(fieldName)));
+                col = new Table.Column(fieldName, "SMALLINT",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getChar(fieldName)),
+                        (app) -> app.append(0));
             }
             case "int" -> {
-                col = new Table.Column(fieldName, "INTEGER", (obj, app) -> app.append(getBaseObject.apply(obj).getInt(fieldName)));
+                col = new Table.Column(fieldName, "INTEGER",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getInt(fieldName)),
+                        (app) -> app.append(0));
             }
             case "boolean" -> {
-                col = new Table.Column(fieldName, "BOOLEAN", (obj, app) -> app.append(getBaseObject.apply(obj).getBoolean(fieldName)));
+                col = new Table.Column(fieldName, "BOOLEAN",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getBoolean(fieldName)),
+                        (app) -> app.append(false));
             }
             case "double" -> {
-                col = new Table.Column(fieldName, "DOUBLE", (obj, app) -> app.append(getBaseObject.apply(obj).getDouble(fieldName)));
+                col = new Table.Column(fieldName, "DOUBLE",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getDouble(fieldName)),
+                        (app) -> app.append(0.0));
             }
             case "float" -> {
-                col = new Table.Column(fieldName, "FLOAT", (obj, app) -> app.append(getBaseObject.apply(obj).getFloat(fieldName)));
+                col = new Table.Column(fieldName, "FLOAT",
+                        (obj, app) -> app.append(getBaseObject.apply(obj).getFloat(fieldName)),
+                        (app) -> app.append(0.0f));
             }
             case "jdk.types.Timestamp" -> {
                 col = new Table.Column(fieldName, "TIMESTAMP", (obj, app) -> {
                     var instant = getBaseObject.apply(obj).getInstant(fieldName);
                     app.append(instant != null ? instant.toString() : null);
-                });
+                }, DuckDBAppender::appendNull);
             }
             case "jdk.types.StackTrace" -> {
                 return createStackTraceColumns(descriptor, getBaseObject);
@@ -400,7 +480,7 @@ public class BasicParallelImporter {
                     return List.of(new Table.Column(fieldName, "VARCHAR", (obj, app) -> {
                         RecordedObject pkg = getBaseObject.apply(obj).getValue(fieldName);
                         app.append(pkg != null ? pkg.getString("name") : null);
-                    }));
+                    }, DuckDBAppender::appendNull));
                 }
                 return createStructColumns(descriptor, getBaseObject);
             }
@@ -445,6 +525,7 @@ public class BasicParallelImporter {
     private List<Table.Column> createStackTraceColumns(ValueDescriptor field, Function<RecordedObject, RecordedObject> getBaseObject) {
         String fieldName = field.getName();
         List<Table.Column> cols = new ArrayList<>();
+        getTableForMiscType(getField(getField(field, "frames"), "method")); // ensure Method table is created first
         BiConsumer<Function<RecordedStackTrace, RecordedFrame>, String> addFrameColumn = (frameObtainer, name) -> {
             cols.add(new Table.Column(fieldName + "$" + name, "INTEGER", (obj, app) -> {
                 RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
@@ -459,7 +540,7 @@ public class BasicParallelImporter {
                     int id = getTableForMiscType(getField(frame, "method")).assumeCaching().insertInto(frame.getMethod());
                     app.append(id);
                 }
-            }, "Method"));
+            }, (app) -> app.append(0), "Method"));
         };
         addFrameColumn.accept((stackTrace) -> {
             return stackTrace.getFrames().getFirst();
@@ -484,11 +565,11 @@ public class BasicParallelImporter {
         cols.add(new Table.Column(fieldName + "$length", "SHORT", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
             app.append(stackTrace != null ? (short) stackTrace.getFrames().size() : 0);
-        }));
+        }, (app) -> app.append(0)));
         cols.add(new Table.Column(fieldName + "$truncated", "BOOLEAN", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
             app.append(stackTrace != null && (stackTrace.isTruncated() || stackTrace.getFrames().size() > options.getMaxStackTraceDepth()));
-        }));
+        }, (app) -> app.append(false)));
         cols.add(new Table.Column(fieldName + "$methods", "INTEGER[" + options.getMaxStackTraceDepth() + "]", (obj, app) -> {
             RecordedStackTrace stackTrace = getBaseObject.apply(obj).getValue(fieldName);
             int[] arr = new int[options.getMaxStackTraceDepth()];
@@ -502,7 +583,7 @@ public class BasicParallelImporter {
                 }
             }
             app.append(arr);
-        }, "Method"));
+        }, (app) -> app.append(0), "Method"));
         return cols;
     }
 
@@ -529,7 +610,7 @@ public class BasicParallelImporter {
                 } else {
                     app.append(table.insertInto(struct));
                 }
-            }, table.name) );
+            }, DuckDBAppender::appendNull, table.name) );
         }
         return descriptor.getFields().stream()
                 .flatMap(f -> createColumnsForType(f, (o) -> getBaseObject.apply(o).getValue(descriptor.getName())).stream())
@@ -556,7 +637,7 @@ public class BasicParallelImporter {
                 return List.of(new Table.Column("javaName", "VARCHAR", (obj, app) -> {
                         RecordedClass cls = (RecordedClass) obj;
                         app.append(decodeBytecodeClassName(cls.getName()));
-                    }));
+                    }, DuckDBAppender::appendNull));
             }
             case "jdk.types.ClassLoader" -> {
                 // I still want to know the class loader name
@@ -566,7 +647,7 @@ public class BasicParallelImporter {
                             RecordedObject cl = getField(obj, "type").getTypeName().equals("java.lang.Class") ?
                                     obj.getValue("type") : null;
                             app.append(cl != null ? decodeBytecodeClassName(cl.getString("name")) : "null-bootstrap");
-                        })
+                        }, DuckDBAppender::appendNull)
                 );
             }
             default -> {
@@ -600,8 +681,8 @@ public class BasicParallelImporter {
     private void writeEventCounts() {
         try {
             Table table = new Table("Events", List.of(
-                    new Table.Column("name", "VARCHAR", null),
-                    new Table.Column("count", "INTEGER", null)
+                    new Table.Column("name", "VARCHAR", null, null),
+                    new Table.Column("count", "INTEGER", null, null)
             ), connectionSupplier, false);
             for (Map.Entry<EventType, Integer> entry : eventCount.entrySet().stream().sorted(Comparator.comparing(e -> -e.getValue())).toList()) {
                 table.appender.beginRow();
@@ -610,8 +691,8 @@ public class BasicParallelImporter {
                 table.appender.endRow();
             }
             Table eventIdTable = new Table("EventIDs", List.of(
-                    new Table.Column("name", "VARCHAR", null),
-                    new Table.Column("id", "LONG", null)
+                    new Table.Column("name", "VARCHAR", null, null),
+                    new Table.Column("id", "LONG", null, null)
             ), connectionSupplier, false);
             Set<EventType> eventTypes = new HashSet<>(eventTypeToTable.keySet());
             eventTypes.addAll(FlightRecorder.getFlightRecorder().getEventTypes());
@@ -629,8 +710,8 @@ public class BasicParallelImporter {
     private void writeEventLabels() {
         try {
             Table table = new Table("EventLabels", List.of(
-                    new Table.Column("name", "VARCHAR", null),
-                    new Table.Column("label", "VARCHAR", null)
+                    new Table.Column("name", "VARCHAR", null, null),
+                    new Table.Column("label", "VARCHAR", null, null)
             ), connectionSupplier, false);
             for (EventType eventType : eventTypeToTable.keySet()) {
                 table.appender.beginRow();

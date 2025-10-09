@@ -34,11 +34,9 @@ Lessons learned on duckdb
   - so fixed arrays instead of varlen are a good idea
 
 TODO
-- use foreign keys with duckdb (null method)
 - simple "query" command that 
   - shows errors better
   - implement another table view that is closer to the original JFR view
-- if java option not passed, start another Java process
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
 - update README
 

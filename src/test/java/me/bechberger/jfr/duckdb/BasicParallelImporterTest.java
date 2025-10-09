@@ -4,7 +4,6 @@ import jdk.jfr.*;
 import jdk.jfr.consumer.RecordedEvent;
 import jdk.jfr.consumer.RecordingStream;
 import org.assertj.core.api.Condition;
-import org.assertj.db.api.Assertions;
 import org.assertj.db.type.AssertDbConnection;
 import org.assertj.db.type.AssertDbConnectionFactory;
 import org.duckdb.DuckDBArray;
@@ -15,16 +14,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import static org.assertj.db.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 class BasicParallelImporterTest {
@@ -162,8 +157,8 @@ class BasicParallelImporterTest {
 //        assertArrayEquals(new int[]{1, 2, 3, 4}, arr);
         // Check Thread table
         var threadTable = conn.request("SELECT * FROM Thread").build();
-        assertThat(threadTable).hasNumberOfRows(1);
-        assertThat(threadTable).row(0)
+        assertThat(threadTable).hasNumberOfRows(2);
+        assertThat(threadTable).row(1)
                 .value("_id").isEqualTo(1)
                 .value("javaName").isEqualTo("Thread")
                 .value("group").isEqualTo(1)
@@ -171,15 +166,15 @@ class BasicParallelImporterTest {
                 .value("osName").isEqualTo("Thread");
         // Check ThreadGroup table
         var threadGroupTable = conn.request("SELECT * FROM ThreadGroup").build();
-        assertThat(threadGroupTable).hasNumberOfRows(1);
-        assertThat(threadGroupTable).row(0)
+        assertThat(threadGroupTable).hasNumberOfRows(2);
+        assertThat(threadGroupTable).row(1)
                 .value("_id").isEqualTo(1)
                 .value("name").isEqualTo("main");
         assertThat(threadGroupTable).hasNumberOfColumns(2);
         // method table
         var methodTable = conn.request("SELECT * FROM Method").build();
-        assertThat(methodTable).hasNumberOfRows(4);
-        assertThat(methodTable).row(0)
+        assertThat(methodTable).hasNumberOfRows(5);
+        assertThat(methodTable).row(1)
                 .value("_id").isEqualTo(1)
                 .value("name").isEqualTo("commitSimpleEventWithStackTraceEvent")
                 .value("descriptor").isEqualTo("()")

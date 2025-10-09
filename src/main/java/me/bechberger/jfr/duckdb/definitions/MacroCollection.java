@@ -369,10 +369,10 @@ public class MacroCollection {
             for (Macro macro : macros) {
                 try {
                     if (!macro.isValid(tableNames)) {
-                        /*System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
+                        System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
                                            Arrays.stream(macro.referencedTables)
                                         .filter(t -> !tableNames.contains(t))
-                                        .collect(Collectors.joining(", ")));*/
+                                        .collect(Collectors.joining(", ")));
                         continue;
                     }
                     stmt.execute(macro.definition());
