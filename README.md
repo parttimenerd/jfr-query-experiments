@@ -1,88 +1,70 @@
 JFR Query Experiments
 =====================
 
-In this branch, I try to experiment with using DuckDB as the backend for JFR queries.
+Working on JFR files using SQL. Essentially transforming JFR files into a DuckDB database
+and then using [DuckDB](https://duckdb.org/) to query it, with support for all JFR views.
 
-Usage:
+Previously, we tried to use the JFR query language directly, but it is quite limited.
 
+The purpose of this project is to ease the pain of exploring JFR files and finding interesting
+patterns in them.
+
+Build
+-----
 ```shell
-java -jar target/query.jar duckdb import recording.jfr duckdb.db -e STACK_TRACES
+mvn clean package
 ```
 
-Then you can use any DuckDB client to query the `duckdb.db` file.
-For example, using the DuckDB CLI:
+Main Usage
+----------
+
+Transform a JFR file into a DuckDB database file:
 
 ```shell
-> duckdb duckdb.db
-D SELECT * FROM CPULoad;
-┌────────────────────────────┬──────────────┬───────────────┬──────────────┐
-│         startTime          │   jvmUser    │   jvmSystem   │ machineTotal │
-│         timestamp          │    float     │     float     │    float     │
-├────────────────────────────┼──────────────┼───────────────┼──────────────┤
-│ 2024-05-24 10:06:42.816701 │  0.012596757 │  0.0018829145 │   0.92435896 │
-│ 2024-05-24 10:06:44.141573 │ 0.0058958004 │   0.002999063 │    0.9324324 │
-...
+> java -jar target/query.jar duckdb import jfr_files/recording.jfr duckdb.db
+> duckdb duckdb.db "SELECT * FROM Events";
+┌───────────────────────────────┬───────┐
+│             name              │ count │
+│            varchar            │ int32 │
+├───────────────────────────────┼───────┤
+│ GCPhaseParallel               │ 69426 │
+│ ObjectAllocationSample        │  6273 │
 ```
+
+Use `duckdb -ui duckdb.db` to get a web-based UI to explore the database.
+
+Directly query a JFR file (implicitly creating a DuckDB file, disable via `--no-cache`):
+
+```
+> java -jar target/query.jar query jfr_files/metal.jfr "hot-methods" 
+╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╤═════════╤═════════╗
+║ Method                                                                                                              │ Samples │ Percent ║
+╠═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╪═════════╪═════════╣
+║ java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.WorkQueue, int)                                           │ 1066    │ 8.09%   ║
+╟─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────┼─────────╢
+║ scala.collection.immutable.RedBlackTree$.lookup(RedBlackTree.Tree, Object, Ordering)                                │ 695     │ 5.27%   ║
+```
+
+View names are directly replaced by `SELECT * FROM <view name>`, so `hot-methods` is
+`SELECT * FROM "Hot Methods"`.
+
+The full list of views is available via the `views` command the full list of macros `macros`.
+
 Limitations:
 - Stack traces are stored a fixed size (10 frames by default) and only have methods in their frames
    - so no line number, bytecode index or the type of the frame
    - this saves a lot of space and makes queries faster
+- Only basic support for JFR specific datatypes, as we have to map them to DuckDB types
 
-Lessons learned on duckdb
--------------------------
-- not using the appender is a terrible idea, it is much, much slower
-  - so fixed arrays instead of varlen are a good idea
+
 
 TODO
-- simple "query" command that 
-  - shows errors better
-  - implement another table view that is closer to the original JFR view
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
-- update README
-
-Features
-- supports all JFR views (most of them are tested, of view.ini till 25. September)
-- supports custom queries (like `SELECT * FROM CPULoad WHERE jvmUser > 0.5`)
-
-Write basic blog post
-
-Old
-===
-
-Experiments with `jfr` tool code and JFR queries.
-
-It's essentially a standalone version of the `jfr view` command,
-based, currently, on the [JDK 21](https://github.com/openjdk/jdk21u) code.
-
-And it has a (highly experimental) web mode to easily test JFR queries:
-
-```shell
-java -jar target/query.jar web recording.jfr
--> starts a web server on port 8080
--> open http://localhost:8080
-```
-
-![Screenshot of the web UI](img/tool.png)
-
-Build
------
-
-```shell
-git clone https://github.com/parttimenerd/jfr-query-experiments
-cd jfr-query-experiments
-mvn clean package
-```
-
-Run
----
-```shell
-java -jar target/jfr-query-experiments.jar
--> shows the help
-```
-
-Purpose
--------
-Play with JFR queries, maybe extend them, without having to build the whole JDK.
+- better table printer
+- support for annotating data types
+   - maybe also a simple data flow analysis to track types and find the actual types of columns 
+     (like memory or duration)
+- write basic blog post
 
 License
 -------

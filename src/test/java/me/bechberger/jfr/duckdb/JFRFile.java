@@ -3,17 +3,11 @@ package me.bechberger.jfr.duckdb;
 import java.nio.file.Path;
 
 public enum JFRFile {
-    /**
-     * Small default.jfc recording
-     */
+    /** Small default.jfc recording */
     DEFAULT("default.jfr"),
-    /**
-     * Recording from a container
-     */
+    /** Recording from a container */
     CONTAINER("container.jfr"),
-    /**
-     * Recording with lots of enabled events and a class modifying agent on Linux
-     */
+    /** Recording with lots of enabled events and a class modifying agent on Linux */
     METAL("metal.jfr");
     private final Path path;
 

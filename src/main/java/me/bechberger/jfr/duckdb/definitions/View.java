@@ -1,9 +1,8 @@
 package me.bechberger.jfr.duckdb.definitions;
 
-import org.jetbrains.annotations.Nullable;
-
 import java.util.*;
 import java.util.stream.Stream;
+import org.jetbrains.annotations.Nullable;
 
 public final class View {
 
@@ -12,7 +11,6 @@ public final class View {
         public boolean isValid(Set<String> existingTables) {
             return existingTables.containsAll(referencedTables);
         }
-
     }
 
     private final String name;
@@ -25,27 +23,42 @@ public final class View {
     private boolean hasUnionAlternatives = false;
     private String description = null;
 
-    public View(String name, String category, String label, @Nullable String relatedJFRView, String definition, String referencedTable, String... referencedTables) {
+    public View(
+            String name,
+            String category,
+            String label,
+            @Nullable String relatedJFRView,
+            String definition,
+            String referencedTable,
+            String... referencedTables) {
         this.name = name;
         this.category = category;
         this.label = label;
         this.relatedJFRView = relatedJFRView;
         this.definition = definition;
-        this.referencedTables = Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables))
-                .toList();
+        this.referencedTables =
+                Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables)).toList();
         // check that the definition starts with "CREATE VIEW name "
-        if (!definition.trim().toLowerCase().replaceAll("[\"']", "").startsWith("create view " + name.toLowerCase() + " ")) {
-            throw new IllegalArgumentException("Improper definition for view " + name + ": must start with \"CREATE VIEW \"" + name + "\" \"");
+        if (!definition
+                .trim()
+                .toLowerCase()
+                .replaceAll("[\"']", "")
+                .startsWith("create view " + name.toLowerCase() + " ")) {
+            throw new IllegalArgumentException(
+                    "Improper definition for view "
+                            + name
+                            + ": must start with \"CREATE VIEW \""
+                            + name
+                            + "\" \"");
         }
     }
 
-    @Nullable public String description() {
+    @Nullable
+    public String description() {
         return description;
     }
 
-    /**
-     * Description currently used for LLMs
-     */
+    /** Description currently used for LLMs */
     public View description(String description) {
         this.description = description;
         return this;
@@ -56,7 +69,8 @@ public final class View {
     }
 
     /**
-     * If the main definition is not valid, tries to find an alternative that is valid (tries the one with the most referenced tables first).
+     * If the main definition is not valid, tries to find an alternative that is valid (tries the
+     * one with the most referenced tables first).
      *
      * @param existingTables the set of existing tables
      * @return the best matching query, or null if none is valid
@@ -66,12 +80,17 @@ public final class View {
             return definition;
         }
         // return the first alternative that is valid, preferring those with more referenced tables
-        var alt = alternatives.stream()
-                .filter(a -> a.isValid(existingTables))
-                .sorted((a1, a2) -> Integer.compare(a2.referencedTables.size(), a1.referencedTables.size()))
-                .map(Alternative::query)
-                .findFirst()
-                .orElse(null);
+        var alt =
+                alternatives.stream()
+                        .filter(a -> a.isValid(existingTables))
+                        .sorted(
+                                (a1, a2) ->
+                                        Integer.compare(
+                                                a2.referencedTables.size(),
+                                                a1.referencedTables.size()))
+                        .map(Alternative::query)
+                        .findFirst()
+                        .orElse(null);
         if (alt == null && hasUnionAlternatives) {
             return getUnionAlternative(existingTables);
         }
@@ -82,7 +101,8 @@ public final class View {
      * Generates an alternative query by removing UNION ALL clauses that reference missing tables.
      *
      * @param existingTables the set of existing tables
-     * @return a modified query with missing table references removed, or null if no valid query can be generated
+     * @return a modified query with missing table references removed, or null if no valid query can
+     *     be generated
      */
     private @Nullable String getUnionAlternative(Set<String> existingTables) {
         String query = definition;
@@ -125,15 +145,16 @@ public final class View {
 
                         // Only process if the inner query contains UNION ALL
                         if (innerQuery.contains("UNION ALL")) {
-                            String processedInnerQuery = processUnionClauses(innerQuery, existingTables);
+                            String processedInnerQuery =
+                                    processUnionClauses(innerQuery, existingTables);
                             if (processedInnerQuery == null) {
                                 return null; // No valid clauses found
                             }
 
                             // Replace the inner query content while preserving structure
-                            return query.substring(0, openParenIndex + 1) +
-                                   processedInnerQuery +
-                                   query.substring(closeParenIndex);
+                            return query.substring(0, openParenIndex + 1)
+                                    + processedInnerQuery
+                                    + query.substring(closeParenIndex);
                         }
                     }
                 }
@@ -144,9 +165,7 @@ public final class View {
         return processUnionClauses(query, existingTables);
     }
 
-    /**
-     * Finds the matching closing parenthesis for an opening parenthesis using balanced counting
-     */
+    /** Finds the matching closing parenthesis for an opening parenthesis using balanced counting */
     private int findMatchingCloseParen(String query, int openParenIndex) {
         int parenCount = 1;
         for (int i = openParenIndex + 1; i < query.length(); i++) {
@@ -163,10 +182,9 @@ public final class View {
         return -1; // No matching closing parenthesis found
     }
 
-    /**
-     * Processes UNION ALL clauses by removing clauses that reference missing tables
-     */
-    private @Nullable String processUnionClauses(String queryWithUnions, Set<String> existingTables) {
+    /** Processes UNION ALL clauses by removing clauses that reference missing tables */
+    private @Nullable String processUnionClauses(
+            String queryWithUnions, Set<String> existingTables) {
         // Split the query by UNION ALL to get individual SELECT clauses
         String[] clauses = queryWithUnions.split("\\s+UNION\\s+ALL\\s+");
         List<String> validClauses = new ArrayList<>();
@@ -188,41 +206,17 @@ public final class View {
 
         // If exactly one clause remains, return it without UNION ALL
         if (validClauses.size() == 1) {
-            return validClauses.get(0);
+            return validClauses.getFirst();
         }
 
         // Join the valid clauses back with UNION ALL
-        return String.join("\n                        UNION ALL\n                        ", validClauses);
+        return String.join(
+                "\n                        UNION ALL\n                        ", validClauses);
     }
 
     /**
-     * Processes simple UNION ALL queries (not wrapped in parentheses)
-     */
-    private @Nullable String processSimpleUnionQuery(String query, Set<String> existingTables) {
-        String[] clauses = query.split("\\s+UNION\\s+ALL\\s+");
-        List<String> validClauses = new ArrayList<>();
-
-        for (String clause : clauses) {
-            Set<String> referencedTables = extractTablesFromSelectClause(clause.trim());
-            if (existingTables.containsAll(referencedTables)) {
-                validClauses.add(clause.trim());
-            }
-        }
-
-        if (validClauses.isEmpty()) {
-            return null;
-        }
-
-        if (validClauses.size() == 1) {
-            return validClauses.get(0);
-        }
-
-        return String.join("\n                        UNION ALL\n                        ", validClauses);
-    }
-
-    /**
-     * Extracts table names from a SELECT clause by finding FROM keywords.
-     * Handles simple cases like "SELECT ... FROM TableName"
+     * Extracts table names from a SELECT clause by finding FROM keywords. Handles simple cases like
+     * "SELECT ... FROM TableName"
      */
     private Set<String> extractTablesFromSelectClause(String selectClause) {
         Set<String> tables = new HashSet<>();
@@ -273,12 +267,12 @@ public final class View {
         if (obj == this) return true;
         if (obj == null || obj.getClass() != this.getClass()) return false;
         var that = (View) obj;
-        return Objects.equals(this.name, that.name) &&
-               Objects.equals(this.category, that.category) &&
-               Objects.equals(this.label, that.label) &&
-               Objects.equals(this.relatedJFRView, that.relatedJFRView) &&
-               Objects.equals(this.definition, that.definition) &&
-               Objects.equals(this.referencedTables, that.referencedTables);
+        return Objects.equals(this.name, that.name)
+                && Objects.equals(this.category, that.category)
+                && Objects.equals(this.label, that.label)
+                && Objects.equals(this.relatedJFRView, that.relatedJFRView)
+                && Objects.equals(this.definition, that.definition)
+                && Objects.equals(this.referencedTables, that.referencedTables);
     }
 
     @Override
@@ -288,58 +282,82 @@ public final class View {
 
     @Override
     public String toString() {
-        return "View[" +
-               "name=" + name + ", " +
-               "category=" + category + ", " +
-               "label=" + label + ", " +
-               "relatedJFRView=" + relatedJFRView + ", " +
-               "definition=" + definition + ", " +
-               "referencedTables=" + referencedTables + ']';
+        return "View["
+                + "name="
+                + name
+                + ", "
+                + "category="
+                + category
+                + ", "
+                + "label="
+                + label
+                + ", "
+                + "relatedJFRView="
+                + relatedJFRView
+                + ", "
+                + "definition="
+                + definition
+                + ", "
+                + "referencedTables="
+                + referencedTables
+                + ']';
     }
 
     public View addAlternative(String query, String referencedTable, String... referencedTables) {
-        alternatives.add(new Alternative(query, Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables)).toList()));
+        alternatives.add(
+                new Alternative(
+                        query,
+                        Stream.concat(Stream.of(referencedTable), Arrays.stream(referencedTables))
+                                .toList()));
         return this;
     }
 
     /**
-     * Enables automatic generation of alternative queries by filtering UNION ALL clauses
-     * that reference missing tables. This feature supports and has been tested with the following SQL patterns:
+     * Enables automatic generation of alternative queries by filtering UNION ALL clauses that
+     * reference missing tables. This feature supports and has been tested with the following SQL
+     * patterns:
      *
      * <h3>Supported Patterns:</h3>
+     *
      * <ul>
      *   <li><b>FROM (UNION ALL)</b> - UNION ALL queries wrapped in parentheses after FROM clause:
-     *       <pre>FROM (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias</pre></li>
+     *       <pre>FROM (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias</pre>
      *   <li><b>LEFT JOIN (UNION ALL)</b> - UNION ALL queries in LEFT JOIN subqueries:
-     *       <pre>LEFT JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...</pre></li>
+     *       <pre>LEFT JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...
+     *       </pre>
      *   <li><b>RIGHT JOIN (UNION ALL)</b> - UNION ALL queries in RIGHT JOIN subqueries:
-     *       <pre>RIGHT JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...</pre></li>
+     *       <pre>RIGHT JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...
+     *       </pre>
      *   <li><b>INNER JOIN (UNION ALL)</b> - UNION ALL queries in INNER JOIN subqueries:
-     *       <pre>INNER JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...</pre></li>
+     *       <pre>INNER JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...
+     *       </pre>
      *   <li><b>JOIN (UNION ALL)</b> - UNION ALL queries in simple JOIN subqueries:
-     *       <pre>JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...</pre></li>
+     *       <pre>JOIN (SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB) alias ON ...</pre>
      *   <li><b>Simple UNION ALL</b> - Top-level UNION ALL queries without parentheses:
-     *       <pre>SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB</pre></li>
+     *       <pre>SELECT ... FROM TableA UNION ALL SELECT ... FROM TableB</pre>
      * </ul>
      *
      * <h3>Behavior:</h3>
+     *
      * <ul>
-     *   <li>Removes UNION ALL clauses that reference tables not present in the database</li>
-     *   <li>Preserves the overall query structure and JOIN clauses</li>
-     *   <li>Returns a single SELECT clause when only one valid table remains (removes UNION ALL)</li>
-     *   <li>Returns null if no valid UNION ALL clauses remain</li>
-     *   <li>Handles nested parentheses with balanced counting</li>
-     *   <li>Preserves query formatting and indentation in the result</li>
+     *   <li>Removes UNION ALL clauses that reference tables not present in the database
+     *   <li>Preserves the overall query structure and JOIN clauses
+     *   <li>Returns a single SELECT clause when only one valid table remains (removes UNION ALL)
+     *   <li>Returns null if no valid UNION ALL clauses remain
+     *   <li>Handles nested parentheses with balanced counting
+     *   <li>Preserves query formatting and indentation in the result
      * </ul>
      *
      * <h3>Limitations:</h3>
+     *
      * <ul>
-     *   <li>Does not support deeply nested UNION ALL structures</li>
-     *   <li>Table extraction uses simple regex pattern matching on FROM keywords</li>
-     *   <li>Does not handle complex table expressions with schema prefixes in UNION clauses</li>
+     *   <li>Does not support deeply nested UNION ALL structures
+     *   <li>Table extraction uses simple regex pattern matching on FROM keywords
+     *   <li>Does not handle complex table expressions with schema prefixes in UNION clauses
      * </ul>
      *
-     * Be sure to check that the pattern used is tested in UnionAlternativeTest and UnionAlternativeParameterizedTest.
+     * Be sure to check that the pattern used is tested in UnionAlternativeTest and
+     * UnionAlternativeParameterizedTest.
      *
      * @return this View instance for method chaining
      */

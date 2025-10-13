@@ -1,18 +1,16 @@
 package me.bechberger.jfr.duckdb;
 
-import me.bechberger.jfr.duckdb.definitions.View;
-import me.bechberger.jfr.duckdb.definitions.ViewCollection;
-
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import me.bechberger.jfr.duckdb.definitions.View;
+import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 
 /**
- * Simple test-side cache for results of `jfr view`.
- * Keys are: absolute jfr path + "|" + view name
+ * Simple test-side cache for results of `jfr view`. Keys are: absolute jfr path + "|" + view name
  */
 public class JFRViewResultCache {
     private final Path jfrFile;
@@ -25,7 +23,8 @@ public class JFRViewResultCache {
             try (FileInputStream in = new FileInputStream(cachePath.toFile())) {
                 props.load(in);
             } catch (IOException e) {
-                throw new RuntimeException("Error loading cache file: " + cachePath.toAbsolutePath(), e);
+                throw new RuntimeException(
+                        "Error loading cache file: " + cachePath.toAbsolutePath(), e);
             }
         }
     }
@@ -42,12 +41,16 @@ public class JFRViewResultCache {
             return cached;
         }
 
-        System.out.println("Executing jfr view for the first time, caching result: jfr view " + viewName + " " + jfrFile.toAbsolutePath());
+        System.out.println(
+                "Executing jfr view for the first time, caching result: jfr view "
+                        + viewName
+                        + " "
+                        + jfrFile.toAbsolutePath());
 
         // Use ProcessBuilder for better process management
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                "jfr", "view", view.relatedJFRView(), jfrFile.toAbsolutePath().toString()
-        );
+        ProcessBuilder processBuilder =
+                new ProcessBuilder(
+                        "jfr", "view", view.relatedJFRView(), jfrFile.toAbsolutePath().toString());
 
         Process process = processBuilder.start();
 
@@ -65,11 +68,13 @@ public class JFRViewResultCache {
             // Also read stderr for error information
             String errorOutput;
             try (var errorReader = process.errorReader()) {
-                errorOutput = errorReader.lines()
-                        .reduce("", (a, b) -> a + b + "\n");
+                errorOutput = errorReader.lines().reduce("", (a, b) -> a + b + "\n");
             }
-            throw new IOException("Error executing jfr view command, exit code: " + exit +
-                    ", stderr: " + errorOutput);
+            throw new IOException(
+                    "Error executing jfr view command, exit code: "
+                            + exit
+                            + ", stderr: "
+                            + errorOutput);
         }
 
         String result = outputBuilder.toString();

@@ -1,29 +1,22 @@
 package me.bechberger.jfr.duckdb.query;
 
-import com.jakewharton.fliptables.FlipTable;
 import com.jakewharton.fliptables.FlipTableConverters;
-import me.bechberger.jfr.duckdb.Options;
-import me.bechberger.jfr.duckdb.RuntimeSQLException;
-import org.duckdb.DuckDBConnection;
-
 import java.io.*;
 import java.math.BigDecimal;
 import java.net.URL;
 import java.sql.*;
-import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+import me.bechberger.jfr.duckdb.RuntimeSQLException;
+import org.duckdb.DuckDBConnection;
 
-/**
- * Executes queries on a DuckDB database connection and prints the results.
- */
+/** Executes queries on a DuckDB database connection and prints the results. */
 public class QueryExecutor {
 
     public enum OutputFormat {
         TABLE,
-        CSV;
+        CSV
     }
 
     private final DuckDBConnection conn;
@@ -48,9 +41,7 @@ public class QueryExecutor {
         }
     }
 
-    /**
-     * Executes a query and returns the result as a string in the specified format.
-     */
+    /** Executes a query and returns the result as a string in the specified format. */
     public String executeQuery(String query, OutputFormat format, int maxCellWidth) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (PrintStream ps = new PrintStream(new BufferedOutputStream(baos))) {
@@ -62,22 +53,25 @@ public class QueryExecutor {
 
     private void printCSV(ResultSet rs, PrintStream out, int maxCellWidth) throws SQLException {
         var meta = rs.getMetaData();
-        String header = IntStream.range(1, meta.getColumnCount() + 1)
-                .mapToObj(i -> {
-                    try {
-                        return meta.getColumnName(i);
-                    } catch (SQLException e) {
-                        throw new RuntimeException(e);
-                    }
-                })
-                .reduce((a, b) -> a + "," + b)
-                .orElse("");
+        String header =
+                IntStream.range(1, meta.getColumnCount() + 1)
+                        .mapToObj(
+                                i -> {
+                                    try {
+                                        return meta.getColumnName(i);
+                                    } catch (SQLException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                })
+                        .reduce((a, b) -> a + "," + b)
+                        .orElse("");
         out.println(header);
         while (rs.next()) {
-            String row = IntStream.range(1, meta.getColumnCount() + 1)
-                    .mapToObj(i -> getStringValue(rs, i, maxCellWidth))
-                    .reduce((a, b) -> a + "," + b)
-                    .orElse("");
+            String row =
+                    IntStream.range(1, meta.getColumnCount() + 1)
+                            .mapToObj(i -> getStringValue(rs, i, maxCellWidth))
+                            .reduce((a, b) -> a + "," + b)
+                            .orElse("");
             out.println(row);
         }
         out.flush();
@@ -89,10 +83,11 @@ public class QueryExecutor {
             if (value == null) {
                 return "";
             }
-            var escaped = value.replace("\"", "\"\"")
-                    .replace(",", "\\,")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r");
+            var escaped =
+                    value.replace("\"", "\"\"")
+                            .replace(",", "\\,")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r");
             if (maxWidth > 0 && escaped.length() > maxWidth) {
                 return "\"" + escaped.substring(0, maxWidth - 3) + "...\"";
             }
@@ -107,8 +102,9 @@ public class QueryExecutor {
     }
 
     /**
-     * Wraps a ResultSet to be compatible with FlipTableConverters.fromResultSet.
-     * This is necessary because DuckDB's ResultSet implementation does not implement all methods.
+     * Wraps a ResultSet to be compatible with FlipTableConverters.fromResultSet. This is necessary
+     * because DuckDB's ResultSet implementation does not implement all methods.
+     *
      * @param rs the original ResultSet
      * @return a wrapped ResultSet
      */
@@ -313,11 +309,11 @@ public class QueryExecutor {
                 return rs.getBigDecimal(columnLabel);
             }
 
-            public boolean isBeforeFirst() throws SQLException {
+            public boolean isBeforeFirst() {
                 return true;
             }
 
-            public boolean isAfterLast() throws SQLException {
+            public boolean isAfterLast() {
                 return false;
             }
 
@@ -453,19 +449,23 @@ public class QueryExecutor {
                 rs.updateTimestamp(columnIndex, x);
             }
 
-            public void updateAsciiStream(int columnIndex, InputStream x, int length) throws SQLException {
+            public void updateAsciiStream(int columnIndex, InputStream x, int length)
+                    throws SQLException {
                 rs.updateAsciiStream(columnIndex, x, length);
             }
 
-            public void updateBinaryStream(int columnIndex, InputStream x, int length) throws SQLException {
+            public void updateBinaryStream(int columnIndex, InputStream x, int length)
+                    throws SQLException {
                 rs.updateBinaryStream(columnIndex, x, length);
             }
 
-            public void updateCharacterStream(int columnIndex, Reader x, int length) throws SQLException {
+            public void updateCharacterStream(int columnIndex, Reader x, int length)
+                    throws SQLException {
                 rs.updateCharacterStream(columnIndex, x, length);
             }
 
-            public void updateObject(int columnIndex, Object x, int scaleOrLength) throws SQLException {
+            public void updateObject(int columnIndex, Object x, int scaleOrLength)
+                    throws SQLException {
                 rs.updateObject(columnIndex, x, scaleOrLength);
             }
 
@@ -529,19 +529,23 @@ public class QueryExecutor {
                 rs.updateTimestamp(columnLabel, x);
             }
 
-            public void updateAsciiStream(String columnLabel, InputStream x, int length) throws SQLException {
+            public void updateAsciiStream(String columnLabel, InputStream x, int length)
+                    throws SQLException {
                 rs.updateAsciiStream(columnLabel, x, length);
             }
 
-            public void updateBinaryStream(String columnLabel, InputStream x, int length) throws SQLException {
+            public void updateBinaryStream(String columnLabel, InputStream x, int length)
+                    throws SQLException {
                 rs.updateBinaryStream(columnLabel, x, length);
             }
 
-            public void updateCharacterStream(String columnLabel, Reader reader, int length) throws SQLException {
+            public void updateCharacterStream(String columnLabel, Reader reader, int length)
+                    throws SQLException {
                 rs.updateCharacterStream(columnLabel, reader, length);
             }
 
-            public void updateObject(String columnLabel, Object x, int scaleOrLength) throws SQLException {
+            public void updateObject(String columnLabel, Object x, int scaleOrLength)
+                    throws SQLException {
                 rs.updateObject(columnLabel, x, scaleOrLength);
             }
 
@@ -581,7 +585,8 @@ public class QueryExecutor {
                 return rs.getStatement();
             }
 
-            public Object getObject(int columnIndex, Map<String, Class<?>> map) throws SQLException {
+            public Object getObject(int columnIndex, Map<String, Class<?>> map)
+                    throws SQLException {
                 return rs.getObject(columnIndex, map);
             }
 
@@ -601,7 +606,8 @@ public class QueryExecutor {
                 return rs.getArray(columnIndex);
             }
 
-            public Object getObject(String columnLabel, Map<String, Class<?>> map) throws SQLException {
+            public Object getObject(String columnLabel, Map<String, Class<?>> map)
+                    throws SQLException {
                 return rs.getObject(columnLabel, map);
             }
 
@@ -765,59 +771,73 @@ public class QueryExecutor {
                 return rs.getNCharacterStream(columnLabel);
             }
 
-            public void updateNCharacterStream(int columnIndex, Reader x, long length) throws SQLException {
+            public void updateNCharacterStream(int columnIndex, Reader x, long length)
+                    throws SQLException {
                 rs.updateNCharacterStream(columnIndex, x, length);
             }
 
-            public void updateNCharacterStream(String columnLabel, Reader reader, long length) throws SQLException {
+            public void updateNCharacterStream(String columnLabel, Reader reader, long length)
+                    throws SQLException {
                 rs.updateNCharacterStream(columnLabel, reader, length);
             }
 
-            public void updateAsciiStream(int columnIndex, InputStream x, long length) throws SQLException {
+            public void updateAsciiStream(int columnIndex, InputStream x, long length)
+                    throws SQLException {
                 rs.updateAsciiStream(columnIndex, x, length);
             }
 
-            public void updateBinaryStream(int columnIndex, InputStream x, long length) throws SQLException {
+            public void updateBinaryStream(int columnIndex, InputStream x, long length)
+                    throws SQLException {
                 rs.updateBinaryStream(columnIndex, x, length);
             }
 
-            public void updateCharacterStream(int columnIndex, Reader x, long length) throws SQLException {
+            public void updateCharacterStream(int columnIndex, Reader x, long length)
+                    throws SQLException {
                 rs.updateCharacterStream(columnIndex, x, length);
             }
 
-            public void updateAsciiStream(String columnLabel, InputStream x, long length) throws SQLException {
+            public void updateAsciiStream(String columnLabel, InputStream x, long length)
+                    throws SQLException {
                 rs.updateAsciiStream(columnLabel, x, length);
             }
 
-            public void updateBinaryStream(String columnLabel, InputStream x, long length) throws SQLException {
+            public void updateBinaryStream(String columnLabel, InputStream x, long length)
+                    throws SQLException {
                 rs.updateBinaryStream(columnLabel, x, length);
             }
 
-            public void updateCharacterStream(String columnLabel, Reader reader, long length) throws SQLException {
+            public void updateCharacterStream(String columnLabel, Reader reader, long length)
+                    throws SQLException {
                 rs.updateCharacterStream(columnLabel, reader, length);
             }
 
-            public void updateBlob(int columnIndex, InputStream inputStream, long length) throws SQLException {
+            public void updateBlob(int columnIndex, InputStream inputStream, long length)
+                    throws SQLException {
                 rs.updateBlob(columnIndex, inputStream, length);
             }
 
-            public void updateBlob(String columnLabel, InputStream inputStream, long length) throws SQLException {
+            public void updateBlob(String columnLabel, InputStream inputStream, long length)
+                    throws SQLException {
                 rs.updateBlob(columnLabel, inputStream, length);
             }
 
-            public void updateClob(int columnIndex, Reader reader, long length) throws SQLException {
+            public void updateClob(int columnIndex, Reader reader, long length)
+                    throws SQLException {
                 rs.updateClob(columnIndex, reader, length);
             }
 
-            public void updateClob(String columnLabel, Reader reader, long length) throws SQLException {
+            public void updateClob(String columnLabel, Reader reader, long length)
+                    throws SQLException {
                 rs.updateClob(columnLabel, reader, length);
             }
 
-            public void updateNClob(int columnIndex, Reader reader, long length) throws SQLException {
+            public void updateNClob(int columnIndex, Reader reader, long length)
+                    throws SQLException {
                 rs.updateNClob(columnIndex, reader, length);
             }
 
-            public void updateNClob(String columnLabel, Reader reader, long length) throws SQLException {
+            public void updateNClob(String columnLabel, Reader reader, long length)
+                    throws SQLException {
                 rs.updateNClob(columnLabel, reader, length);
             }
 
@@ -825,7 +845,8 @@ public class QueryExecutor {
                 rs.updateNCharacterStream(columnIndex, x);
             }
 
-            public void updateNCharacterStream(String columnLabel, Reader reader) throws SQLException {
+            public void updateNCharacterStream(String columnLabel, Reader reader)
+                    throws SQLException {
                 rs.updateNCharacterStream(columnLabel, reader);
             }
 
@@ -849,7 +870,8 @@ public class QueryExecutor {
                 rs.updateBinaryStream(columnLabel, x);
             }
 
-            public void updateCharacterStream(String columnLabel, Reader reader) throws SQLException {
+            public void updateCharacterStream(String columnLabel, Reader reader)
+                    throws SQLException {
                 rs.updateCharacterStream(columnLabel, reader);
             }
 
@@ -857,7 +879,8 @@ public class QueryExecutor {
                 rs.updateBlob(columnIndex, inputStream);
             }
 
-            public void updateBlob(String columnLabel, InputStream inputStream) throws SQLException {
+            public void updateBlob(String columnLabel, InputStream inputStream)
+                    throws SQLException {
                 rs.updateBlob(columnLabel, inputStream);
             }
 
@@ -885,19 +908,25 @@ public class QueryExecutor {
                 return rs.getObject(columnLabel, type);
             }
 
-            public void updateObject(int columnIndex, Object x, SQLType targetSqlType, int scaleOrLength) throws SQLException {
+            public void updateObject(
+                    int columnIndex, Object x, SQLType targetSqlType, int scaleOrLength)
+                    throws SQLException {
                 rs.updateObject(columnIndex, x, targetSqlType, scaleOrLength);
             }
 
-            public void updateObject(String columnLabel, Object x, SQLType targetSqlType, int scaleOrLength) throws SQLException {
+            public void updateObject(
+                    String columnLabel, Object x, SQLType targetSqlType, int scaleOrLength)
+                    throws SQLException {
                 rs.updateObject(columnLabel, x, targetSqlType, scaleOrLength);
             }
 
-            public void updateObject(int columnIndex, Object x, SQLType targetSqlType) throws SQLException {
+            public void updateObject(int columnIndex, Object x, SQLType targetSqlType)
+                    throws SQLException {
                 rs.updateObject(columnIndex, x, targetSqlType);
             }
 
-            public void updateObject(String columnLabel, Object x, SQLType targetSqlType) throws SQLException {
+            public void updateObject(String columnLabel, Object x, SQLType targetSqlType)
+                    throws SQLException {
                 rs.updateObject(columnLabel, x, targetSqlType);
             }
         };

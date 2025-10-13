@@ -1,42 +1,45 @@
 package me.bechberger.jfr.duckdb.util;
 
-import jdk.jfr.consumer.RecordedEvent;
-import jdk.jfr.consumer.RecordingFile;
-
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Spliterators;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import jdk.jfr.consumer.RecordedEvent;
+import jdk.jfr.consumer.RecordingFile;
 
 public class JFRUtil {
 
     public static Stream<RecordedEvent> streamEvents(Path path) throws IOException {
         RecordingFile recordingFile = new RecordingFile(path);
         return StreamSupport.stream(
-                Spliterators.spliteratorUnknownSize(new Iterator<RecordedEvent>() {
-                    @Override
-                    public boolean hasNext() {
-                        return recordingFile.hasMoreEvents();
-                    }
+                        Spliterators.spliteratorUnknownSize(
+                                new Iterator<RecordedEvent>() {
+                                    @Override
+                                    public boolean hasNext() {
+                                        return recordingFile.hasMoreEvents();
+                                    }
 
-                    @Override
-                    public RecordedEvent next() {
-                        try {
-                            return recordingFile.readEvent();
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                }, 0), false
-        ).onClose(() -> {
-            try {
-                recordingFile.close();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
+                                    @Override
+                                    public RecordedEvent next() {
+                                        try {
+                                            return recordingFile.readEvent();
+                                        } catch (IOException e) {
+                                            throw new RuntimeException(e);
+                                        }
+                                    }
+                                },
+                                0),
+                        false)
+                .onClose(
+                        () -> {
+                            try {
+                                recordingFile.close();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
     }
 
     public static String decodeBytecodeClassName(String name) {
@@ -59,21 +62,23 @@ public class JFRUtil {
             // object descriptor like Ljava/lang/String;
             base = rest.substring(1, rest.length() - 1).replace('/', '.').replace('$', '.');
         } else {
-            switch (rest) {
-                case "B": base = "byte"; break;
-                case "C": base = "char"; break;
-                case "D": base = "double"; break;
-                case "F": base = "float"; break;
-                case "I": base = "int"; break;
-                case "J": base = "long"; break;
-                case "S": base = "short"; break;
-                case "Z": base = "boolean"; break;
-                case "V": base = "void"; break;
-                default:
-                    // Already slash-separated or dotted class name (e.g. java/lang/String or java.lang.String)
-                    base = rest.replace('/', '.');
-                    break;
-            }
+            base =
+                    switch (rest) {
+                        case "B" -> "byte";
+                        case "C" -> "char";
+                        case "D" -> "double";
+                        case "F" -> "float";
+                        case "I" -> "int";
+                        case "J" -> "long";
+                        case "S" -> "short";
+                        case "Z" -> "boolean";
+                        case "V" -> "void";
+                        default ->
+                                // Already slash-separated or dotted class name (e.g.
+                                // java/lang/String or
+                                // java.lang.String)
+                                rest.replace('/', '.');
+                    };
         }
 
         if (depth == 0) {
@@ -81,17 +86,15 @@ public class JFRUtil {
         }
 
         StringBuilder sb = new StringBuilder(base);
-        for (int i = 0; i < depth; i++) {
-            sb.append("[]");
-        }
+        sb.append("[]".repeat(depth));
         return sb.toString();
     }
 
     /**
-     * Simplifies a bytecode method descriptor by removing package names and the return type
-     * and formatting it into Java style.
-     * E.g. (Ljava/lang/String;I)V becomes (String, int)
-     * If the descriptor is invalid, returns the original descriptor.
+     * Simplifies a bytecode method descriptor by removing package names and the return type and
+     * formatting it into Java style. E.g. (Ljava/lang/String;I)V becomes (String, int) If the
+     * descriptor is invalid, returns the original descriptor.
+     *
      * @param descriptor the bytecode method descriptor
      * @return the simplified descriptor
      */
@@ -148,9 +151,7 @@ public class JFRUtil {
                 i++;
             }
             sb.append(type);
-            for (int j = 0; j < arrayDepth; j++) {
-                sb.append("[]");
-            }
+            sb.append("[]".repeat(Math.max(0, arrayDepth)));
         }
         sb.append(')');
         return sb.toString();

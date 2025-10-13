@@ -1,18 +1,16 @@
 package me.bechberger.jfr.duckdb.util;
 
-import org.duckdb.DuckDBAppender;
-import org.duckdb.DuckDBConnection;
-
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetTime;
 import java.util.*;
-import java.util.stream.Collectors;
+import org.duckdb.DuckDBAppender;
+import org.duckdb.DuckDBConnection;
 
 public class SQLUtil {
-    
+
     public static Set<String> getTableNames(DuckDBConnection connection) throws SQLException {
         ResultSet rs = connection.createStatement().executeQuery("SHOW TABLES");
         Set<String> tableNames = new HashSet<>();

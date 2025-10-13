@@ -1,16 +1,15 @@
 package me.bechberger.jfr.duckdb.commands;
 
+import java.io.PrintWriter;
 import picocli.CommandLine;
 
-import java.io.PrintWriter;
-
-@CommandLine.Command(name = "macros",
+@CommandLine.Command(
+        name = "macros",
         mixinStandardHelpOptions = true,
         description = "List available SQL macros (views) for JFR analysis.")
 public class MacrosCommand implements Runnable {
 
-    @CommandLine.Spec
-    CommandLine.Model.CommandSpec spec;
+    @CommandLine.Spec CommandLine.Model.CommandSpec spec;
 
     @Override
     public void run() {
@@ -23,7 +22,12 @@ public class MacrosCommand implements Runnable {
             out.println(macro.nameWithArgs());
             out.println("  " + macro.description());
             out.println("  Sample Usage: " + macro.sampleUsages());
-            out.println("  Definition:\n    " + macro.definition().lines().reduce((a, b) -> a + "\n    " + b).orElse(""));
+            out.println(
+                    "  Definition:\n    "
+                            + macro.definition()
+                                    .lines()
+                                    .reduce((a, b) -> a + "\n    " + b)
+                                    .orElse(""));
             out.println();
         }
     }

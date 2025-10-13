@@ -1,38 +1,35 @@
 package me.bechberger.jfr.duckdb.util;
 
-import me.bechberger.jfr.duckdb.JFRFile;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.stream.Stream;
-
-import static org.junit.jupiter.api.Assertions.*;
-
 class JFRUtilTest {
 
     @ParameterizedTest
     @CsvSource({
-            "Ljava/lang/String;,java.lang.String",
-            "[I,int[]",
-            "[[D,double[][]",
-            "[[Ljava/util/List;,java.util.List[][]",
-            "V,void",
-            "I,int",
-            "Z,boolean",
-            "B,byte",
-            "C,char",
-            "S,short",
-            "J,long",
-            "F,float",
-            "D,double",
-            "[[[[Ljava/lang/Object;,java.lang.Object[][][][]",
-            "[[[I,int[][][]"
+        "Ljava/lang/String;,java.lang.String",
+        "[I,int[]",
+        "[[D,double[][]",
+        "[[Ljava/util/List;,java.util.List[][]",
+        "V,void",
+        "I,int",
+        "Z,boolean",
+        "B,byte",
+        "C,char",
+        "S,short",
+        "J,long",
+        "F,float",
+        "D,double",
+        "[[[[Ljava/lang/Object;,java.lang.Object[][][][]",
+        "[[[I,int[][][]"
     })
     void decodeBytecodeClassName(String input, String expected) {
-        JFRUtil util = new JFRUtil();
-        assertEquals(expected, util.decodeBytecodeClassName(input));
+        assertEquals(expected, JFRUtil.decodeBytecodeClassName(input));
     }
 
     static Stream<Arguments> provideSimplifyBytecodeTests() {
@@ -45,8 +42,7 @@ class JFRUtilTest {
                 Arguments.of("([I[[Ljava/lang/Object;)V", "(int[], Object[][])"),
                 Arguments.of("(D[FJ)V", "(double, float[], long)"),
                 Arguments.of("()V", "()"),
-                Arguments.of("(Ljava/util/List;[[[I)Ljava/lang/String;", "(List, int[][][])")
-        );
+                Arguments.of("(Ljava/util/List;[[[I)Ljava/lang/String;", "(List, int[][][])"));
     }
 
     @ParameterizedTest

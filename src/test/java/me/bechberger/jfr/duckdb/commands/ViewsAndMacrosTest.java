@@ -1,19 +1,15 @@
 package me.bechberger.jfr.duckdb.commands;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
-import java.io.PrintWriter;
-import java.io.StringWriter;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
-/**
- * Tests the basic functionality of the {@link ViewsCommand} and
- * {@link MacrosCommand}.
- */
+/** Tests the basic functionality of the {@link ViewsCommand} and {@link MacrosCommand}. */
 public class ViewsAndMacrosTest {
 
     @Test

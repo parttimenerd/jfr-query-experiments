@@ -1,7 +1,5 @@
 package me.bechberger.jfr.duckdb;
 
-import org.duckdb.DuckDBConnection;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,6 +8,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import org.duckdb.DuckDBConnection;
 
 class JFRFileHelper {
     private final JFRViewResultCache jfrViewResultCache;
@@ -29,7 +28,10 @@ class JFRFileHelper {
         // Check if we can use cached database or need full import
         if (shouldUseCachedDatabase()) {
             // Database exists and is newer than source files, just add macros and views
-            try (DuckDBConnection connection = (DuckDBConnection) java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbFile.toAbsolutePath())) {
+            try (DuckDBConnection connection =
+                    (DuckDBConnection)
+                            java.sql.DriverManager.getConnection(
+                                    "jdbc:duckdb:" + dbFile.toAbsolutePath())) {
                 BasicParallelImporter.addMacrosAndViews(connection);
             }
         } else {
@@ -50,26 +52,28 @@ class JFRFileHelper {
 
         long dbModTime = Files.getLastModifiedTime(dbFile).toMillis();
 
-        // Check all non-test source files, excluding MacroCollection, ViewCollection, and *Command files
+        // Check all non-test source files, excluding MacroCollection, ViewCollection, and *Command
+        // files
         Path srcDir = Paths.get("src/main/java");
         if (!Files.exists(srcDir)) {
             return true; // No source directory, use cached version
         }
 
         try (Stream<Path> files = Files.walk(srcDir)) {
-            return files
-                    .filter(Files::isRegularFile)
+            return files.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".java"))
                     .filter(path -> !path.getFileName().toString().equals("MacroCollection.java"))
                     .filter(path -> !path.getFileName().toString().equals("ViewCollection.java"))
                     .filter(path -> !path.getFileName().toString().endsWith("Command.java"))
-                    .allMatch(path -> {
-                        try {
-                            return Files.getLastModifiedTime(path).toMillis() < dbModTime;
-                        } catch (IOException e) {
-                            return false; // If we can't read the file time, consider it newer
-                        }
-                    });
+                    .allMatch(
+                            path -> {
+                                try {
+                                    return Files.getLastModifiedTime(path).toMillis() < dbModTime;
+                                } catch (IOException e) {
+                                    return false; // If we can't read the file time, consider it
+                                    // newer
+                                }
+                            });
         }
     }
 
@@ -89,7 +93,10 @@ class JFRFileHelper {
     }
 
     public DuckDBConnection openConnection() throws SQLException {
-        DuckDBConnection con = (DuckDBConnection) java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbFile.toAbsolutePath());
+        DuckDBConnection con =
+                (DuckDBConnection)
+                        java.sql.DriverManager.getConnection(
+                                "jdbc:duckdb:" + dbFile.toAbsolutePath());
         openConnections.add(con);
         return con;
     }

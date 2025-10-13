@@ -1,24 +1,21 @@
 package me.bechberger.jfr.duckdb.commands;
 
-import me.bechberger.jfr.duckdb.Options;
-import picocli.CommandLine;
+import static me.bechberger.jfr.duckdb.BasicParallelImporter.createFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-
-import static me.bechberger.jfr.duckdb.BasicParallelImporter.createFile;
+import me.bechberger.jfr.duckdb.Options;
+import picocli.CommandLine;
 
 @CommandLine.Command(
         name = "import",
         mixinStandardHelpOptions = true,
         version = "0.1",
-        description = "Import a JFR recording into a DuckDB database"
-)
+        description = "Import a JFR recording into a DuckDB database")
 public class ImportCommand implements Runnable {
 
-    @CommandLine.Mixin
-    private Options options;
+    @CommandLine.Mixin private Options options;
 
     @CommandLine.Parameters(index = "0", description = "The input JFR recording file")
     private String inputFile;

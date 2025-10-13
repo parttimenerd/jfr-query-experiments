@@ -1,127 +1,123 @@
 package me.bechberger.jfr.duckdb.definitions;
 
-import me.bechberger.jfr.duckdb.RuntimeSQLException;
-import org.duckdb.DuckDBConnection;
+import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
 
 import java.sql.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-
-import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
+import me.bechberger.jfr.duckdb.RuntimeSQLException;
+import org.duckdb.DuckDBConnection;
 
 public class MacroCollection {
 
     /**
      * A SQL macro definition.
+     *
      * @param name the name of the macro
      * @param description description of the macro
      * @param sampleUsages example usages of the macro
      * @param definition SQL definition of the macro (including "CREATE MACRO ... AS ...")
      */
-    public record Macro(String name, String description, String sampleUsages, String definition, String... referencedTables) {
+    public record Macro(
+            String name,
+            String description,
+            String sampleUsages,
+            String definition,
+            String... referencedTables) {
 
         public boolean isValid(Set<String> availableTables) {
             return availableTables.containsAll(List.of(referencedTables));
         }
 
         public String nameWithArgs() {
-            String args = definition.substring(definition.indexOf('(') + 1, definition.indexOf(')'));
+            String args =
+                    definition.substring(definition.indexOf('(') + 1, definition.indexOf(')'));
             return name + "(" + args + ")";
         }
     }
 
-    private static final Macro[] macros = new Macro[] {
+    private static final Macro[] macros =
+            new Macro[] {
 
-            // ==========================================
-            // STATISTICAL FUNCTIONS AND PERCENTILES
-            // ==========================================
+                // ==========================================
+                // STATISTICAL FUNCTIONS AND PERCENTILES
+                // ==========================================
 
-            new Macro(
-                    "P90",
-                    "90th percentile of a column.",
-                    "SELECT P90(duration) FROM GCPhasePause;",
-                    "CREATE MACRO P90(col) AS quantile(col, 0.90)"
-            ),
-            new Macro(
-                    "P95",
-                    "95th percentile of a column.",
-                    "SELECT P95(duration) FROM GCPhasePause;",
-                    "CREATE MACRO P95(col) AS quantile(col, 0.95)"
-            ),
-            new Macro(
-                    "P99",
-                    "99th percentile of a column.",
-                    "SELECT P99(duration) FROM GCPhasePause;",
-                    "CREATE MACRO P99(col) AS quantile(col, 0.99)"
-            ),
-            new Macro(
-                    "P999",
-                    "99.9th percentile of a column.",
-                    "SELECT P999(duration) FROM GCPhasePause;",
-                    "CREATE MACRO P999(col) AS quantile(col, 0.999)"
-            ),
-            new Macro(
-                    "normalized",
-                    "Normalize a value to [0,1] over entire input, by comparing with max value, might have problems with LIMIT",
-                    "SELECT normalized(duration) FROM GCPhasePause LIMIT 10;",
-                    """
+                new Macro(
+                        "P90",
+                        "90th percentile of a column.",
+                        "SELECT P90(duration) FROM GCPhasePause;",
+                        "CREATE MACRO P90(col) AS quantile(col, 0.90)"),
+                new Macro(
+                        "P95",
+                        "95th percentile of a column.",
+                        "SELECT P95(duration) FROM GCPhasePause;",
+                        "CREATE MACRO P95(col) AS quantile(col, 0.95)"),
+                new Macro(
+                        "P99",
+                        "99th percentile of a column.",
+                        "SELECT P99(duration) FROM GCPhasePause;",
+                        "CREATE MACRO P99(col) AS quantile(col, 0.99)"),
+                new Macro(
+                        "P999",
+                        "99.9th percentile of a column.",
+                        "SELECT P999(duration) FROM GCPhasePause;",
+                        "CREATE MACRO P999(col) AS quantile(col, 0.999)"),
+                new Macro(
+                        "normalized",
+                        "Normalize a value to [0,1] over entire input, by comparing with max value, might have problems with LIMIT",
+                        "SELECT normalized(duration) FROM GCPhasePause LIMIT 10;",
+                        """
                     CREATE MACRO normalized(x) AS (
                       x / NULLIF(MAX(x) OVER(), 0)
                     )
-                    """
-            ),
+                    """),
 
-            // ==========================================
-            // JFR AGGREGATE FUNCTIONS
-            // ==========================================
+                // ==========================================
+                // JFR AGGREGATE FUNCTIONS
+                // ==========================================
 
-            new Macro(
-                    "diff",
-                    "Row delta: col - LAG(col) OVER(ORDER BY col).",
-                    "SELECT diff(duration) FROM GCPhasePause;",
-                    "CREATE MACRO diff(col) AS (col - LAG(col) OVER (ORDER BY col))"
-            ),
-            new Macro(
-                    "COUNT_UNIQUE",
-                    "Count distinct values (JFR UNIQUE(x)).",
-                    "SELECT COUNT_UNIQUE(eventThread) FROM JavaMonitorEnter; -- Contention analysis: GROUP BY monitorClass",
-                    "CREATE MACRO COUNT_UNIQUE(x) AS count(DISTINCT x)"
-            ),
+                new Macro(
+                        "diff",
+                        "Row delta: col - LAG(col) OVER(ORDER BY col).",
+                        "SELECT diff(duration) FROM GCPhasePause;",
+                        "CREATE MACRO diff(col) AS (col - LAG(col) OVER (ORDER BY col))"),
+                new Macro(
+                        "COUNT_UNIQUE",
+                        "Count distinct values (JFR UNIQUE(x)).",
+                        "SELECT COUNT_UNIQUE(eventThread) FROM JavaMonitorEnter; -- Contention analysis: GROUP BY monitorClass",
+                        "CREATE MACRO COUNT_UNIQUE(x) AS count(DISTINCT x)"),
 
-            // ==========================================
-            // UNIT CONVERSION FUNCTIONS
-            // ==========================================
-            new Macro(
-                    "format_decimals",
-                    "Format number with fixed number of decimals.",
-                    "SELECT format_decimals(PI(), 4);",
-                    """
+                // ==========================================
+                // UNIT CONVERSION FUNCTIONS
+                // ==========================================
+                new Macro(
+                        "format_decimals",
+                        "Format number with fixed number of decimals.",
+                        "SELECT format_decimals(PI(), 4);",
+                        """
             CREATE MACRO format_decimals(num, decimals) AS (
                 CASE
                     WHEN decimals == 0 THEN FLOOR(num)::VARCHAR
                     ELSE format('{:.' || decimals || 'f}', num)
                 END)
-                """
-            ),
-
-            new Macro(
-                    "format_percentage",
-                    "Format a number as percentage with fixed number of decimals.",
-                    "SELECT format_percentage(0.123456, 2);",
-                    """
+            """),
+                new Macro(
+                        "format_percentage",
+                        "Format a number as percentage with fixed number of decimals.",
+                        "SELECT format_percentage(0.123456, 2);",
+                        """
                     CREATE MACRO format_percentage(num, decimals := 2) AS (
                       format_decimals(num * 100.0, decimals) || '%'
                     )
-                    """
-            ),
-
-            new Macro(
-                    "format_memory",
-                    "Format bytes into human readable string (B, KB, MB, GB, TB).",
-                    "SELECT format_memory(123456789);",
-                    """
+                    """),
+                new Macro(
+                        "format_memory",
+                        "Format bytes into human readable string (B, KB, MB, GB, TB).",
+                        "SELECT format_memory(123456789);",
+                        """
                     CREATE MACRO format_memory(bytes, decimals := 2) AS (
                       CASE
                         WHEN bytes IS NULL THEN NULL
@@ -136,13 +132,12 @@ public class MacroCollection {
                           END)
                       END
                     )
-                    """
-            ),
-
-            new Macro("format_human_duration",
-                    "Format seconds into human readable string).",
-                    "SELECT format_human_duration(60.1);",
-                    """
+                    """),
+                new Macro(
+                        "format_human_duration",
+                        "Format seconds into human readable string).",
+                        "SELECT format_human_duration(60.1);",
+                        """
                             CREATE MACRO format_human_duration(sec) AS (
                                CASE
                                   WHEN sec IS NULL THEN NULL
@@ -186,11 +181,12 @@ public class MacroCollection {
                                     )
                                 END
                                   )
-                              """),
-            new Macro("format_duration",
-                    "Format seconds using SI units (s, ms, us, ns) with specified decimal places. Does not go larger than seconds.",
-                    "SELECT format_duration(40), format_duration(0.4), format_duration(0.0004), format_duration(0.0000004);",
-                    """
+                            """),
+                new Macro(
+                        "format_duration",
+                        "Format seconds using SI units (s, ms, us, ns) with specified decimal places. Does not go larger than seconds.",
+                        "SELECT format_duration(40), format_duration(0.4), format_duration(0.0004), format_duration(0.0000004);",
+                        """
                     CREATE MACRO format_duration(seconds, decimals := 2) AS (
                       CASE
                         WHEN seconds IS NULL THEN NULL
@@ -207,21 +203,21 @@ public class MacroCollection {
                       END
                     )
                     """),
-            new Macro("format_hex",
-                    "Format integer as hex string (with 0x prefix).",
-                    "SELECT format_hex(255), format_hex(-255);",
-                    "CREATE MACRO format_hex(i) AS format('0x{:x}', i)"
-            ),
+                new Macro(
+                        "format_hex",
+                        "Format integer as hex string (with 0x prefix).",
+                        "SELECT format_hex(255), format_hex(-255);",
+                        "CREATE MACRO format_hex(i) AS format('0x{:x}', i)"),
 
-            // ==========================================
-            // GARBAGE COLLECTION ANALYSIS
-            // ==========================================
+                // ==========================================
+                // GARBAGE COLLECTION ANALYSIS
+                // ==========================================
 
-            new Macro(
-                    "before_gc",
-                    "GC id of the last GC before the event, or -1. Slow on large tables.",
-                    "SELECT before_gc(startTime) FROM ExecutionSample LIMIT 10;",
-                    """
+                new Macro(
+                        "before_gc",
+                        "GC id of the last GC before the event, or -1. Slow on large tables.",
+                        "SELECT before_gc(startTime) FROM ExecutionSample LIMIT 10;",
+                        """
                     CREATE MACRO before_gc(ts) AS (
                       COALESCE(
                         (SELECT gcId
@@ -233,13 +229,12 @@ public class MacroCollection {
                       )
                     )
                     """,
-                    "GarbageCollection"
-            ),
-            new Macro(
-                    "after_gc",
-                    "GC id of the first GC after the event, or -1. Slow on large tables.",
-                    "SELECT after_gc(startTime) FROM ExecutionSample LIMIT 10;",
-                    """
+                        "GarbageCollection"),
+                new Macro(
+                        "after_gc",
+                        "GC id of the first GC after the event, or -1. Slow on large tables.",
+                        "SELECT after_gc(startTime) FROM ExecutionSample LIMIT 10;",
+                        """
                     CREATE MACRO after_gc(ts) AS (
                       COALESCE(
                         (SELECT gcId
@@ -251,13 +246,12 @@ public class MacroCollection {
                       )
                     )
                     """,
-                    "GarbageCollection"
-            ),
-            new Macro(
-                    "duration_since_last_gc",
-                    "Duration since the last GC before the event, or -1.",
-                    "SELECT duration_since_last_gc(startTime) FROM ExecutionSample LIMIT 10;",
-                    """
+                        "GarbageCollection"),
+                new Macro(
+                        "duration_since_last_gc",
+                        "Duration since the last GC before the event, or -1.",
+                        "SELECT duration_since_last_gc(startTime) FROM ExecutionSample LIMIT 10;",
+                        """
                     CREATE MACRO duration_since_last_gc(ts) AS (
                       COALESCE(
                         (SELECT ts - startTime
@@ -269,13 +263,12 @@ public class MacroCollection {
                       )
                     )
                     """,
-                    "GarbageCollection"
-            ),
-            new Macro(
-                    "HEAP_BEFORE_GC",
-                    "Get heap usage before GC for a given GC ID.",
-                    "SELECT gcId, HEAP_BEFORE_GC(gcId) as heap_before FROM GarbageCollection;",
-                    """
+                        "GarbageCollection"),
+                new Macro(
+                        "HEAP_BEFORE_GC",
+                        "Get heap usage before GC for a given GC ID.",
+                        "SELECT gcId, HEAP_BEFORE_GC(gcId) as heap_before FROM GarbageCollection;",
+                        """
                     CREATE MACRO HEAP_BEFORE_GC(gc_id) AS (
                       (SELECT heapUsed
                        FROM GCHeapSummary
@@ -283,13 +276,12 @@ public class MacroCollection {
                        LIMIT 1)
                     )
                     """,
-                    "GCHeapSummary"
-            ),
-            new Macro(
-                    "HEAP_AFTER_GC",
-                    "Get heap usage after GC for a given GC ID.",
-                    "SELECT gcId, HEAP_AFTER_GC(gcId) as heap_after FROM GarbageCollection;",
-                    """
+                        "GCHeapSummary"),
+                new Macro(
+                        "HEAP_AFTER_GC",
+                        "Get heap usage after GC for a given GC ID.",
+                        "SELECT gcId, HEAP_AFTER_GC(gcId) as heap_after FROM GarbageCollection;",
+                        """
                     CREATE MACRO HEAP_AFTER_GC(gc_id) AS (
                       (SELECT heapUsed
                        FROM GCHeapSummary
@@ -297,13 +289,12 @@ public class MacroCollection {
                        LIMIT 1)
                     )
                     """,
-                    "GCHeapSummary"
-            ),
-            new Macro(
-                    "GC_TYPE",
-                    "Get GC type for a given GC ID (Young/Old/Unknown).",
-                    "SELECT gcId, GC_TYPE(gcId) as gc_type FROM GarbageCollection;",
-                    """
+                        "GCHeapSummary"),
+                new Macro(
+                        "GC_TYPE",
+                        "Get GC type for a given GC ID (Young/Old/Unknown).",
+                        "SELECT gcId, GC_TYPE(gcId) as gc_type FROM GarbageCollection;",
+                        """
                     CREATE MACRO GC_TYPE(gc_id) AS (
                       COALESCE(
                         (SELECT 'Young' FROM YoungGarbageCollection WHERE gcId = gc_id LIMIT 1),
@@ -312,41 +303,39 @@ public class MacroCollection {
                       )
                     )
                     """,
-                    "YoungGarbageCollection", "OldGarbageCollection"
-            ),
+                        "YoungGarbageCollection",
+                        "OldGarbageCollection"),
 
-            // ==========================================
-            // JFR FIELD ACCESSORS
-            // ==========================================
+                // ==========================================
+                // JFR FIELD ACCESSORS
+                // ==========================================
 
-            new Macro(
-                    "EVENT_TYPE_LABEL",
-                    "Get the event label for the event table name.",
-                    "SELECT EVENT_TYPE_LABEL('GarbageCollection');",
-                    "CREATE MACRO EVENT_TYPE_LABEL(et) AS (SELECT label FROM EventLabels WHERE name = et LIMIT 1)",
-                    "EventLabels"
-            ),
-            new Macro("EVENT_NAME_FOR_ID",
-                    "Get the event table name for the event ID.",
-                    "SELECT EVENT_NAME_FOR_ID(1);",
-                    "CREATE MACRO EVENT_NAME_FOR_ID(_id) AS (SELECT name FROM EventIDs event WHERE id = _id LIMIT 1)",
-                    "EventIDs"
-            ),
-            // ============================================
-            // Misc database utility functions
-            // ============================================
-            new Macro("macro_sql",
-                    "Get the SQL definition of a macro by name.",
-                    "SELECT macro_sql('P90');",
-                    "CREATE MACRO macro_sql(macro_name) AS (SELECT macro_definition FROM duckdb_functions() WHERE function_name = macro_name AND function_type = 'macro' AND NOT internal LIMIT 1)"
-            ),
-            new Macro("view_sql",
-                    "Get the SQL definition of a view by name.",
-                    "SELECT view_sql('SomeView');",
-                    "CREATE MACRO view_sql(name) AS (SELECT sql FROM duckdb_views() WHERE view_name = name LIMIT 1)",
-                    "information_schema.views"
-            )
-    };
+                new Macro(
+                        "EVENT_TYPE_LABEL",
+                        "Get the event label for the event table name.",
+                        "SELECT EVENT_TYPE_LABEL('GarbageCollection');",
+                        "CREATE MACRO EVENT_TYPE_LABEL(et) AS (SELECT label FROM EventLabels WHERE name = et LIMIT 1)",
+                        "EventLabels"),
+                new Macro(
+                        "EVENT_NAME_FOR_ID",
+                        "Get the event table name for the event ID.",
+                        "SELECT EVENT_NAME_FOR_ID(1);",
+                        "CREATE MACRO EVENT_NAME_FOR_ID(_id) AS (SELECT name FROM EventIDs event WHERE id = _id LIMIT 1)",
+                        "EventIDs"),
+                // ============================================
+                // Misc database utility functions
+                // ============================================
+                new Macro(
+                        "macro_sql",
+                        "Get the SQL definition of a macro by name.",
+                        "SELECT macro_sql('P90');",
+                        "CREATE MACRO macro_sql(macro_name) AS (SELECT macro_definition FROM duckdb_functions() WHERE function_name = macro_name AND function_type = 'macro' AND NOT internal LIMIT 1)"),
+                new Macro(
+                        "view_sql",
+                        "Get the SQL definition of a view by name.",
+                        "SELECT view_sql('SomeView');",
+                        "CREATE MACRO view_sql(name) AS (SELECT sql FROM duckdb_views() WHERE view_name = name LIMIT 1)")
+            };
 
     public static List<Macro> getMacros() {
         return List.of(macros);
@@ -355,13 +344,19 @@ public class MacroCollection {
     public static void addToDatabase(DuckDBConnection connection) throws SQLException {
         Set<String> tableNames = getTableNames(connection);
         // remove all existing macros
-        try (ResultSet rs = connection.createStatement().executeQuery("SELECT function_name FROM duckdb_functions() WHERE function_type = 'macro' and not internal")) {
+        try (ResultSet rs =
+                connection
+                        .createStatement()
+                        .executeQuery(
+                                "SELECT function_name FROM duckdb_functions() WHERE function_type = 'macro' and not internal")) {
             while (rs.next()) {
                 String macroName = rs.getString(1);
                 try (var dropStmt = connection.createStatement()) {
                     dropStmt.execute("DROP MACRO IF EXISTS " + macroName + ";");
                 } catch (SQLException e) {
-                    throw new RuntimeSQLException("Error dropping existing macro " + macroName + ": " + e.getMessage(), e);
+                    throw new RuntimeSQLException(
+                            "Error dropping existing macro " + macroName + ": " + e.getMessage(),
+                            e);
                 }
             }
         }
@@ -369,21 +364,33 @@ public class MacroCollection {
             for (Macro macro : macros) {
                 try {
                     if (!macro.isValid(tableNames)) {
-                        System.out.println("Skipping macro " + macro.name() + " because it references missing tables: " +
-                                           Arrays.stream(macro.referencedTables)
-                                        .filter(t -> !tableNames.contains(t))
-                                        .collect(Collectors.joining(", ")));
+                        System.out.println(
+                                "Skipping macro "
+                                        + macro.name()
+                                        + " because it references missing tables: "
+                                        + Arrays.stream(macro.referencedTables)
+                                                .filter(t -> !tableNames.contains(t))
+                                                .collect(Collectors.joining(", ")));
                         continue;
                     }
                     stmt.execute(macro.definition());
-                    String description = macro.description() + "\nExample usage:\n" + macro.sampleUsages();
-                    stmt.execute("COMMENT ON MACRO " + macro.name() + " IS " + stmt.enquoteLiteral(description) + ";");
-                    //System.out.println("Created macro " + macro.nameWithArgs() + ": " + macro.description());
+                    String description =
+                            macro.description() + "\nExample usage:\n" + macro.sampleUsages();
+                    stmt.execute(
+                            "COMMENT ON MACRO "
+                                    + macro.name()
+                                    + " IS "
+                                    + stmt.enquoteLiteral(description)
+                                    + ";");
+                    // System.out.println("Created macro " + macro.nameWithArgs() + ": " +
+                    // macro.description());
                 } catch (SQLException e) {
-                    throw new RuntimeSQLException("Error creating macro " + macro.name() + ": " + e.getMessage(), e);
+                    throw new RuntimeSQLException(
+                            "Error creating macro " + macro.name() + ": " + e.getMessage(), e);
                 }
             }
-            stmt.execute("""
+            stmt.execute(
+                    """
                 CREATE TABLE IF NOT EXISTS macros (
                   name VARCHAR,
                   description VARCHAR,

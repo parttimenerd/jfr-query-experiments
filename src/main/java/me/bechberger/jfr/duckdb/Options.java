@@ -2,25 +2,30 @@ package me.bechberger.jfr.duckdb;
 
 import picocli.CommandLine;
 
-/**
- *
- */
+/** */
 public class Options {
 
     public enum ExcludableItems {
-        /**
-         * Just have a package string
-         */
+        /** Just have a package string */
         PACKAGE_HIERARCHY,
     }
 
-    @CommandLine.Option(names = {"-e", "--exclude"}, description = "Exclude certain items from the import, possible values: ${COMPLETION-CANDIDATES}")
+    @CommandLine.Option(
+            names = {"-e", "--exclude"},
+            description =
+                    "Exclude certain items from the import, possible values: ${COMPLETION-CANDIDATES}")
     private ExcludableItems[] exclude = new ExcludableItems[0];
 
-    @CommandLine.Option(names = {"-s", "--stacktrace-depth"}, description = "Maximum stack trace depth to import (default: ${DEFAULT-VALUE})", defaultValue = "10")
+    @CommandLine.Option(
+            names = {"-s", "--stacktrace-depth"},
+            description = "Maximum stack trace depth to import (default: ${DEFAULT-VALUE})",
+            defaultValue = "10")
     private int maxStackTraceDepth = 10;
 
-    @CommandLine.Option(names = {"--complex-descriptors"}, description = "Use package names in descriptors", defaultValue = "false")
+    @CommandLine.Option(
+            names = {"--complex-descriptors"},
+            description = "Use package names in descriptors",
+            defaultValue = "false")
     private boolean complexDescriptors = false;
 
     public boolean isExcluded(ExcludableItems item) {
@@ -32,8 +37,7 @@ public class Options {
         return false;
     }
 
-    public Options() {
-    }
+    public Options() {}
 
     public Options(ExcludableItems... exclude) {
         this.exclude = exclude;
@@ -50,5 +54,4 @@ public class Options {
     public void setComplexDescriptors(boolean complexDescriptors) {
         this.complexDescriptors = complexDescriptors;
     }
-
 }

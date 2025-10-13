@@ -1,56 +1,52 @@
 /**
+ * Copyright (c) 2025, SAP SE or an SAP affiliate company. All rights reserved. Copyright (c) 2023,
+ * Oracle and/or its affiliates. All rights reserved. DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR
+ * THIS FILE HEADER.
  *
- * Copyright (c) 2025, SAP SE or an SAP affiliate company. All rights reserved.
- * Copyright (c) 2023, Oracle and/or its affiliates. All rights reserved.
- * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+ * <p>This code is free software; you can redistribute it and/or modify it under the terms of the
+ * GNU General Public License version 2 only, as published by the Free Software Foundation. Oracle
+ * designates this particular file as subject to the "Classpath" exception as provided by Oracle in
+ * the LICENSE file that accompanied this code.
  *
- * This code is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 only, as
- * published by the Free Software Foundation.  Oracle designates this
- * particular file as subject to the "Classpath" exception as provided
- * by Oracle in the LICENSE file that accompanied this code.
- *
- * This code is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * version 2 for more details (a copy is included in the LICENSE file that
+ * <p>This code is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without
+ * even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License version 2 for more details (a copy is included in the LICENSE file that
  * accompanied this code).
  *
- * You should have received a copy of the GNU General Public License version
- * 2 along with this work; if not, write to the Free Software Foundation,
- * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
+ * <p>You should have received a copy of the GNU General Public License version 2 along with this
+ * work; if not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
+ * MA 02110-1301 USA.
  *
- * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
- * or visit www.oracle.com if you need additional information or have any
- * questions.
+ * <p>Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA or visit
+ * www.oracle.com if you need additional information or have any questions.
  */
 package me.bechberger.jfr.duckdb.definitions;
 
-import me.bechberger.jfr.duckdb.RuntimeSQLException;
-import me.bechberger.jfr.duckdb.query.QueryExecutor;
-import org.duckdb.DuckDBConnection;
+import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
 
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+import me.bechberger.jfr.duckdb.RuntimeSQLException;
+import org.duckdb.DuckDBConnection;
 
-import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
-
-/**
- * Implement all JFR views as defined in the OpenJDK (till 25. September 2025).
- */
+/** Implement all JFR views as defined in the OpenJDK (till 25. September 2025). */
+@SuppressWarnings("DanglingJavadoc")
 public class ViewCollection {
 
-    private static final View[] views = new View[]{
-            new View(
-                    "active-recordings",
-                    "environment",
-                    "Active Recordings",
-                    "active-recordings",
-                    """
+    private static final View[] views =
+            new View[] {
+                new View(
+                                "active-recordings",
+                                "environment",
+                                "Active Recordings",
+                                "active-recordings",
+                                """
                             CREATE VIEW "active-recordings" AS
                             SELECT
                                 LAST(recordingStart) AS "Start",
@@ -62,16 +58,17 @@ public class ViewCollection {
                             FROM ActiveRecording
                             GROUP BY id
                             """,
-                    "ActiveRecording"
-            ).description("""
+                                "ActiveRecording")
+                        .description(
+                                """
                     Shows all active recordings with their start, duration and name.
                     """),
-            new View(
-                    "active-settings",
-                    "environment",
-                    "Active Settings",
-                    "active-settings",
-                    """
+                new View(
+                                "active-settings",
+                                "environment",
+                                "Active Settings",
+                                "active-settings",
+                                """
                             CREATE VIEW "active-settings" AS
                             SELECT
                                 EVENT_NAME_FOR_ID(id) AS "Event Type",
@@ -85,16 +82,17 @@ public class ViewCollection {
                             GROUP BY id
                             ORDER BY "Event Type"
                             """,
-                    "ActiveSetting"
-            ).description("""
+                                "ActiveSetting")
+                        .description(
+                                """
                     Shows the active settings for all event types.
                     """),
-            new View(
-                    "allocation-by-class",
-                    "application",
-                    "Allocation by Class",
-                    "allocation-by-class",
-                    """
+                new View(
+                                "allocation-by-class",
+                                "application",
+                                "Allocation by Class",
+                                "allocation-by-class",
+                                """
                                  CREATE VIEW "allocation-by-class" AS
                                  SELECT cls.javaName as "Object Type", format_percentage(pressure) as "Allocation Pressure" FROM (SELECT
                                      objectClass AS _objectType,
@@ -106,15 +104,18 @@ public class ViewCollection {
                                  WHERE _objectType = cls._id
                                  ORDER BY pressure DESC
                             """,
-                    "ObjectAllocationSample", "Class"
-            ).description("""
+                                "ObjectAllocationSample",
+                                "Class")
+                        .description(
+                                """
                     Shows the classes which have the highest allocation pressure.
                     """),
-            new View("allocation-by-thread",
-                    "application",
-                    "Allocation by Thread",
-                    "allocation-by-thread",
-                    """
+                new View(
+                                "allocation-by-thread",
+                                "application",
+                                "Allocation by Thread",
+                                "allocation-by-thread",
+                                """
                                  CREATE VIEW "allocation-by-thread" AS
                                  SELECT th.javaName AS "Thread", format_percentage(pressure) AS "Allocation Pressure" FROM (SELECT
                                      eventThread AS _thread,
@@ -126,15 +127,18 @@ public class ViewCollection {
                                  WHERE _thread = th._id
                                  ORDER BY pressure DESC
                             """,
-                    "ObjectAllocationSample", "Thread"
-            ).description("""
+                                "ObjectAllocationSample",
+                                "Thread")
+                        .description(
+                                """
                     Shows the threads which have the highest allocation pressure.
                     """),
-            new View("allocation-by-site",
-                    "application",
-                    "Allocation by Method (disregarding line number and descriptor)",
-                    "allocation-by-site",
-                    """
+                new View(
+                                "allocation-by-site",
+                                "application",
+                                "Allocation by Method (disregarding line number and descriptor)",
+                                "allocation-by-site",
+                                """
                                  CREATE VIEW "allocation-by-site" AS
                                  SELECT "Method", format_percentage(pressure) AS "Allocation Pressure" FROM
                                  (SELECT
@@ -149,25 +153,24 @@ public class ViewCollection {
                                  )
                                  ORDER BY pressure DESC
                             """,
-                    "ObjectAllocationSample", "Method", "Class"
-            ).description("""
+                                "ObjectAllocationSample",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Shows the methods which have the highest allocation pressure.
                     """),
-            /**
-             * [jvm.blocked-by-system-gc]
-             * label = "Blocked by System.gc()"
-             * table = "FORMAT none, none, cell-height:10
-             *          SELECT startTime, duration, stackTrace
-             *          FROM SystemGC
-             *          WHERE invokedConcurrent = 'false'
-             *          ORDER BY duration DESC
-             *          LIMIT 25"
-            */
-            new View("blocked-by-system-gc",
-                    "jvm",
-                    "Blocked by System.gc()",
-                    "blocked-by-system-gc",
-                    """
+                /**
+                 * [jvm.blocked-by-system-gc] label = "Blocked by System.gc()" table = "FORMAT none,
+                 * none, cell-height:10 SELECT startTime, duration, stackTrace FROM SystemGC WHERE
+                 * invokedConcurrent = 'false' ORDER BY duration DESC LIMIT 25"
+                 */
+                new View(
+                                "blocked-by-system-gc",
+                                "jvm",
+                                "Blocked by System.gc()",
+                                "blocked-by-system-gc",
+                                """
                                  CREATE VIEW "blocked-by-system-gc" AS
                                  SELECT
                                      startTime AS "Time",
@@ -180,15 +183,19 @@ public class ViewCollection {
                                  ORDER BY sgc.duration DESC
                                  LIMIT 25
                             """,
-                    "SystemGC", "Method", "Class"
-            ).description("""
+                                "SystemGC",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Shows the System.gc() calls which have blocked application threads the most.
                     """),
-            new View("class-loaders",
-                    "application",
-                    "Class Loaders",
-                    "class-loaders",
-                    """
+                new View(
+                                "class-loaders",
+                                "application",
+                                "Class Loaders",
+                                "class-loaders",
+                                """
                                  CREATE VIEW "class-loaders" AS
                                  SELECT
                                      cl.javaName AS "Class Loader",
@@ -199,15 +206,18 @@ public class ViewCollection {
                                  GROUP BY classLoader, cl.javaName
                                  ORDER BY "Classes" DESC
                             """,
-                    "ClassLoaderStatistics", "ClassLoader"
-            ).description("""
+                                "ClassLoaderStatistics",
+                                "ClassLoader")
+                        .description(
+                                """
                     Shows all class loaders with their loaded class count and hidden class count.
                     """),
-            new View("class-modifications",
-                    "jvm",
-                    "Class Modifications",
-                    "class-modifications",
-                    """
+                new View(
+                                "class-modifications",
+                                "jvm",
+                                "Class Modifications",
+                                "class-modifications",
+                                """
                                  CREATE VIEW "class-modifications" AS
                                  SELECT
                                      format_duration(duration) AS "Time",
@@ -237,15 +247,21 @@ public class ViewCollection {
                                  LEFT JOIN Class c ON c._id = m.type
                                  ORDER BY duration DESC
                             """,
-                    "RedefineClasses", "RetransformClasses", "Method", "Class"
-            ).addUnionAlternatives().description("""
+                                "RedefineClasses",
+                                "RetransformClasses",
+                                "Method",
+                                "Class")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Shows all class redefinitions and retransforms with their duration, requested by and class count.
                     """),
-            new View("compiler-configuration",
-                    "jvm",
-                    "Compiler Configuration",
-                    "compiler-configuration",
-                    """
+                new View(
+                                "compiler-configuration",
+                                "jvm",
+                                "Compiler Configuration",
+                                "compiler-configuration",
+                                """
                                  CREATE VIEW "compiler-configuration" AS
                                  SELECT
                                      LAST(threadCount) AS "Compiler Threads",
@@ -253,15 +269,17 @@ public class ViewCollection {
                                      LAST(tieredCompilation) AS "Tiered Compilation"
                                  FROM CompilerConfiguration
                             """,
-                    "CompilerConfiguration"
-            ).description("""
+                                "CompilerConfiguration")
+                        .description(
+                                """
                     Shows the configuration of the JIT compiler.
                     """),
-            new View("compiler-statistics",
-                    "jvm",
-                    "Compiler Statistics",
-                    "compiler-statistics",
-                    """
+                new View(
+                                "compiler-statistics",
+                                "jvm",
+                                "Compiler Statistics",
+                                "compiler-statistics",
+                                """
                                  CREATE VIEW "compiler-statistics" AS
                                  SELECT
                                      LAST(compileCount) AS "Compiled Methods",
@@ -276,27 +294,23 @@ public class ViewCollection {
                                      format_memory(LAST(nmethodCodeSize)) AS "Compilation Resulting Code Size"
                                  FROM CompilerStatistics
                             """,
-                    "CompilerStatistics"
-            ).description("""
+                                "CompilerStatistics")
+                        .description(
+                                """
                     Shows statistics about the JIT compiler.
                     """),
-            /**
-             * [jvm.compiler-phases]
-             * label = "Concurrent Compiler Phases"
-             * table = "COLUMN 'Level', 'Phase', 'Average',
-             *                 'P95', 'Longest', 'Count',
-             *                 'Total'
-             *          SELECT phaseLevel AS L, phase AS P, AVG(duration),
-             *                 P95(duration),  MAX(duration), COUNT(*),
-             *                 SUM(duration) AS S
-             *          FROM CompilerPhase
-             *          GROUP BY P ORDER BY L ASC, S DESC"
-            */
-            new View("compiler-phases",
-                    "jvm",
-                    "Concurrent Compiler Phases",
-                    "compiler-phases",
-                    """
+                /**
+                 * [jvm.compiler-phases] label = "Concurrent Compiler Phases" table = "COLUMN
+                 * 'Level', 'Phase', 'Average', 'P95', 'Longest', 'Count', 'Total' SELECT phaseLevel
+                 * AS L, phase AS P, AVG(duration), P95(duration), MAX(duration), COUNT(*),
+                 * SUM(duration) AS S FROM CompilerPhase GROUP BY P ORDER BY L ASC, S DESC"
+                 */
+                new View(
+                                "compiler-phases",
+                                "jvm",
+                                "Concurrent Compiler Phases",
+                                "compiler-phases",
+                                """
                                  CREATE VIEW "compiler-phases" AS
                                  SELECT
                                      phaseLevel AS "Level",
@@ -310,23 +324,24 @@ public class ViewCollection {
                                  GROUP BY phase, phaseLevel
                                  ORDER BY phaseLevel ASC, SUM(duration) DESC
                             """,
-                    "CompilerPhase"
-            ).description("""
+                                "CompilerPhase")
+                        .description(
+                                """
                     Shows the phases of the concurrent compiler with their average, p95, longest, count and total duration.
                     """),
-            /**
-             * [environment.container-configuration]
-             * label = "Container Configuration"
-             * form = "SELECT LAST(containerType), LAST(cpuSlicePeriod), LAST(cpuQuota), LAST(cpuShares),
-             *                LAST(effectiveCpuCount), LAST(memorySoftLimit), LAST(memoryLimit),
-             *                LAST(swapMemoryLimit), LAST(hostTotalMemory)
-             *                FROM ContainerConfiguration"
-            */
-            new View("container-configuration",
-                    "environment",
-                    "Container Configuration",
-                    "container-configuration",
-                    """
+                /**
+                 * [environment.container-configuration] label = "Container Configuration" form =
+                 * "SELECT LAST(containerType), LAST(cpuSlicePeriod), LAST(cpuQuota),
+                 * LAST(cpuShares), LAST(effectiveCpuCount), LAST(memorySoftLimit),
+                 * LAST(memoryLimit), LAST(swapMemoryLimit), LAST(hostTotalMemory) FROM
+                 * ContainerConfiguration"
+                 */
+                new View(
+                                "container-configuration",
+                                "environment",
+                                "Container Configuration",
+                                "container-configuration",
+                                """
                                  CREATE VIEW "container-configuration" AS
                                  SELECT
                                      LAST(containerType) AS "Container Type",
@@ -340,20 +355,21 @@ public class ViewCollection {
                                      format_memory(LAST(hostTotalMemory)) AS "Host Total Memory"
                                  FROM ContainerConfiguration
                             """,
-                    "ContainerConfiguration"
-            ).description("""
+                                "ContainerConfiguration")
+                        .description(
+                                """
                     Shows the configuration of the container in which the JVM is running.
                     """),
-            /**
-             * [environment.container-cpu-usage]
-             * label = "Container CPU Usage"
-             * form = "SELECT LAST(cpuTime), LAST(cpuUserTime), LAST(cpuSystemTime) FROM ContainerCPUUsage"
-            */
-            new View("container-cpu-usage",
-                    "environment",
-                    "Container CPU Usage",
-                    "container-cpu-usage",
-                    """
+                /**
+                 * [environment.container-cpu-usage] label = "Container CPU Usage" form = "SELECT
+                 * LAST(cpuTime), LAST(cpuUserTime), LAST(cpuSystemTime) FROM ContainerCPUUsage"
+                 */
+                new View(
+                                "container-cpu-usage",
+                                "environment",
+                                "Container CPU Usage",
+                                "container-cpu-usage",
+                                """
                                  CREATE VIEW "container-cpu-usage" AS
                                  SELECT
                                      format_duration(LAST(cpuTime)) AS "CPU Time",
@@ -361,20 +377,22 @@ public class ViewCollection {
                                      format_duration(LAST(cpuSystemTime)) AS "CPU System Time"
                                  FROM ContainerCPUUsage
                             """,
-                    "ContainerCPUUsage"
-            ).description("""
+                                "ContainerCPUUsage")
+                        .description(
+                                """
                     Shows the CPU usage of the container in which the JVM is running.
                     """),
-            /**
-             * [environment.container-memory-usage]
-             * label = "Container Memory Usage"
-             * form = "SELECT LAST(memoryFailCount), LAST(memoryUsage), LAST(swapMemoryUsage) FROM ContainerMemoryUsage"
-            */
-            new View("container-memory-usage",
-                    "environment",
-                    "Container Memory Usage",
-                    "container-memory-usage",
-                    """
+                /**
+                 * [environment.container-memory-usage] label = "Container Memory Usage" form =
+                 * "SELECT LAST(memoryFailCount), LAST(memoryUsage), LAST(swapMemoryUsage) FROM
+                 * ContainerMemoryUsage"
+                 */
+                new View(
+                                "container-memory-usage",
+                                "environment",
+                                "Container Memory Usage",
+                                "container-memory-usage",
+                                """
                                  CREATE VIEW "container-memory-usage" AS
                                  SELECT
                                      LAST(memoryFailCount) AS "Memory Fail Count",
@@ -382,40 +400,43 @@ public class ViewCollection {
                                      format_memory(LAST(swapMemoryUsage)) AS "Swap Memory Usage"
                                  FROM ContainerMemoryUsage
                             """,
-                    "ContainerMemoryUsage"
-            ).description("""
+                                "ContainerMemoryUsage")
+                        .description(
+                                """
                     Shows the memory usage of the container in which the JVM is running.
                     """),
-            /**
-             * [environment.container-io-usage]
-             * label = "Container I/O Usage"
-             * form = "SELECT LAST(serviceRequests), LAST(dataTransferred) FROM ContainerIOUsage"
-            */
-            new View("container-io-usage",
-                    "environment",
-                    "Container I/O Usage",
-                    "container-io-usage",
-                    """
+                /**
+                 * [environment.container-io-usage] label = "Container I/O Usage" form = "SELECT
+                 * LAST(serviceRequests), LAST(dataTransferred) FROM ContainerIOUsage"
+                 */
+                new View(
+                                "container-io-usage",
+                                "environment",
+                                "Container I/O Usage",
+                                "container-io-usage",
+                                """
                                  CREATE VIEW "container-io-usage" AS
                                  SELECT
                                      LAST(serviceRequests) AS "Service Requests",
                                      format_memory(LAST(dataTransferred)) AS "Data Transferred"
                                  FROM ContainerIOUsage
                             """,
-                    "ContainerIOUsage"
-            ).description("""
+                                "ContainerIOUsage")
+                        .description(
+                                """
                     Shows the I/O usage of the container in which the JVM is running.
                     """),
-            /**
-             * [environment.container-cpu-throttling]
-             * label = "Container CPU Throttling"
-             * form = "SELECT LAST(cpuElapsedSlices), LAST(cpuThrottledSlices), LAST(cpuThrottledTime) FROM ContainerCPUThrottling"
-            */
-            new View("container-cpu-throttling",
-                    "environment",
-                    "Container CPU Throttling",
-                    "container-cpu-throttling",
-                    """
+                /**
+                 * [environment.container-cpu-throttling] label = "Container CPU Throttling" form =
+                 * "SELECT LAST(cpuElapsedSlices), LAST(cpuThrottledSlices), LAST(cpuThrottledTime)
+                 * FROM ContainerCPUThrottling"
+                 */
+                new View(
+                                "container-cpu-throttling",
+                                "environment",
+                                "Container CPU Throttling",
+                                "container-cpu-throttling",
+                                """
                                  CREATE VIEW "container-cpu-throttling" AS
                                  SELECT
                                      LAST(cpuElapsedSlices) AS "CPU Elapsed Slices",
@@ -423,22 +444,23 @@ public class ViewCollection {
                                      format_duration(LAST(cpuThrottledTime)) AS "CPU Throttled Time"
                                  FROM ContainerCPUThrottling
                             """,
-                    "ContainerCPUThrottling"
-            ).description("""
+                                "ContainerCPUThrottling")
+                        .description(
+                                """
                     Shows the CPU throttling of the container in which the JVM is running.
                     """),
-            /**
-             * [application.contention-by-thread]
-             * label = "Contention by Thread"
-             * table = "COLUMN 'Thread', 'Count', 'Avg', 'P90', 'Max.'
-             *          SELECT eventThread, COUNT(*), AVG(duration), P90(duration), MAX(duration) AS M
-             *          FROM JavaMonitorEnter GROUP BY eventThread ORDER BY M"
-            */
-            new View("contention-by-thread",
-                    "application",
-                    "Contention by Thread",
-                    "contention-by-thread",
-                    """
+                /**
+                 * [application.contention-by-thread] label = "Contention by Thread" table = "COLUMN
+                 * 'Thread', 'Count', 'Avg', 'P90', 'Max.' SELECT eventThread, COUNT(*),
+                 * AVG(duration), P90(duration), MAX(duration) AS M FROM JavaMonitorEnter GROUP BY
+                 * eventThread ORDER BY M"
+                 */
+                new View(
+                                "contention-by-thread",
+                                "application",
+                                "Contention by Thread",
+                                "contention-by-thread",
+                                """
                                  CREATE VIEW "contention-by-thread" AS
                                  SELECT
                                      th.javaName AS "Thread",
@@ -451,22 +473,24 @@ public class ViewCollection {
                                  GROUP BY eventThread, th.javaName
                                  ORDER BY MAX(duration) DESC
                             """,
-                    "JavaMonitorEnter", "Thread"
-            ).description("""
+                                "JavaMonitorEnter",
+                                "Thread")
+                        .description(
+                                """
                     Shows the threads which have the highest contention time.
                     """),
-            /**
-             * [application.contention-by-class]
-             * label = "Contention by Lock Class"
-             * table = "COLUMN 'Lock Class', 'Count', 'Avg.', 'P90', 'Max.'
-             *          SELECT monitorClass, COUNT(*), AVG(duration), P90(duration), MAX(duration) AS M
-             *          FROM JavaMonitorEnter GROUP BY monitorClass ORDER BY M"
-            */
-            new View("contention-by-class",
-                    "application",
-                    "Contention by Lock Class",
-                    "contention-by-class",
-                    """
+                /**
+                 * [application.contention-by-class] label = "Contention by Lock Class" table =
+                 * "COLUMN 'Lock Class', 'Count', 'Avg.', 'P90', 'Max.' SELECT monitorClass,
+                 * COUNT(*), AVG(duration), P90(duration), MAX(duration) AS M FROM JavaMonitorEnter
+                 * GROUP BY monitorClass ORDER BY M"
+                 */
+                new View(
+                                "contention-by-class",
+                                "application",
+                                "Contention by Lock Class",
+                                "contention-by-class",
+                                """
                                  CREATE VIEW "contention-by-class" AS
                                  SELECT
                                      c.javaName AS "Lock Class",
@@ -479,22 +503,23 @@ public class ViewCollection {
                                  GROUP BY monitorClass, c.javaName
                                  ORDER BY MAX(duration) DESC
                             """,
-                    "JavaMonitorEnter", "Class"
-            ).description("""
+                                "JavaMonitorEnter",
+                                "Class")
+                        .description(
+                                """
                     Shows the classes which have the highest contention time.
                     """),
-            /**
-             * [application.contention-by-site]
-             * label = "Contention by Site"
-             * table = "COLUMN 'StackTrace', 'Count', 'Avg.', 'Max.'
-             *          SELECT stackTrace AS S, COUNT(*), AVG(duration), MAX(duration) AS M
-             *          FROM JavaMonitorEnter GROUP BY S ORDER BY M"
-            */
-            new View("contention-by-site",
-                    "application",
-                    "Contention by Site",
-                    "contention-by-site",
-                    """
+                /**
+                 * [application.contention-by-site] label = "Contention by Site" table = "COLUMN
+                 * 'StackTrace', 'Count', 'Avg.', 'Max.' SELECT stackTrace AS S, COUNT(*),
+                 * AVG(duration), MAX(duration) AS M FROM JavaMonitorEnter GROUP BY S ORDER BY M"
+                 */
+                new View(
+                                "contention-by-site",
+                                "application",
+                                "Contention by Site",
+                                "contention-by-site",
+                                """
                                  CREATE VIEW "contention-by-site" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "StackTrace",
@@ -507,23 +532,25 @@ public class ViewCollection {
                                  GROUP BY c.javaName, m.name, m.descriptor
                                  ORDER BY MAX(duration) DESC
                             """,
-                    "JavaMonitorEnter", "Method", "Class"
-            ).description("""
+                                "JavaMonitorEnter",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Shows the stack traces which have the highest contention time.
                     """),
-            /**
-             * [application.contention-by-address]
-             * label = "Contention by Monitor Address"
-             * table = "COLUMN 'Monitor Address', 'Class', 'Threads', 'Max Duration'
-             *          SELECT address, FIRST(monitorClass), UNIQUE(eventThread), MAX(duration) AS M
-             *          FROM JavaMonitorEnter
-             *          GROUP BY monitorClass ORDER BY M"
-            */
-            new View("contention-by-address",
-                    "application",
-                    "Contention by Monitor Address",
-                    "contention-by-address",
-                    """
+                /**
+                 * [application.contention-by-address] label = "Contention by Monitor Address" table
+                 * = "COLUMN 'Monitor Address', 'Class', 'Threads', 'Max Duration' SELECT address,
+                 * FIRST(monitorClass), UNIQUE(eventThread), MAX(duration) AS M FROM
+                 * JavaMonitorEnter GROUP BY monitorClass ORDER BY M"
+                 */
+                new View(
+                                "contention-by-address",
+                                "application",
+                                "Contention by Monitor Address",
+                                "contention-by-address",
+                                """
                                  CREATE VIEW "contention-by-address" AS
                                  SELECT
                                      format_hex(jme.address) AS "Monitor Address",
@@ -535,26 +562,25 @@ public class ViewCollection {
                                  GROUP BY jme.address, c.javaName
                                  ORDER BY MAX(duration) DESC
                             """,
-                    "JavaMonitorEnter", "Class"
-            ).description("""
+                                "JavaMonitorEnter",
+                                "Class")
+                        .description(
+                                """
                     Shows the monitor addresses which have the highest contention time.
                     """),
-            /**
-             * [application.deprecated-methods-for-removal]
-             * label = "Deprecated Methods for Removal"
-             * table = "COLUMN 'Deprecated Method', 'Called from Class'
-             *          FORMAT truncate-beginning, cell-height:10000;truncate-beginning
-             *          SELECT method AS m, SET(stackTrace.topFrame.method.type)
-             *          FROM DeprecatedInvocation
-             *          WHERE forRemoval = 'true'
-             *          GROUP BY m
-             *          ORDER BY m"
-            */
-            new View("deprecated-methods-for-removal",
-                    "application",
-                    "Deprecated Methods for Removal",
-                    "deprecated-methods-for-removal",
-                    """
+                /**
+                 * [application.deprecated-methods-for-removal] label = "Deprecated Methods for
+                 * Removal" table = "COLUMN 'Deprecated Method', 'Called from Class' FORMAT
+                 * truncate-beginning, cell-height:10000;truncate-beginning SELECT method AS m,
+                 * SET(stackTrace.topFrame.method.type) FROM DeprecatedInvocation WHERE forRemoval =
+                 * 'true' GROUP BY m ORDER BY m"
+                 */
+                new View(
+                                "deprecated-methods-for-removal",
+                                "application",
+                                "Deprecated Methods for Removal",
+                                "deprecated-methods-for-removal",
+                                """
                                  CREATE VIEW "deprecated-methods-for-removal" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Deprecated Method",
@@ -567,20 +593,24 @@ public class ViewCollection {
                                  WHERE forRemoval = 'true'
                                  GROUP BY di.method, c.javaName, m.name, m.descriptor
                                  ORDER BY c.javaName, m.name, m.descriptor
-                            """, "DeprecatedInvocation", "Method", "Class").description("""
+                            """,
+                                "DeprecatedInvocation",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Shows all deprecated methods which are marked for removal and the classes from which they are called.
                     """),
-            /**
-             *
-            [environment.cpu-information]
-            label ="CPU Information"
-            form = "SELECT cpu, sockets, cores, hwThreads, description FROM CPUInformation"
-            */
-            new View("cpu-information",
-                    "environment",
-                    "CPU Information",
-                    "cpu-information",
-                    """
+                /**
+                 * [environment.cpu-information] label ="CPU Information" form = "SELECT cpu,
+                 * sockets, cores, hwThreads, description FROM CPUInformation"
+                 */
+                new View(
+                                "cpu-information",
+                                "environment",
+                                "CPU Information",
+                                "cpu-information",
+                                """
                                  CREATE VIEW "cpu-information" AS
                                  SELECT
                                      cpu AS "CPU",
@@ -591,33 +621,25 @@ public class ViewCollection {
                                  FROM CPUInformation
                                  GROUP BY cpu, sockets, cores, hwThreads, description
                             """,
-                    "CPUInformation"
-            ).description("""
+                                "CPUInformation")
+                        .description(
+                                """
                     Shows information about the CPU(s) on which the JVM is running.
                     """),
-            /**
-             * [environment.cpu-load]
-             * label = "CPU Load Statistics"
-             * form = "COLUMN
-             *         'JVM User (Minimum)',
-             *         'JVM User (Average)',
-             *         'JVM User (Maximum)',
-             *         'JVM System (Minimum)',
-             *         'JVM System (Average)',
-             *         'JVM System (Maximum)',
-             *         'Machine Total (Minimum)',
-             *         'Machine Total (Average)',
-             *         'Machine Total (Maximum)'
-             *         SELECT MIN(jvmUser), AVG(jvmUser), MAX(jvmUser),
-             *                MIN(jvmSystem), AVG(jvmSystem), MAX(jvmSystem),
-             *                MIN(machineTotal), AVG(machineTotal), MAX(machineTotal)
-             *                FROM CPULoad"
-            */
-            new View("cpu-load",
-                    "environment",
-                    "CPU Load Statistics",
-                    "cpu-load",
-                    """
+                /**
+                 * [environment.cpu-load] label = "CPU Load Statistics" form = "COLUMN 'JVM User
+                 * (Minimum)', 'JVM User (Average)', 'JVM User (Maximum)', 'JVM System (Minimum)',
+                 * 'JVM System (Average)', 'JVM System (Maximum)', 'Machine Total (Minimum)',
+                 * 'Machine Total (Average)', 'Machine Total (Maximum)' SELECT MIN(jvmUser),
+                 * AVG(jvmUser), MAX(jvmUser), MIN(jvmSystem), AVG(jvmSystem), MAX(jvmSystem),
+                 * MIN(machineTotal), AVG(machineTotal), MAX(machineTotal) FROM CPULoad"
+                 */
+                new View(
+                                "cpu-load",
+                                "environment",
+                                "CPU Load Statistics",
+                                "cpu-load",
+                                """
                                  CREATE VIEW "cpu-load" AS
                                  SELECT
                                      format_percentage(MIN(jvmUser)) AS "JVM User (Minimum)",
@@ -631,20 +653,21 @@ public class ViewCollection {
                                      format_percentage(MAX(machineTotal)) AS "Machine Total (Maximum)"
                                  FROM CPULoad
                             """,
-                    "CPULoad"
-            ).description("""
+                                "CPULoad")
+                        .description(
+                                """
                     Shows statistics about the CPU load of the JVM and the machine.
                     """),
-            /**
-             * [environment.cpu-load-samples]
-             * label = "CPU Load"
-             * table = "SELECT startTime, jvmUser, jvmSystem, machineTotal FROM CPULoad"
-            */
-            new View("cpu-load-samples",
-                    "environment",
-                    "CPU Load",
-                    "cpu-load-samples",
-                    """
+                /**
+                 * [environment.cpu-load-samples] label = "CPU Load" table = "SELECT startTime,
+                 * jvmUser, jvmSystem, machineTotal FROM CPULoad"
+                 */
+                new View(
+                                "cpu-load-samples",
+                                "environment",
+                                "CPU Load",
+                                "cpu-load-samples",
+                                """
                                  CREATE VIEW "cpu-load-samples" AS
                                  SELECT
                                      startTime AS "Time",
@@ -654,22 +677,24 @@ public class ViewCollection {
                                  FROM CPULoad
                                  ORDER BY startTime
                             """,
-                    "CPULoad"
-            ).description("""
+                                "CPULoad")
+                        .description(
+                                """
                     Shows the CPU load samples of the JVM and the machine over time.
                     """),
-            /*
-            [environment.cpu-tsc]
-label ="CPU Time Stamp Counter"
-form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
-               LAST(fastTimeFrequency), LAST(osFrequency)
-        FROM CPUTimeStampCounter"
-             */
-            new View("cpu-tsc",
-                    "environment",
-                    "CPU Time Stamp Counter",
-                    "cpu-tsc",
-                    """
+                /*
+                            [environment.cpu-tsc]
+                label ="CPU Time Stamp Counter"
+                form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
+                               LAST(fastTimeFrequency), LAST(osFrequency)
+                        FROM CPUTimeStampCounter"
+                             */
+                new View(
+                                "cpu-tsc",
+                                "environment",
+                                "CPU Time Stamp Counter",
+                                "cpu-tsc",
+                                """
                                  CREATE VIEW "cpu-tsc" AS
                                  SELECT
                                      LAST(fastTimeAutoEnabled) AS "Fast Time Auto Enabled",
@@ -678,21 +703,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      LAST(osFrequency) || ' Hz' AS "OS Frequency"
                                  FROM CPUTimeStampCounter
                             """,
-                    "CPUTimeStampCounter"
-            ).description("""
+                                "CPUTimeStampCounter")
+                        .description(
+                                """
                     Shows information about the CPU Time Stamp Counter (TSC).
                     """),
-            /**
-             * [jvm.deoptimizations-by-reason]
-             * label = "Deoptimization by Reason"
-             * table = "SELECT reason, COUNT(reason) AS C
-             *          FROM Deoptimization GROUP BY reason ORDER BY C DESC"
-            */
-            new View("deoptimizations-by-reason",
-                    "jvm",
-                    "Deoptimization by Reason",
-                    "deoptimizations-by-reason",
-                    """
+                /**
+                 * [jvm.deoptimizations-by-reason] label = "Deoptimization by Reason" table =
+                 * "SELECT reason, COUNT(reason) AS C FROM Deoptimization GROUP BY reason ORDER BY C
+                 * DESC"
+                 */
+                new View(
+                                "deoptimizations-by-reason",
+                                "jvm",
+                                "Deoptimization by Reason",
+                                "deoptimizations-by-reason",
+                                """
                                  CREATE VIEW "deoptimizations-by-reason" AS
                                  SELECT
                                      reason AS "Reason",
@@ -701,21 +727,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY reason
                                  ORDER BY COUNT(reason) DESC
                             """,
-                    "Deoptimization"
-            ).description("""
+                                "Deoptimization")
+                        .description(
+                                """
                     Shows the reasons for deoptimizations and their counts.
                     """),
-            /**
-             * [jvm.deoptimizations-by-site]
-             * label = "Deoptimization by Site"
-             * table = "SELECT method, lineNumber, bci, COUNT(reason) AS C
-             *          FROM Deoptimization GROUP BY method ORDER BY C DESC"
-            */
-            new View("deoptimizations-by-site",
-                    "jvm",
-                    "Deoptimization by Site",
-                    "deoptimizations-by-site",
-                    """
+                /**
+                 * [jvm.deoptimizations-by-site] label = "Deoptimization by Site" table = "SELECT
+                 * method, lineNumber, bci, COUNT(reason) AS C FROM Deoptimization GROUP BY method
+                 * ORDER BY C DESC"
+                 */
+                new View(
+                                "deoptimizations-by-site",
+                                "jvm",
+                                "Deoptimization by Site",
+                                "deoptimizations-by-site",
+                                """
                                  CREATE VIEW "deoptimizations-by-site" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -728,20 +755,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY d.method, d.lineNumber, d.bci, c.javaName, m.name, m.descriptor
                                  ORDER BY COUNT(d.reason) DESC
                             """,
-                    "Deoptimization", "Method", "Class"
-            ).description("""
+                                "Deoptimization",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Shows the methods where deoptimizations occurred and their counts.
                     """),
-            /**
-             * [environment.events-by-count]
-             * label = "Event Types by Count"
-             * table = "SELECT eventType.label AS E, COUNT(*) AS C FROM * GROUP BY E ORDER BY C DESC"
-            */
-            new View("events-by-count",
-                    "environment",
-                    "Event Types by Count",
-                    "events-by-count",
-                    """
+                /**
+                 * [environment.events-by-count] label = "Event Types by Count" table = "SELECT
+                 * eventType.label AS E, COUNT(*) AS C FROM * GROUP BY E ORDER BY C DESC"
+                 */
+                new View(
+                        "events-by-count",
+                        "environment",
+                        "Event Types by Count",
+                        "events-by-count",
+                        """
                                  CREATE VIEW "events-by-count" AS
                                  SELECT
                                      label AS "Event Label",
@@ -750,18 +780,18 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  JOIN EventLabels ON Events.name = EventLabels.name
                                  ORDER BY count DESC
                                  """,
-                    "Events", "EventLabels"
-            ),
-            /**
-            [environment.events-by-name]
-            label = "Event Types by Name"
-            table = "SELECT eventType.label AS E, COUNT(*) AS C FROM * GROUP BY E ORDER BY E ASC"
-            */
-            new View("events-by-name",
-                    "environment",
-                    "Event Types by Name",
-                    "events-by-name",
-                    """
+                        "Events",
+                        "EventLabels"),
+                /**
+                 * [environment.events-by-name] label = "Event Types by Name" table = "SELECT
+                 * eventType.label AS E, COUNT(*) AS C FROM * GROUP BY E ORDER BY E ASC"
+                 */
+                new View(
+                        "events-by-name",
+                        "environment",
+                        "Event Types by Name",
+                        "events-by-name",
+                        """
                                  CREATE VIEW "events-by-name" AS
                                  SELECT
                                      label AS "Event Label",
@@ -770,20 +800,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  JOIN EventLabels ON Events.name = EventLabels.name
                                  ORDER BY Events.name ASC
                             """,
-                    "Events", "EventLabels"
-            ),
-            /**
-             * [environment.environment-variables]
-             * label = "Environment Variables"
-             * table = "FORMAT none, cell-height:20
-             *          SELECT LAST(key) AS K, LAST(value)
-             *          FROM InitialEnvironmentVariable GROUP BY key ORDER BY K"
-            */
-            new View("environment-variables",
-                    "environment",
-                    "Environment Variables",
-                    "environment-variables",
-                    """
+                        "Events",
+                        "EventLabels"),
+                /**
+                 * [environment.environment-variables] label = "Environment Variables" table =
+                 * "FORMAT none, cell-height:20 SELECT LAST(key) AS K, LAST(value) FROM
+                 * InitialEnvironmentVariable GROUP BY key ORDER BY K"
+                 */
+                new View(
+                        "environment-variables",
+                        "environment",
+                        "Environment Variables",
+                        "environment-variables",
+                        """
                                  CREATE VIEW "environment-variables" AS
                                  SELECT
                                      key AS "Key",
@@ -792,39 +821,36 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY key, value
                                  ORDER BY key
                             """,
-                    "InitialEnvironmentVariable"
-            ),
-            /**
-
-            [application.exception-count]
-            label ="Exception Statistics"
-            form = "COLUMN 'Exceptions Thrown' SELECT DIFF(throwables) FROM ExceptionStatistics"
-
-            */
-            new View("exception-count",
-                    "application",
-                    "Exception Statistics",
-                    "exception-count",
-                    """
+                        "InitialEnvironmentVariable"),
+                /**
+                 * [application.exception-count] label ="Exception Statistics" form = "COLUMN
+                 * 'Exceptions Thrown' SELECT DIFF(throwables) FROM ExceptionStatistics"
+                 */
+                new View(
+                                "exception-count",
+                                "application",
+                                "Exception Statistics",
+                                "exception-count",
+                                """
                                  CREATE VIEW "exception-count" AS
                                  SELECT
                                      LAST(throwables) - FIRST(throwables) AS "Exceptions Thrown"
                                  FROM ExceptionStatistics
                             """,
-                    "ExceptionStatistics"
-            ).description("Shows the total number of exceptions thrown during the JFR recording period."),
-            /**
-             * [application.exception-by-type]
-             * label ="Exceptions by Type"
-             * table = "COLUMN 'Class', 'Count'
-             *          SELECT thrownClass AS T, COUNT(thrownClass) AS C
-             *          FROM JavaErrorThrow, JavaExceptionThrow GROUP BY T ORDER BY C DESC"
-            */
-            new View("exception-by-type",
-                    "application",
-                    "Exceptions by Type",
-                    "exception-by-type",
-                    """
+                                "ExceptionStatistics")
+                        .description(
+                                "Shows the total number of exceptions thrown during the JFR recording period."),
+                /**
+                 * [application.exception-by-type] label ="Exceptions by Type" table = "COLUMN
+                 * 'Class', 'Count' SELECT thrownClass AS T, COUNT(thrownClass) AS C FROM
+                 * JavaErrorThrow, JavaExceptionThrow GROUP BY T ORDER BY C DESC"
+                 */
+                new View(
+                                "exception-by-type",
+                                "application",
+                                "Exceptions by Type",
+                                "exception-by-type",
+                                """
                                  CREATE VIEW "exception-by-type" AS
                                  SELECT
                                      c.javaName AS "Class",
@@ -837,21 +863,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  JOIN Class c ON combined.thrownClass = c._id
                                  GROUP BY combined.thrownClass, c.javaName
                                     ORDER BY COUNT(*) DESC
-                            """, "JavaErrorThrow", "JavaExceptionThrow", "Class").addUnionAlternatives()
-                    .description("Categorizes all thrown exceptions and errors by their class type, ranked by frequency."),
-            /**
-             *
-            [application.exception-by-message]
-            label ="Exceptions by Message"
-            table = "COLUMN 'Message', 'Count'
-            SELECT message AS M, COUNT(message) AS C
-            FROM JavaErrorThrow, JavaExceptionThrow GROUP BY M ORDER BY C DESC"
-            */
-            new View("exception-by-message",
-                    "application",
-                    "Exceptions by Message",
-                    "exception-by-message",
-                    """
+                            """,
+                                "JavaErrorThrow",
+                                "JavaExceptionThrow",
+                                "Class")
+                        .addUnionAlternatives()
+                        .description(
+                                "Categorizes all thrown exceptions and errors by their class type, ranked by frequency."),
+                /**
+                 * [application.exception-by-message] label ="Exceptions by Message" table = "COLUMN
+                 * 'Message', 'Count' SELECT message AS M, COUNT(message) AS C FROM JavaErrorThrow,
+                 * JavaExceptionThrow GROUP BY M ORDER BY C DESC"
+                 */
+                new View(
+                                "exception-by-message",
+                                "application",
+                                "Exceptions by Message",
+                                "exception-by-message",
+                                """
                                  CREATE VIEW "exception-by-message" AS
                                  SELECT
                                      message AS "Message",
@@ -864,20 +893,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY message
                                  ORDER BY COUNT(*) DESC
                             """,
-                    "JavaErrorThrow", "JavaExceptionThrow"
-            ).addUnionAlternatives().description("Groups exceptions by their specific error messages, revealing the most frequent error conditions in your application."),
-            /**
-             * [application.exception-by-site]
-             * label ="Exceptions by Site"
-             * table = "COLUMN 'Method', 'Count'
-             *          SELECT stackTrace.notInit AS S, COUNT(startTime) AS C
-             *          FROM JavaErrorThrow, JavaExceptionThrow GROUP BY S ORDER BY C DESC"
-            */
-            new View("exception-by-site",
-                    "application",
-                    "Exceptions by Site",
-                    "exception-by-site",
-                    """
+                                "JavaErrorThrow",
+                                "JavaExceptionThrow")
+                        .addUnionAlternatives()
+                        .description(
+                                "Groups exceptions by their specific error messages, revealing the most frequent error conditions in your application."),
+                /**
+                 * [application.exception-by-site] label ="Exceptions by Site" table = "COLUMN
+                 * 'Method', 'Count' SELECT stackTrace.notInit AS S, COUNT(startTime) AS C FROM
+                 * JavaErrorThrow, JavaExceptionThrow GROUP BY S ORDER BY C DESC"
+                 */
+                new View(
+                                "exception-by-site",
+                                "application",
+                                "Exceptions by Site",
+                                "exception-by-site",
+                                """
                                  CREATE VIEW "exception-by-site" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -892,23 +923,26 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY combined.ni, c.javaName, m.name, m.descriptor
                                  ORDER BY COUNT(*) DESC
                             """,
-                    "JavaErrorThrow", "JavaExceptionThrow", "Method", "Class"
-            ).addUnionAlternatives().description("""
+                                "JavaErrorThrow",
+                                "JavaExceptionThrow",
+                                "Method",
+                                "Class")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Shows the locations in the code (methods) where exceptions are thrown, along with the count of how many times exceptions were thrown at each location.
                     """),
-            /**
-             * [application.file-reads-by-path]
-             * label = "File Reads by Path"
-             * table = "COLUMN 'Path', 'Reads', 'Total Read'
-             *          FORMAT cell-height:5, none, none
-             *          SELECT path, COUNT(*), SUM(bytesRead) AS S FROM FileRead
-             *          GROUP BY path ORDER BY S DESC"
-            */
-            new View("file-reads-by-path",
-                    "application",
-                    "File Reads by Path",
-                    "file-reads-by-path",
-                    """
+                /**
+                 * [application.file-reads-by-path] label = "File Reads by Path" table = "COLUMN
+                 * 'Path', 'Reads', 'Total Read' FORMAT cell-height:5, none, none SELECT path,
+                 * COUNT(*), SUM(bytesRead) AS S FROM FileRead GROUP BY path ORDER BY S DESC"
+                 */
+                new View(
+                                "file-reads-by-path",
+                                "application",
+                                "File Reads by Path",
+                                "file-reads-by-path",
+                                """
                                  CREATE VIEW "file-reads-by-path" AS
                                  SELECT
                                      path AS "Path",
@@ -918,21 +952,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY path
                                  ORDER BY SUM(bytesRead) DESC
                             """,
-                    "FileRead"
-            ).description("Analyzes file system read operations grouped by file path, showing both operation frequency and total data volume."),
-            /**
-             * [application.file-writes-by-path]
-             * label = "File Writes by Path"
-             * table = "COLUMN 'Path', 'Writes', 'Total Written'
-             *          FORMAT cell-height:5, none, none
-             *          SELECT path, COUNT(bytesWritten), SUM(bytesWritten) AS S FROM FileWrite
-             *          GROUP BY path ORDER BY S DESC"
-            */
-            new View("file-writes-by-path",
-                    "application",
-                    "File Writes by Path",
-                    "file-writes-by-path",
-                    """
+                                "FileRead")
+                        .description(
+                                "Analyzes file system read operations grouped by file path, showing both operation frequency and total data volume."),
+                /**
+                 * [application.file-writes-by-path] label = "File Writes by Path" table = "COLUMN
+                 * 'Path', 'Writes', 'Total Written' FORMAT cell-height:5, none, none SELECT path,
+                 * COUNT(bytesWritten), SUM(bytesWritten) AS S FROM FileWrite GROUP BY path ORDER BY
+                 * S DESC"
+                 */
+                new View(
+                                "file-writes-by-path",
+                                "application",
+                                "File Writes by Path",
+                                "file-writes-by-path",
+                                """
                                  CREATE VIEW "file-writes-by-path" AS
                                  SELECT
                                      path AS "Path",
@@ -942,22 +976,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY path
                                  ORDER BY SUM(bytesWritten) DESC
                             """,
-                    "FileWrite"
-            ).description("""
+                                "FileWrite")
+                        .description(
+                                """
                     Shows the file write operations grouped by file path.
                     """),
-            /**
-             *
-            [application.finalizers]
-            label = "Finalizers"
-            table = "SELECT finalizableClass, LAST_BATCH(objects) AS O, LAST_BATCH(totalFinalizersRun)
-            FROM FinalizerStatistics GROUP BY finalizableClass ORDER BY O DESC"
-            */
-            new View("finalizers", // TODO: test
-                    "application",
-                    "Finalizers",
-                    "finalizers",
-                    """
+                /**
+                 * [application.finalizers] label = "Finalizers" table = "SELECT finalizableClass,
+                 * LAST_BATCH(objects) AS O, LAST_BATCH(totalFinalizersRun) FROM FinalizerStatistics
+                 * GROUP BY finalizableClass ORDER BY O DESC"
+                 */
+                new View(
+                                "finalizers", // TODO: test
+                                "application",
+                                "Finalizers",
+                                "finalizers",
+                                """
                                  CREATE VIEW "finalizers" AS
                                  SELECT
                                      c.javaName AS "Finalizable Class",
@@ -968,29 +1002,26 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY fs.finalizableClass, c.javaName
                                  ORDER BY LAST(objects) DESC
                             """,
-                    "FinalizerStatistics", "Class"
-            ).description("""
+                                "FinalizerStatistics",
+                                "Class")
+                        .description(
+                                """
                     Shows statistics about finalizers grouped by the class of the objects being finalized.
                     """),
-            /**
-             * [jvm.gc]
-             * label = "Garbage Collections"
-             * table = "COLUMN 'Start', 'GC ID', 'GC Name', 'Heap Before GC', 'Heap After GC', 'Longest Pause'
-             *          FORMAT none, none, missing:Unknown, none, none, none
-             *          SELECT G.startTime, gcId, G.name,
-             *                 B.heapUsed, A.heapUsed, longestPause
-             *          FROM
-             *                 GarbageCollection AS G,
-             *                 GCHeapSummary AS B,
-             *                 GCHeapSummary AS A
-             *          WHERE B.when = 'Before GC' AND A.when = 'After GC'
-             *          GROUP BY gcId ORDER BY gcId"
-            */
-            new View("gc",
-                    "jvm",
-                    "Garbage Collections",
-                    "gc",
-                    """
+                /**
+                 * [jvm.gc] label = "Garbage Collections" table = "COLUMN 'Start', 'GC ID', 'GC
+                 * Name', 'Heap Before GC', 'Heap After GC', 'Longest Pause' FORMAT none, none,
+                 * missing:Unknown, none, none, none SELECT G.startTime, gcId, G.name, B.heapUsed,
+                 * A.heapUsed, longestPause FROM GarbageCollection AS G, GCHeapSummary AS B,
+                 * GCHeapSummary AS A WHERE B.when = 'Before GC' AND A.when = 'After GC' GROUP BY
+                 * gcId ORDER BY gcId"
+                 */
+                new View(
+                                "gc",
+                                "jvm",
+                                "Garbage Collections",
+                                "gc",
+                                """
                             CREATE VIEW "gc" AS
                             SELECT
                                 G.startTime                          AS "Start",
@@ -1004,25 +1035,25 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             JOIN GCHeapSummary A ON G.gcId = A.gcId AND A.when = 'After GC'
                             ORDER BY G.gcId;
                             """,
-                    "GarbageCollection", "GCHeapSummary"
-            ).addUnionAlternatives().description("""
+                                "GarbageCollection",
+                                "GCHeapSummary")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Provides a summary of all garbage collection events, including start time, type, heap usage before and after GC, and the longest pause duration.
                     """),
-            /**
-             * [jvm.gc-concurrent-phases]
-             * label = "Concurrent GC Phases"
-             * table = "COLUMN 'Name', 'Average', 'P95',
-             *                 'Longest', 'Count', 'Total'
-             *          SELECT name,  AVG(duration),  P95(duration),
-             *                 MAX(duration), COUNT(*), SUM(duration) AS S
-             *          FROM   GCPhaseConcurrent, GCPhaseConcurrentLevel1
-             *          GROUP BY name ORDER BY S"
-            */
-            new View("gc-concurrent-phases",
-                    "jvm",
-                    "Concurrent GC Phases",
-                    "gc-concurrent-phases",
-                    """
+                /**
+                 * [jvm.gc-concurrent-phases] label = "Concurrent GC Phases" table = "COLUMN 'Name',
+                 * 'Average', 'P95', 'Longest', 'Count', 'Total' SELECT name, AVG(duration),
+                 * P95(duration), MAX(duration), COUNT(*), SUM(duration) AS S FROM
+                 * GCPhaseConcurrent, GCPhaseConcurrentLevel1 GROUP BY name ORDER BY S"
+                 */
+                new View(
+                                "gc-concurrent-phases",
+                                "jvm",
+                                "Concurrent GC Phases",
+                                "gc-concurrent-phases",
+                                """
                                  CREATE VIEW "gc-concurrent-phases" AS
                                  SELECT
                                      name AS "Name",
@@ -1035,23 +1066,20 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY name
                                  ORDER BY SUM(duration) DESC
                             """,
-                    "GCPhaseConcurrent"
-            ).description("Shows how long each gc phase took on average."),
-            /**
-             * [jvm.gc-parallel-phases]
-             * label = "Parallel GC Phases"
-             * table = "COLUMN 'Name', 'Average', 'P95',
-             *                 'Longest', 'Count', 'Total'
-             *          SELECT name,  AVG(duration),  P95(duration),
-             *                 MAX(duration), COUNT(*), SUM(duration) AS S
-             *          FROM   GCPhaseParallel
-             *          GROUP BY name ORDER BY S"
-            */
-            new View("gc-parallel-phases",
-                    "jvm",
-                    "Parallel GC Phases",
-                    "gc-parallel-phases",
-                    """
+                                "GCPhaseConcurrent")
+                        .description("Shows how long each gc phase took on average."),
+                /**
+                 * [jvm.gc-parallel-phases] label = "Parallel GC Phases" table = "COLUMN 'Name',
+                 * 'Average', 'P95', 'Longest', 'Count', 'Total' SELECT name, AVG(duration),
+                 * P95(duration), MAX(duration), COUNT(*), SUM(duration) AS S FROM GCPhaseParallel
+                 * GROUP BY name ORDER BY S"
+                 */
+                new View(
+                                "gc-parallel-phases",
+                                "jvm",
+                                "Parallel GC Phases",
+                                "gc-parallel-phases",
+                                """
                                  CREATE VIEW "gc-parallel-phases" AS
                                  SELECT
                                      name AS "Name",
@@ -1064,28 +1092,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY name
                                  ORDER BY SUM(duration) DESC
                             """,
-                    "GCPhaseParallel"
-            ).description("Shows how long each parallel gc phase took on average."),
-            /**
-             * [jvm.gc-configuration]
-             * label = 'GC Configuration'
-             * form = "COLUMN 'Young GC', 'Old GC',
-             *                'Parallel GC Threads','Concurrent GC Threads',
-             *                'Dynamic GC Threads', 'Concurrent Explicit GC',
-             *                'Disable Explicit GC', 'Pause Target',
-             *                'GC Time Ratio'
-             *         SELECT LAST(youngCollector), LAST(oldCollector),
-             *                LAST(parallelGCThreads), LAST(concurrentGCThreads),
-             *                LAST(usesDynamicGCThreads), LAST(isExplicitGCConcurrent),
-             *                LAST(isExplicitGCDisabled), LAST(pauseTarget),
-             *                LAST(gcTimeRatio)
-             *         FROM   GCConfiguration"
-            */
-            new View("gc-configuration",
-                    "jvm",
-                    "GC Configuration",
-                    "gc-configuration",
-                    """
+                                "GCPhaseParallel")
+                        .description("Shows how long each parallel gc phase took on average."),
+                /**
+                 * [jvm.gc-configuration] label = 'GC Configuration' form = "COLUMN 'Young GC', 'Old
+                 * GC', 'Parallel GC Threads','Concurrent GC Threads', 'Dynamic GC Threads',
+                 * 'Concurrent Explicit GC', 'Disable Explicit GC', 'Pause Target', 'GC Time Ratio'
+                 * SELECT LAST(youngCollector), LAST(oldCollector), LAST(parallelGCThreads),
+                 * LAST(concurrentGCThreads), LAST(usesDynamicGCThreads),
+                 * LAST(isExplicitGCConcurrent), LAST(isExplicitGCDisabled), LAST(pauseTarget),
+                 * LAST(gcTimeRatio) FROM GCConfiguration"
+                 */
+                new View(
+                                "gc-configuration",
+                                "jvm",
+                                "GC Configuration",
+                                "gc-configuration",
+                                """
                                  CREATE VIEW "gc-configuration" AS
                                  SELECT
                                      LAST(youngCollector) AS "Young GC",
@@ -1099,29 +1122,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      LAST(gcTimeRatio) AS "GC Time Ratio"
                                  FROM GCConfiguration
                             """,
-                    "GCConfiguration"
-            ).description("Shows the configuration of the garbage collector (including number of gc threads)."),
-            /**
-             * [jvm.gc-references]
-             * label = "GC References"
-             * table = "COLUMN 'Time', 'GC ID', 'Soft Ref.', 'Weak Ref.', 'Phantom Ref.', 'Final Ref.', 'Total Count'
-             *          SELECT G.startTime, G.gcId, S.count, W.count, P.count, F.count, SUM(G.count)
-             *          FROM GCReferenceStatistics AS S,
-             *               GCReferenceStatistics AS W,
-             *               GCReferenceStatistics AS P,
-             *               GCReferenceStatistics AS F,
-             *               GCReferenceStatistics AS G
-             *          WHERE S.type = 'Soft reference' AND
-             *                W.type = 'Weak reference' AND
-             *                P.type = 'Phantom reference' AND
-             *                F.type = 'Final reference'
-             *          GROUP BY gcId ORDER By G.gcId ASC"
-            */
-            new View("gc-references",
-                    "jvm",
-                    "GC References",
-                    "gc-references",
-                    """
+                                "GCConfiguration")
+                        .description(
+                                "Shows the configuration of the garbage collector (including number of gc threads)."),
+                /**
+                 * [jvm.gc-references] label = "GC References" table = "COLUMN 'Time', 'GC ID',
+                 * 'Soft Ref.', 'Weak Ref.', 'Phantom Ref.', 'Final Ref.', 'Total Count' SELECT
+                 * G.startTime, G.gcId, S.count, W.count, P.count, F.count, SUM(G.count) FROM
+                 * GCReferenceStatistics AS S, GCReferenceStatistics AS W, GCReferenceStatistics AS
+                 * P, GCReferenceStatistics AS F, GCReferenceStatistics AS G WHERE S.type = 'Soft
+                 * reference' AND W.type = 'Weak reference' AND P.type = 'Phantom reference' AND
+                 * F.type = 'Final reference' GROUP BY gcId ORDER By G.gcId ASC"
+                 */
+                new View(
+                                "gc-references",
+                                "jvm",
+                                "GC References",
+                                "gc-references",
+                                """
                                  CREATE VIEW "gc-references" AS
                                  SELECT
                                      FIRST(G.startTime) AS "Time",
@@ -1143,24 +1161,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY G.gcId, S.count, W.count, P.count, F.count
                                  ORDER BY G.gcId ASC
                             """,
-                    "GCReferenceStatistics"
-            ).description("Shows reference processing statistics during garbage collection including soft, weak, phantom, and final reference counts."),
-            /**
-             * [jvm.gc-pause-phases]
-             * label = "GC Pause Phases"
-             * table = "COLUMN 'Type', 'Name', 'Average',
-             *                 'P95', 'Longest', 'Count', 'Total'
-             *          SELECT eventType.label AS T, name,  AVG(duration),
-             *                 P95(duration), MAX(duration), COUNT(*), SUM(duration) AS S
-             *          FROM   GCPhasePause, GCPhasePauseLevel1, GCPhasePauseLevel2,
-             *                 GCPhasePauseLevel3, GCPhasePauseLevel4 GROUP BY name
-             *          ORDER BY T ASC, S DESC"
-            */
-            new View("gc-pause-phases",
-                    "jvm",
-                    "GC Pause Phases",
-                    "gc-pause-phases",
-                    """
+                                "GCReferenceStatistics")
+                        .description(
+                                "Shows reference processing statistics during garbage collection including soft, weak, phantom, and final reference counts."),
+                /**
+                 * [jvm.gc-pause-phases] label = "GC Pause Phases" table = "COLUMN 'Type', 'Name',
+                 * 'Average', 'P95', 'Longest', 'Count', 'Total' SELECT eventType.label AS T, name,
+                 * AVG(duration), P95(duration), MAX(duration), COUNT(*), SUM(duration) AS S FROM
+                 * GCPhasePause, GCPhasePauseLevel1, GCPhasePauseLevel2, GCPhasePauseLevel3,
+                 * GCPhasePauseLevel4 GROUP BY name ORDER BY T ASC, S DESC"
+                 */
+                new View(
+                                "gc-pause-phases",
+                                "jvm",
+                                "GC Pause Phases",
+                                "gc-pause-phases",
+                                """
                             CREATE VIEW "gc-pause-phases" AS
                             SELECT
                                 eventTypeLabel AS "Type",
@@ -1184,28 +1200,31 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY eventTypeLabel, name
                             ORDER BY eventTypeLabel ASC, SUM(duration) DESC;
                     """,
-                    "GCPhasePause", "GCPhasePauseLevel1", "GCPhasePauseLevel2", "GCPhasePauseLevel3", "GCPhasePauseLevel4", "EventType"
-            ).addUnionAlternatives().description("""
+                                "GCPhasePause",
+                                "GCPhasePauseLevel1",
+                                "GCPhasePauseLevel2",
+                                "GCPhasePauseLevel3",
+                                "GCPhasePauseLevel4",
+                                "EventType")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Shows the pause phases of the garbage collector with their type, name, average, p95, longest, count, and total duration.
                     """),
-            /**
-             * [jvm.gc-pauses]
-             * label = "GC Pauses"
-             * form = "COLUMN 'Total Pause Time','Number of Pauses', 'Minimum Pause Time',
-             *                'Median Pause Time', 'Average Pause Time', 'P90 Pause Time',
-             *                'P95 Pause Time', 'P99 Pause Time', 'P99.9% Pause Time',
-             *                'Maximum Pause Time'
-             *         SELECT SUM(duration), COUNT(duration), MIN(duration),
-             *                MEDIAN(duration), AVG(duration), P90(duration),
-             *                P95(duration), P99(duration), P999(duration),
-             *                MAX(duration)
-             *         FROM GCPhasePause"
-            */
-            new View("gc-pauses",
-                    "jvm",
-                    "GC Pauses",
-                    "gc-pauses",
-                    """
+                /**
+                 * [jvm.gc-pauses] label = "GC Pauses" form = "COLUMN 'Total Pause Time','Number of
+                 * Pauses', 'Minimum Pause Time', 'Median Pause Time', 'Average Pause Time', 'P90
+                 * Pause Time', 'P95 Pause Time', 'P99 Pause Time', 'P99.9% Pause Time', 'Maximum
+                 * Pause Time' SELECT SUM(duration), COUNT(duration), MIN(duration),
+                 * MEDIAN(duration), AVG(duration), P90(duration), P95(duration), P99(duration),
+                 * P999(duration), MAX(duration) FROM GCPhasePause"
+                 */
+                new View(
+                                "gc-pauses",
+                                "jvm",
+                                "GC Pauses",
+                                "gc-pauses",
+                                """
                                  CREATE VIEW "gc-pauses" AS
                                  SELECT
                                      format_duration(SUM(duration)) AS "Total Pause Time",
@@ -1220,22 +1239,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      format_duration(MAX(duration)) AS "Maximum Pause Time"
                                  FROM GCPhasePause
                             """,
-                    "GCPhasePause"
-            ).description("""
+                                "GCPhasePause")
+                        .description(
+                                """
                     Shows statistics about the garbage collection pauses including total pause time and number of pauses.
                     """),
-            /**
-             * [jvm.gc-allocation-trigger]
-             * label = "GC Allocation Trigger"
-             * table = "COLUMN 'Trigger Method (Non-JDK)', 'Count', 'Total Requested'
-             *          SELECT stackTrace.topApplicationFrame AS S, COUNT(*), SUM(size)
-             *          FROM AllocationRequiringGC GROUP BY S"
-            */
-            new View("gc-allocation-trigger",
-                    "jvm",
-                    "GC Allocation Trigger",
-                    "gc-allocation-trigger",
-                    """
+                /**
+                 * [jvm.gc-allocation-trigger] label = "GC Allocation Trigger" table = "COLUMN
+                 * 'Trigger Method (Non-JDK)', 'Count', 'Total Requested' SELECT
+                 * stackTrace.topApplicationFrame AS S, COUNT(*), SUM(size) FROM
+                 * AllocationRequiringGC GROUP BY S"
+                 */
+                new View(
+                                "gc-allocation-trigger",
+                                "jvm",
+                                "GC Allocation Trigger",
+                                "gc-allocation-trigger",
+                                """
                                  CREATE VIEW "gc-allocation-trigger" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Trigger Method (Non-JDK)",
@@ -1247,25 +1267,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY ar.stackTrace$topApplicationMethod, c.javaName, m.name, m.descriptor
                                  ORDER BY COUNT(*) DESC, SUM(ar.size) DESC
                             """,
-                    "AllocationRequiringGC", "Class"
-            ).description("""
+                                "AllocationRequiringGC",
+                                "Class")
+                        .description(
+                                """
                     Identifies the application methods that most frequently trigger garbage collections due to memory allocation requests.
                     """),
-            /**
-             * [jvm.gc-cpu-time]
-             * label = "GC CPU Time"
-             * form = "COLUMN 'GC User Time', 'GC System Time',
-             *                'GC Wall Clock Time', 'Total Time',
-             *                'GC Count'
-             *         SELECT SUM(userTime), SUM(systemTime),
-             *                SUM(realTime), DIFF(startTime), COUNT(*)
-             *         FROM GCCPUTime"
-            */
-            new View("gc-cpu-time",
-                    "jvm",
-                    "GC CPU Time",
-                    "gc-cpu-time",
-                    """
+                /**
+                 * [jvm.gc-cpu-time] label = "GC CPU Time" form = "COLUMN 'GC User Time', 'GC System
+                 * Time', 'GC Wall Clock Time', 'Total Time', 'GC Count' SELECT SUM(userTime),
+                 * SUM(systemTime), SUM(realTime), DIFF(startTime), COUNT(*) FROM GCCPUTime"
+                 */
+                new View(
+                                "gc-cpu-time",
+                                "jvm",
+                                "GC CPU Time",
+                                "gc-cpu-time",
+                                """
                                  CREATE VIEW "gc-cpu-time" AS
                                  SELECT
                                      format_duration(SUM(userTime)) AS "GC User Time",
@@ -1275,22 +1293,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      COUNT(*) AS "GC Count"
                                  FROM GCCPUTime
                             """,
-                    "GCCPUTime"
-            ).description("""
+                                "GCCPUTime")
+                        .description(
+                                """
                     Summarizes the CPU time consumed by garbage collection.
                     """),
-            /**
-             * [jvm.heap-configuration]
-             * label = "Heap Configuration"
-             * form = "SELECT LAST(initialSize), LAST(minSize), LAST(maxSize),
-             *                LAST(usesCompressedOops), LAST(compressedOopsMode)
-             *                FROM GCHeapConfiguration"
-            */
-            new View("heap-configuration",
-                    "jvm",
-                    "Heap Configuration",
-                    "heap-configuration",
-                    """
+                /**
+                 * [jvm.heap-configuration] label = "Heap Configuration" form = "SELECT
+                 * LAST(initialSize), LAST(minSize), LAST(maxSize), LAST(usesCompressedOops),
+                 * LAST(compressedOopsMode) FROM GCHeapConfiguration"
+                 */
+                new View(
+                                "heap-configuration",
+                                "jvm",
+                                "Heap Configuration",
+                                "heap-configuration",
+                                """
                                  CREATE VIEW "heap-configuration" AS
                                  SELECT
                                      format_memory(LAST(initialSize)) AS "Initial Size",
@@ -1300,23 +1318,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      LAST(compressedOopsMode) AS "Compressed Oops Mode"
                                  FROM GCHeapConfiguration
                             """,
-                    "GCHeapConfiguration"
-            ).description("""
+                                "GCHeapConfiguration")
+                        .description(
+                                """
                     Displays the configuration settings of the JVM heap, including sizes and compressed oops usage.
                     """),
-            /**
-             * [application.hot-methods]
-             * label = "Java Methods that Execute the Most"
-             * table = "COLUMN 'Method', 'Samples', 'Percent'
-             *          FORMAT none, none, normalized
-             *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
-             *          FROM ExecutionSample GROUP BY T LIMIT 25"
-            */
-            new View("hot-methods",
-                    "application",
-                    "Java Methods that Execute the Most",
-                    "hot-methods",
-                    """
+                /**
+                 * [application.hot-methods] label = "Java Methods that Execute the Most" table =
+                 * "COLUMN 'Method', 'Samples', 'Percent' FORMAT none, none, normalized SELECT
+                 * stackTrace.topFrame AS T, COUNT(*), COUNT(*) FROM ExecutionSample GROUP BY T
+                 * LIMIT 25"
+                 */
+                new View(
+                                "hot-methods",
+                                "application",
+                                "Java Methods that Execute the Most",
+                                "hot-methods",
+                                """
                                  CREATE VIEW "hot-methods" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -1329,23 +1347,25 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                                  LIMIT 25
                             """,
-                    "ExecutionSample", "Method", "Class"
-            ).description("""
+                                "ExecutionSample",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Identifies the top Java methods where the application spends the most execution time, based on sampling data.
                     """),
-            /**
-             * [application.cpu-time-hot-methods]
-             * label = "Java Methods that Execute the Most from CPU Time Sampler"
-             * table = "COLUMN 'Method', 'Samples', 'Percent'
-             *          FORMAT none, none, normalized
-             *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
-             *          FROM CPUTimeSample GROUP BY T LIMIT 25"
-            */
-            new View("cpu-time-hot-methods",
-                    "application",
-                    "Java Methods that Execute the Most from CPU Time Sampler",
-                    "cpu-time-hot-methods",
-                    """
+                /**
+                 * [application.cpu-time-hot-methods] label = "Java Methods that Execute the Most
+                 * from CPU Time Sampler" table = "COLUMN 'Method', 'Samples', 'Percent' FORMAT
+                 * none, none, normalized SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*) FROM
+                 * CPUTimeSample GROUP BY T LIMIT 25"
+                 */
+                new View(
+                                "cpu-time-hot-methods",
+                                "application",
+                                "Java Methods that Execute the Most from CPU Time Sampler",
+                                "cpu-time-hot-methods",
+                                """
                                  CREATE VIEW "cpu-time-hot-methods" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -1358,31 +1378,27 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ORDER BY COUNT(*) DESC
                                  LIMIT 25
                             """,
-                    "CPUTimeSample", "Method", "Class"
-            ).description("""
+                                "CPUTimeSample",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Identifies the top Java methods where the application spends the most CPU time, based on CPU time sampling data.
                     """),
-            /**
-             * [application.cpu-time-statistics]
-             * label = "CPU Time Sample Statistics"
-             * form = "COLUMN 'Successful Samples', 'Failed Samples', 'Biased Samples', 'Total Samples', 'Lost Samples'
-             *         SELECT COUNT(S.startTime), COUNT(F.startTime), COUNT(B.startTime), Count(A.startTime), SUM(L.lostSamples)
-             *         FROM
-             *           CPUTimeSample AS S,
-             *           CPUTimeSample AS F,
-             *           CPUTimeSample AS A,
-             *           CPUTimeSample AS B,
-             *           CPUTimeSamplesLost AS L
-             *         WHERE
-             *           S.failed = 'false' AND
-             *           F.failed = 'true'  AND
-             *           B.biased = 'true'"
-            */
-            new View("cpu-time-statistics",
-                    "application",
-                    "CPU Time Sample Statistics",
-                    "cpu-time-statistics",
-                    """
+                /**
+                 * [application.cpu-time-statistics] label = "CPU Time Sample Statistics" form =
+                 * "COLUMN 'Successful Samples', 'Failed Samples', 'Biased Samples', 'Total
+                 * Samples', 'Lost Samples' SELECT COUNT(S.startTime), COUNT(F.startTime),
+                 * COUNT(B.startTime), Count(A.startTime), SUM(L.lostSamples) FROM CPUTimeSample AS
+                 * S, CPUTimeSample AS F, CPUTimeSample AS A, CPUTimeSample AS B, CPUTimeSamplesLost
+                 * AS L WHERE S.failed = 'false' AND F.failed = 'true' AND B.biased = 'true'"
+                 */
+                new View(
+                                "cpu-time-statistics",
+                                "application",
+                                "CPU Time Sample Statistics",
+                                "cpu-time-statistics",
+                                """
                                  CREATE VIEW "cpu-time-statistics" AS
                                  SELECT
                                      (SELECT COUNT(*) FROM CPUTimeSample WHERE failed = FALSE) AS "Successful Samples",
@@ -1391,24 +1407,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      (SELECT COUNT(*) FROM CPUTimeSample) AS "Total Samples",
                                      (SELECT SUM(lostSamples) FROM CPUTimeSamplesLost) AS "Lost Samples"
                             """,
-                    "CPUTimeSample", "CPUTimeSamplesLost"
-            ).description("""
+                                "CPUTimeSample",
+                                "CPUTimeSamplesLost")
+                        .description(
+                                """
                     Provides statistics about CPU time sampling, including counts of successful, failed, biased, total, and lost samples.
                     """),
-            /**
-             * [jvm.jdk-agents]
-             * label = "JDK Agents"
-             * table = "COLUMN 'Time', 'Initialization', 'Name', 'Options'
-             *          FORMAT none, none, truncate-beginning;cell-height:10, cell-height:10
-             *          SELECT LAST(initializationTime) AS t, LAST(initializationDuration) AS d, LAST(name), LAST(JavaAgent.options)
-             *          FROM JavaAgent, NativeAgent
-             *          ORDER BY t"
-            */
-            new View("jdk-agents",
-                    "jvm",
-                    "JDK Agents",
-                    "jdk-agents",
-                    """
+                /**
+                 * [jvm.jdk-agents] label = "JDK Agents" table = "COLUMN 'Time', 'Initialization',
+                 * 'Name', 'Options' FORMAT none, none, truncate-beginning;cell-height:10,
+                 * cell-height:10 SELECT LAST(initializationTime) AS t, LAST(initializationDuration)
+                 * AS d, LAST(name), LAST(JavaAgent.options) FROM JavaAgent, NativeAgent ORDER BY t"
+                 */
+                new View(
+                                "jdk-agents",
+                                "jvm",
+                                "JDK Agents",
+                                "jdk-agents",
+                                """
                                  CREATE VIEW "jdk-agents" AS
                                  SELECT
                                      t AS "Time",
@@ -1422,27 +1438,26 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  ) agents
                                  ORDER BY t
                             """,
-                    "JavaAgent", "NativeAgent"
-            ).addUnionAlternatives().description("""
+                                "JavaAgent",
+                                "NativeAgent")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Lists all JDK and native agents that were initialized, along with their initialization time and other info.
                     """),
-            /**
-             * [environment.jvm-flags]
-             * label = "Command Line Flags"
-             * table = "SELECT name AS N, LAST(value)
-             *          FROM IntFlag, UnsignedIntFlag, BooleanFlag,
-             *          LongFlag, UnsignedLongFlag,
-             *          DoubleFlag, StringFlag,
-             *          IntFlagChanged, UnsignedIntFlagChanged, BooleanFlagChanged,
-             *          LongFlagChanged, UnsignedLongFlagChanged,
-             *          DoubleFlagChanged, StringFlagChanged
-             *          GROUP BY name ORDER BY name ASC"
-            */
-            new View("jvm-flags",
-                    "environment",
-                    "Command Line Flags",
-                    "jvm-flags",
-                    """
+                /**
+                 * [environment.jvm-flags] label = "Command Line Flags" table = "SELECT name AS N,
+                 * LAST(value) FROM IntFlag, UnsignedIntFlag, BooleanFlag, LongFlag,
+                 * UnsignedLongFlag, DoubleFlag, StringFlag, IntFlagChanged, UnsignedIntFlagChanged,
+                 * BooleanFlagChanged, LongFlagChanged, UnsignedLongFlagChanged, DoubleFlagChanged,
+                 * StringFlagChanged GROUP BY name ORDER BY name ASC"
+                 */
+                new View(
+                                "jvm-flags",
+                                "environment",
+                                "Command Line Flags",
+                                "jvm-flags",
+                                """
                                  CREATE VIEW "jvm-flags" AS
                                  SELECT
                                      name AS "Name",
@@ -1479,25 +1494,37 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY name, value
                                  ORDER BY name ASC
                             """,
-                    "IntFlag", "UnsignedIntFlag", "BooleanFlag", "LongFlag", "UnsignedLongFlag", "DoubleFlag", "StringFlag",
-                    "IntFlagChanged", "UnsignedIntFlagChanged", "BooleanFlagChanged", "LongFlagChanged", "UnsignedLongFlagChanged", "DoubleFlagChanged", "StringFlagChanged"
-            ).addUnionAlternatives().description("""
+                                "IntFlag",
+                                "UnsignedIntFlag",
+                                "BooleanFlag",
+                                "LongFlag",
+                                "UnsignedLongFlag",
+                                "DoubleFlag",
+                                "StringFlag",
+                                "IntFlagChanged",
+                                "UnsignedIntFlagChanged",
+                                "BooleanFlagChanged",
+                                "LongFlagChanged",
+                                "UnsignedLongFlagChanged",
+                                "DoubleFlagChanged",
+                                "StringFlagChanged")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Displays all JVM command line flags along with their current values.
                     """),
-            /**
-             * [jvm.jvm-information]
-             * label = "JVM Information"
-             * form = "COLUMN
-             *                'PID', 'VM Start', 'Name', 'Version',
-             *                'VM Arguments', 'Program Arguments'
-             *         SELECT LAST(pid), LAST(jvmStartTime), LAST(jvmName), LAST(jvmVersion),
-             *                LAST(jvmArguments), LAST(javaArguments) FROM JVMInformation"
-            */
-            new View("jvm-information",
-                    "jvm",
-                    "JVM Information",
-                    "jvm-information",
-                    """
+                /**
+                 * [jvm.jvm-information] label = "JVM Information" form = "COLUMN 'PID', 'VM Start',
+                 * 'Name', 'Version', 'VM Arguments', 'Program Arguments' SELECT LAST(pid),
+                 * LAST(jvmStartTime), LAST(jvmName), LAST(jvmVersion), LAST(jvmArguments),
+                 * LAST(javaArguments) FROM JVMInformation"
+                 */
+                new View(
+                        "jvm-information",
+                        "jvm",
+                        "JVM Information",
+                        "jvm-information",
+                        """
                                  CREATE VIEW "jvm-information" AS
                                  SELECT
                                      LAST(pid) AS "PID",
@@ -1508,21 +1535,20 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                      LAST(javaArguments) AS "Program Arguments"
                                  FROM JVMInformation
                             """,
-                    "JVMInformation"
-            ),
-            /**
-             * [application.latencies-by-type]
-             * label = "Latencies by Type"
-             * table = "COLUMN 'Event Type', 'Count', 'Average', 'P 99', 'Longest', 'Total'
-             *          SELECT eventType.label AS T, COUNT(*), AVG(duration),  P99(duration), MAX(duration), SUM(duration)
-             *          FROM JavaMonitorWait, JavaMonitorEnter, ThreadPark, ThreadSleep,
-             *          SocketRead, SocketWrite, FileWrite, FileRead GROUP BY T"
-            */
-            new View("latencies-by-type",
-                    "application",
-                    "Latencies by Type",
-                    "latencies-by-type",
-                    """
+                        "JVMInformation"),
+                /**
+                 * [application.latencies-by-type] label = "Latencies by Type" table = "COLUMN
+                 * 'Event Type', 'Count', 'Average', 'P 99', 'Longest', 'Total' SELECT
+                 * eventType.label AS T, COUNT(*), AVG(duration), P99(duration), MAX(duration),
+                 * SUM(duration) FROM JavaMonitorWait, JavaMonitorEnter, ThreadPark, ThreadSleep,
+                 * SocketRead, SocketWrite, FileWrite, FileRead GROUP BY T"
+                 */
+                new View(
+                                "latencies-by-type",
+                                "application",
+                                "Latencies by Type",
+                                "latencies-by-type",
+                                """
                                  CREATE VIEW "latencies-by-type" AS
                                  SELECT
                                      eventType AS "Event Type",
@@ -1551,22 +1577,32 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY eventType
                                  ORDER BY SUM(duration) DESC
                             """,
-                    "JavaMonitorWait", "JavaMonitorEnter", "ThreadPark", "ThreadSleep", "SocketRead", "SocketWrite", "FileWrite", "FileRead"
-            ).addUnionAlternatives().description("""
+                                "JavaMonitorWait",
+                                "JavaMonitorEnter",
+                                "ThreadPark",
+                                "ThreadSleep",
+                                "SocketRead",
+                                "SocketWrite",
+                                "FileWrite",
+                                "FileRead")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Summarizes various latency events by type, including counts and duration statistics.
                     """),
-            /**
-             * [application.memory-leaks-by-class]
-             * label = "Memory Leak Candidates by Class"
-             * table = "COLUMN 'Alloc. Time', 'Object Class', 'Object Age', 'Heap Usage'
-             *          SELECT LAST_BATCH(allocationTime), LAST_BATCH(object.type), LAST_BATCH(objectAge),
-             *          LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP BY object.type ORDER BY allocationTime"
-            */
-            new View("memory-leaks-by-class",
-                    "application",
-                    "Memory Leak Candidates by Class",
-                    "memory-leaks-by-class",
-                    """
+                /**
+                 * [application.memory-leaks-by-class] label = "Memory Leak Candidates by Class"
+                 * table = "COLUMN 'Alloc. Time', 'Object Class', 'Object Age', 'Heap Usage' SELECT
+                 * LAST_BATCH(allocationTime), LAST_BATCH(object.type), LAST_BATCH(objectAge),
+                 * LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP BY object.type ORDER BY
+                 * allocationTime"
+                 */
+                new View(
+                        "memory-leaks-by-class",
+                        "application",
+                        "Memory Leak Candidates by Class",
+                        "memory-leaks-by-class",
+                        """
                                  CREATE VIEW "memory-leaks-by-class" AS
                                  SELECT
                                      LAST(allocationTime) AS "Alloc. Time",
@@ -1579,19 +1615,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY c.javaName
                                  ORDER BY LAST(allocationTime) ASC
                             """,
-                    "OldObjectSample", "Class"),
-            /**
-             * [application.memory-leaks-by-site]
-             * label = "Memory Leak Candidates by Site"
-             * table = "COLUMN 'Alloc. Time', 'Application Method', 'Object Age', 'Heap Usage'
-             *          SELECT LAST_BATCH(allocationTime), LAST_BATCH(stackTrace.topApplicationFrame), LAST_BATCH(objectAge),
-             *          LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP BY stackTrace.topApplicationFrame ORDER BY allocationTime"
-            */
-            new View("memory-leaks-by-site",
-                    "application",
-                    "Memory Leak Candidates by Site",
-                    "memory-leaks-by-site",
-                    """
+                        "OldObjectSample",
+                        "Class"),
+                /**
+                 * [application.memory-leaks-by-site] label = "Memory Leak Candidates by Site" table
+                 * = "COLUMN 'Alloc. Time', 'Application Method', 'Object Age', 'Heap Usage' SELECT
+                 * LAST_BATCH(allocationTime), LAST_BATCH(stackTrace.topApplicationFrame),
+                 * LAST_BATCH(objectAge), LAST_BATCH(lastKnownHeapUsage) FROM OldObjectSample GROUP
+                 * BY stackTrace.topApplicationFrame ORDER BY allocationTime"
+                 */
+                new View(
+                        "memory-leaks-by-site",
+                        "application",
+                        "Memory Leak Candidates by Site",
+                        "memory-leaks-by-site",
+                        """
                                  CREATE VIEW "memory-leaks-by-site" AS
                                  SELECT
                                      LAST(allocationTime) AS "Alloc. Time",
@@ -1604,21 +1642,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY os.stackTrace$topApplicationMethod, c.javaName, m.name, m.descriptor
                                  ORDER BY LAST(allocationTime) ASC
                             """,
-                    "OldObjectSample", "Method", "Class"
-            ),
-            /**
-             * [application.method-timing]
-             * label = "Method Timing"
-             * table = "COLUMN 'Timed Method', 'Invocations', 'Minimum Time', 'Average Time', 'Maximum Time'
-             *          FORMAT none, none, ms-precision:6, ms-precision:6, ms-precision:6
-             *          SELECT LAST_BATCH(method) AS M, LAST_BATCH(invocations), LAST_BATCH(minimum), LAST_BATCH(average), LAST_BATCH(maximum)
-             *          FROM jdk.MethodTiming GROUP BY method ORDER BY average"
-            */
-            new View("method-timing",
-                    "application",
-                    "Method Timing",
-                    "method-timing",
-                    """
+                        "OldObjectSample",
+                        "Method",
+                        "Class"),
+                /**
+                 * [application.method-timing] label = "Method Timing" table = "COLUMN 'Timed
+                 * Method', 'Invocations', 'Minimum Time', 'Average Time', 'Maximum Time' FORMAT
+                 * none, none, ms-precision:6, ms-precision:6, ms-precision:6 SELECT
+                 * LAST_BATCH(method) AS M, LAST_BATCH(invocations), LAST_BATCH(minimum),
+                 * LAST_BATCH(average), LAST_BATCH(maximum) FROM jdk.MethodTiming GROUP BY method
+                 * ORDER BY average"
+                 */
+                new View(
+                                "method-timing",
+                                "application",
+                                "Method Timing",
+                                "method-timing",
+                                """
                                  CREATE VIEW "method-timing" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Timed Method",
@@ -1632,22 +1672,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY mt.method, c.javaName, m.name, m.descriptor
                                  ORDER BY LAST(average) ASC
                             """,
-                    "MethodTiming", "Method", "Class"
-            ).description("""
+                                "MethodTiming",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Provides timing statistics for methods, including invocation counts and time metrics.
                     """),
-            /**
-             * [application.method-calls]
-             * label = "Method Calls"
-             * table = "COLUMN 'Traced Method', 'Caller', 'Invocations'
-             *          SELECT method as M, stackTrace.topFrame.method AS S, COUNT(*) AS C
-             *          FROM jdk.MethodTrace GROUP BY M, S ORDER BY C DESC"
-            */
-            new View("method-calls",
-                    "application",
-                    "Method Calls",
-                    "method-calls",
-                    """
+                /**
+                 * [application.method-calls] label = "Method Calls" table = "COLUMN 'Traced
+                 * Method', 'Caller', 'Invocations' SELECT method as M, stackTrace.topFrame.method
+                 * AS S, COUNT(*) AS C FROM jdk.MethodTrace GROUP BY M, S ORDER BY C DESC"
+                 */
+                new View(
+                                "method-calls",
+                                "application",
+                                "Method Calls",
+                                "method-calls",
+                                """
                                  CREATE VIEW "method-calls" AS
                                  SELECT
                                      (cm.javaName || '.' || m.name || m.descriptor) AS "Traced Method",
@@ -1661,20 +1703,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY mt.method, mt.stackTrace$topMethod, cm.javaName, m.name, m.descriptor, cc.javaName, sm.name, sm.descriptor
                                  ORDER BY COUNT(*) DESC
                             """,
-                    "MethodTrace", "Method", "Class"
-            ).description("""
+                                "MethodTrace",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Displays method call relationships, showing which methods are called by which callers along with invocation counts.
                     """),
-            /**
-             * [application.modules]
-             * label = "Modules"
-             * table = "SELECT LAST(source.name) AS S FROM ModuleRequire GROUP BY source.name ORDER BY S"
-            */
-            new View("modules",
-                    "application",
-                    "Modules",
-                    "modules",
-                    """
+                /**
+                 * [application.modules] label = "Modules" table = "SELECT LAST(source.name) AS S
+                 * FROM ModuleRequire GROUP BY source.name ORDER BY S"
+                 */
+                new View(
+                        "modules",
+                        "application",
+                        "Modules",
+                        "modules",
+                        """
                                  CREATE VIEW "modules" AS
                                  SELECT
                                      LAST(m.name) AS "Module Name"
@@ -1683,19 +1728,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY source
                                  ORDER BY "Module Name" ASC
                             """,
-                    "ModuleRequire", "Module"
-            ),
-            /**
-             * [application.monitor-inflation]
-             * label = "Monitor Inflation"
-             * table = "SELECT stackTrace, monitorClass, COUNT(*), SUM(duration) AS S
-             *          FROM jdk.JavaMonitorInflate GROUP BY stackTrace, monitorClass ORDER BY S"
-            */
-            new View("monitor-inflation",
-                    "application",
-                    "Monitor Inflation",
-                    "monitor-inflation",
-                    """
+                        "ModuleRequire",
+                        "Module"),
+                /**
+                 * [application.monitor-inflation] label = "Monitor Inflation" table = "SELECT
+                 * stackTrace, monitorClass, COUNT(*), SUM(duration) AS S FROM
+                 * jdk.JavaMonitorInflate GROUP BY stackTrace, monitorClass ORDER BY S"
+                 */
+                new View(
+                                "monitor-inflation",
+                                "application",
+                                "Monitor Inflation",
+                                "monitor-inflation",
+                                """
                                  CREATE VIEW "monitor-inflation" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -1709,21 +1754,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY jmi.stackTrace$topApplicationMethod, mc.javaName, c.javaName, m.name, m.descriptor
                                  ORDER BY SUM(jmi.duration) DESC
                             """,
-                    "JavaMonitorInflate", "Class"
-            ).description("""
+                                "JavaMonitorInflate",
+                                "Class")
+                        .description(
+                                """
                     Identifies methods that caused monitor inflation, along with the associated monitor classes and duration statistics.
                     """),
-            /**
-             * [environment.native-libraries]
-             * label = "Native Libraries"
-             * table = "FORMAT cell-height:2, none, none
-             *          SELECT name AS N, baseAddress, topAddress FROM NativeLibrary GROUP BY name ORDER BY N"
-            */
-            new View("native-libraries",
-                    "environment",
-                    "Native Libraries",
-                    "native-libraries",
-                    """
+                /**
+                 * [environment.native-libraries] label = "Native Libraries" table = "FORMAT
+                 * cell-height:2, none, none SELECT name AS N, baseAddress, topAddress FROM
+                 * NativeLibrary GROUP BY name ORDER BY N"
+                 */
+                new View(
+                        "native-libraries",
+                        "environment",
+                        "Native Libraries",
+                        "native-libraries",
+                        """
                                  CREATE VIEW "native-libraries" AS
                                  SELECT
                                      name AS "Name",
@@ -1733,22 +1780,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY name, baseAddress, topAddress
                                  ORDER BY name ASC
                             """,
-                    "NativeLibrary"
-            ),
-            /**
-             * [environment.native-library-failures]
-             * label = "Native Library Load/Unload Failures"
-             * table = "COLUMN 'Operation', 'Library', 'Error Message'
-             *          FORMAT none, truncate-beginning, cell-height:10
-             *          SELECT eventType.label, name, errorMessage
-             *          FROM NativeLibraryUnload, NativeLibraryLoad
-             *          WHERE success = 'false'"
-            */
-            new View("native-library-failures",
-                    "environment",
-                    "Native Library Load/Unload Failures",
-                    "native-library-failures",
-                    """
+                        "NativeLibrary"),
+                /**
+                 * [environment.native-library-failures] label = "Native Library Load/Unload
+                 * Failures" table = "COLUMN 'Operation', 'Library', 'Error Message' FORMAT none,
+                 * truncate-beginning, cell-height:10 SELECT eventType.label, name, errorMessage
+                 * FROM NativeLibraryUnload, NativeLibraryLoad WHERE success = 'false'"
+                 */
+                new View(
+                                "native-library-failures",
+                                "environment",
+                                "Native Library Load/Unload Failures",
+                                "native-library-failures",
+                                """
                                  CREATE VIEW "native-library-failures" AS
                                  SELECT
                                      eventType AS "Operation",
@@ -1762,22 +1806,25 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  WHERE success = FALSE
                                  ORDER BY eventType ASC, name ASC
                             """,
-                    "NativeLibraryUnload", "NativeLibraryLoad"
-            ).addUnionAlternatives().description("""
+                                "NativeLibraryUnload",
+                                "NativeLibraryLoad")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Lists any failures that occurred during the loading or unloading of native libraries, along with error messages.
                     """),
-            /**
-             * [jvm.native-memory-committed]
-             * label = "Native Memory Committed"
-             * table = "COLUMN 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum'
-             *          SELECT type, FIRST(committed), AVG(committed), LAST(committed), MAX(committed) AS M
-             *          FROM NativeMemoryUsage GROUP BY type ORDER BY M DESC"
-            */
-            new View("native-memory-committed",
-                    "jvm",
-                    "Native Memory Committed",
-                    "native-memory-committed",
-                    """
+                /**
+                 * [jvm.native-memory-committed] label = "Native Memory Committed" table = "COLUMN
+                 * 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum' SELECT
+                 * type, FIRST(committed), AVG(committed), LAST(committed), MAX(committed) AS M FROM
+                 * NativeMemoryUsage GROUP BY type ORDER BY M DESC"
+                 */
+                new View(
+                        "native-memory-committed",
+                        "jvm",
+                        "Native Memory Committed",
+                        "native-memory-committed",
+                        """
                                  CREATE VIEW "native-memory-committed" AS
                                  SELECT
                                      type AS "Memory Type",
@@ -1789,20 +1836,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY type
                                  ORDER BY MAX(committed) DESC
                             """,
-                    "NativeMemoryUsage"
-            ),
-            /**
-             * [jvm.native-memory-reserved]
-             * label = "Native Memory Reserved"
-             * table = "COLUMN 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum'
-             *          SELECT type, FIRST(reserved), AVG(reserved), LAST(reserved), MAX(reserved) AS M
-             *          FROM NativeMemoryUsage GROUP BY type ORDER BY M DESC"
-            */
-            new View("native-memory-reserved",
-                    "jvm",
-                    "Native Memory Reserved",
-                    "native-memory-reserved",
-                    """
+                        "NativeMemoryUsage"),
+                /**
+                 * [jvm.native-memory-reserved] label = "Native Memory Reserved" table = "COLUMN
+                 * 'Memory Type', 'First Observed', 'Average', 'Last Observed', 'Maximum' SELECT
+                 * type, FIRST(reserved), AVG(reserved), LAST(reserved), MAX(reserved) AS M FROM
+                 * NativeMemoryUsage GROUP BY type ORDER BY M DESC"
+                 */
+                new View(
+                        "native-memory-reserved",
+                        "jvm",
+                        "Native Memory Reserved",
+                        "native-memory-reserved",
+                        """
                                  CREATE VIEW "native-memory-reserved" AS
                                  SELECT
                                      type AS "Memory Type",
@@ -1814,21 +1860,18 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY type
                                  ORDER BY MAX(reserved) DESC
                             """,
-                    "NativeMemoryUsage"
-            ),
-            /**
-             * [application.native-methods]
-             * label = "Waiting or Executing Native Methods"
-             * table = "COLUMN 'Method', 'Samples', 'Percent'
-             *          FORMAT none, none, normalized
-             *          SELECT stackTrace.topFrame AS T, COUNT(*), COUNT(*)
-             *          FROM NativeMethodSample GROUP BY T"
-            */
-            new View("native-methods",
-                    "application",
-                    "Waiting or Executing Native Methods",
-                    "native-methods",
-                    """
+                        "NativeMemoryUsage"),
+                /**
+                 * [application.native-methods] label = "Waiting or Executing Native Methods" table
+                 * = "COLUMN 'Method', 'Samples', 'Percent' FORMAT none, none, normalized SELECT
+                 * stackTrace.topFrame AS T, COUNT(*), COUNT(*) FROM NativeMethodSample GROUP BY T"
+                 */
+                new View(
+                                "native-methods",
+                                "application",
+                                "Waiting or Executing Native Methods",
+                                "native-methods",
+                                """
                                  CREATE VIEW "native-methods" AS
                                  SELECT
                                      (c.javaName || '.' || m.name || m.descriptor) AS "Method",
@@ -1840,21 +1883,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY nms.stackTrace$topMethod, c.javaName, m.name, m.descriptor
                                  ORDER BY COUNT(*) DESC
                             """,
-                    "NativeMethodSample", "Method", "Class"
-            ).description("""
+                                "NativeMethodSample",
+                                "Method",
+                                "Class")
+                        .description(
+                                """
                     Identifies the top native methods where the application spends the most time, based on sampling data.
                     """),
-            /**
-             * [environment.network-utilization]
-             * label = "Network Utilization"
-             * table = "SELECT networkInterface, AVG(readRate), MAX(readRate), AVG(writeRate), MAX(writeRate)
-             *          FROM NetworkUtilization GROUP BY networkInterface"
-            */
-            new View("network-utilization",
-                    "environment",
-                    "Network Utilization",
-                    "network-utilization",
-                    """
+                /**
+                 * [environment.network-utilization] label = "Network Utilization" table = "SELECT
+                 * networkInterface, AVG(readRate), MAX(readRate), AVG(writeRate), MAX(writeRate)
+                 * FROM NetworkUtilization GROUP BY networkInterface"
+                 */
+                new View(
+                                "network-utilization",
+                                "environment",
+                                "Network Utilization",
+                                "network-utilization",
+                                """
                                  CREATE VIEW "network-utilization" AS
                                  SELECT
                                      networkInterface AS "Network Interface",
@@ -1866,26 +1912,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                  GROUP BY networkInterface
                                  ORDER BY networkInterface ASC
                             """,
-                    "NetworkUtilization"
-            ).description("""
+                                "NetworkUtilization")
+                        .description(
+                                """
                     Displays network utilization statistics for each network interface, including read and write rates.
                     """),
-            /**
-             * [application.object-statistics]
-             * label = "Objects Occupying More than 1%"
-             * table = "COLUMN 'Class', 'Count', 'Heap Space', 'Increase'
-             *          SELECT
-             *           LAST_BATCH(objectClass), LAST_BATCH(count),
-             *           LAST_BATCH(totalSize), DIFF(totalSize)
-             *          FROM ObjectCountAfterGC, ObjectCount
-             *          GROUP BY objectClass
-             *          ORDER BY totalSize DESC"
-            */
-            new View("object-statistics",
-                    "application",
-                    "Objects Occupying More than 1%",
-                    "object-statistics",
-                    """
+                /**
+                 * [application.object-statistics] label = "Objects Occupying More than 1%" table =
+                 * "COLUMN 'Class', 'Count', 'Heap Space', 'Increase' SELECT
+                 * LAST_BATCH(objectClass), LAST_BATCH(count), LAST_BATCH(totalSize),
+                 * DIFF(totalSize) FROM ObjectCountAfterGC, ObjectCount GROUP BY objectClass ORDER
+                 * BY totalSize DESC"
+                 */
+                new View(
+                                "object-statistics",
+                                "application",
+                                "Objects Occupying More than 1%",
+                                "object-statistics",
+                                """
                             CREATE VIEW "object-statistics" AS
                             SELECT "Class", "Count", "Heap Space", "Increase"
                             FROM
@@ -1904,24 +1948,26 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY c.javaName)
                             ORDER BY h DESC
                             """,
-                    "ObjectCountAfterGC", "ObjectCount", "Class"
-            ).addUnionAlternatives().description("""
+                                "ObjectCountAfterGC",
+                                "ObjectCount",
+                                "Class")
+                        .addUnionAlternatives()
+                        .description(
+                                """
                     Summarizes object statistics by class, including counts, heap space usage, and increases over time.
                     """),
-            /**
-             * [application.pinned-threads]
-             * label = "Pinned Virtual Threads"
-             * table = "COLUMN 'Method', 'Pinned Count',  'Longest Pinning', 'Total Time Pinned'
-             *          SELECT stackTrace.topApplicationFrame AS S, COUNT(*),
-             *                 MAX(duration), SUM(duration) AS T FROM VirtualThreadPinned
-             *          GROUP BY S
-             *          ORDER BY T DESC"
-            */
-            new View("pinned-threads", // TODO test
-                    "application",
-                    "Pinned Virtual Threads",
-                    "pinned-threads",
-                    """
+                /**
+                 * [application.pinned-threads] label = "Pinned Virtual Threads" table = "COLUMN
+                 * 'Method', 'Pinned Count', 'Longest Pinning', 'Total Time Pinned' SELECT
+                 * stackTrace.topApplicationFrame AS S, COUNT(*), MAX(duration), SUM(duration) AS T
+                 * FROM VirtualThreadPinned GROUP BY S ORDER BY T DESC"
+                 */
+                new View(
+                                "pinned-threads", // TODO test
+                                "application",
+                                "Pinned Virtual Threads",
+                                "pinned-threads",
+                                """
                             CREATE VIEW "pinned-threads" AS
                             SELECT
                                 (c.javaName || '.' || vtp.stackTrace$topApplicationMethod) AS "Method",
@@ -1933,20 +1979,22 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY vtp.stackTrace$topApplicationMethod, vtp.stackTrace$topApplicationClass, c.javaName
                             ORDER BY SUM(vtp.duration) DESC
                             """,
-                    "VirtualThreadPinned", "Class"
-            ).description("""
+                                "VirtualThreadPinned",
+                                "Class")
+                        .description(
+                                """
                     Identifies virtual threads that have been pinned, along with statistics on pinning duration and counts.
                     """),
-            /**
-             * [application.thread-count]
-             * label ="Java Thread Statistics"
-             * table = "SELECT * FROM JavaThreadStatistics"
-            */
-            new View("thread-count",
-                    "application",
-                    "Java Thread Statistics",
-                    "thread-count",
-                    """
+                /**
+                 * [application.thread-count] label ="Java Thread Statistics" table = "SELECT * FROM
+                 * JavaThreadStatistics"
+                 */
+                new View(
+                        "thread-count",
+                        "application",
+                        "Java Thread Statistics",
+                        "thread-count",
+                        """
                             CREATE VIEW "thread-count" AS
                             SELECT
                             startTime AS "Start Time",
@@ -1957,28 +2005,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             FROM JavaThreadStatistics
                             ORDER BY startTime ASC
                             """,
-                    "JavaThreadStatistics"
-            ),
-            /**
-             * [environment.recording]
-             * label = "Recording Information"
-             * form = "COLUMN 'Event Count', 'First Recorded Event', 'Last Recorded Event',
-             *                  'Length of Recorded Events', 'Dump Reason'
-             *         SELECT   COUNT(startTime), FIRST(startTime), LAST(startTime),
-             *                  DIFF(startTime), LAST(jdk.Shutdown.reason)
-             *         FROM *
-             *
-             *                    new Table.Column("eventCount", "INTEGER", null),
-             *                     new Table.Column("firstEvent", "TIMESTAMP", null),
-             *                     new Table.Column("lastEvent", "TIMESTAMP", null),
-             *                     new Table.Column("eventDurationSeconds", "DOUBLE", null),
-             *                     new Table.Column("dumpReason", "VARCHAR", null)
-            */
-            new View("recording",
-                    "environment",
-                    "Recording Information",
-                    "recording",
-                    """
+                        "JavaThreadStatistics"),
+                /**
+                 * [environment.recording] label = "Recording Information" form = "COLUMN 'Event
+                 * Count', 'First Recorded Event', 'Last Recorded Event', 'Length of Recorded
+                 * Events', 'Dump Reason' SELECT COUNT(startTime), FIRST(startTime),
+                 * LAST(startTime), DIFF(startTime), LAST(jdk.Shutdown.reason) FROM *
+                 *
+                 * <p>new Table.Column("eventCount", "INTEGER", null), new
+                 * Table.Column("firstEvent", "TIMESTAMP", null), new Table.Column("lastEvent",
+                 * "TIMESTAMP", null), new Table.Column("eventDurationSeconds", "DOUBLE", null), new
+                 * Table.Column("dumpReason", "VARCHAR", null)
+                 */
+                new View(
+                        "recording",
+                        "environment",
+                        "Recording Information",
+                        "recording",
+                        """
                             CREATE VIEW "recording" AS
                             SELECT
                                 eventCount AS "Event Count",
@@ -1988,26 +2032,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 dumpReason AS "Dump Reason"
                             FROM RecordingInfo
                             """,
-                    "RecordingInfo"
-            ),
-            /**
-             * [jvm.safepoints]
-             * label = "Safepoints"
-             * table = "COLUMN  'Start Time', 'Duration',
-             *                    'State Syncronization', 'Cleanup',
-             *                    'JNI Critical Threads', 'Total Threads'
-             *          SELECT    B.startTime,  DIFF([B|E].startTime),
-             *                    S.duration, C.duration,
-             *                    jniCriticalThreadCount, totalThreadCount
-             *          FROM SafepointBegin AS B, SafepointEnd AS E,
-            SafepointCleanup AS C, SafepointStateSynchronization AS S
-             *          GROUP BY safepointId ORDER BY B.startTime"
-            */
-            new View("safepoints", // TODO test
-                    "jvm",
-                    "Safepoints",
-                    "safepoints",
-                    """
+                        "RecordingInfo"),
+                /**
+                 * [jvm.safepoints] label = "Safepoints" table = "COLUMN 'Start Time', 'Duration',
+                 * 'State Syncronization', 'Cleanup', 'JNI Critical Threads', 'Total Threads' SELECT
+                 * B.startTime, DIFF([B|E].startTime), S.duration, C.duration,
+                 * jniCriticalThreadCount, totalThreadCount FROM SafepointBegin AS B, SafepointEnd
+                 * AS E, SafepointCleanup AS C, SafepointStateSynchronization AS S GROUP BY
+                 * safepointId ORDER BY B.startTime"
+                 */
+                new View(
+                                "safepoints", // TODO test
+                                "jvm",
+                                "Safepoints",
+                                "safepoints",
+                                """
                             CREATE VIEW "safepoints" AS
                             SELECT
                                 B.startTime AS "Start Time",
@@ -2022,9 +2061,15 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             LEFT JOIN SafepointCleanup C ON B.safepointId = C.safepointId
                             ORDER BY B.startTime ASC
                             """,
-                    "SafepointBegin", "SafepointEnd", "SafepointStateSynchronization", "SafepointCleanup"
-            ).addAlternative("SafepointStateSynchronization", "SafepointBegin", "SafepointEnd",
-                    """
+                                "SafepointBegin",
+                                "SafepointEnd",
+                                "SafepointStateSynchronization",
+                                "SafepointCleanup")
+                        .addAlternative(
+                                "SafepointStateSynchronization",
+                                "SafepointBegin",
+                                "SafepointEnd",
+                                """
                     CREATE VIEW "safepoints" AS
                     SELECT
                         B.startTime AS "Start Time",
@@ -2037,17 +2082,17 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                     LEFT JOIN SafepointStateSynchronization S ON B.safepointId = S.safepointId
                     ORDER BY B.startTime ASC
                     """),
-            /**
-             * [jvm.longest-compilations]
-             * label = "Longest Compilations"
-             * table = "SELECT startTime, duration AS D, method, compileLevel, succeded
-             *          FROM Compilation ORDER BY D LIMIT 25"
-            */
-            new View("longest-compilations",
-                    "jvm",
-                    "Longest Compilations",
-                    "longest-compilations",
-                    """
+                /**
+                 * [jvm.longest-compilations] label = "Longest Compilations" table = "SELECT
+                 * startTime, duration AS D, method, compileLevel, succeded FROM Compilation ORDER
+                 * BY D LIMIT 25"
+                 */
+                new View(
+                        "longest-compilations",
+                        "jvm",
+                        "Longest Compilations",
+                        "longest-compilations",
+                        """
                             CREATE VIEW "longest-compilations" AS
                             SELECT
                                 startTime AS "Start Time",
@@ -2061,20 +2106,20 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY duration DESC
                             LIMIT 25
                             """,
-                    "Compilation", "Method", "Class"
-            ),
-            /**
-             * [application.longest-class-loading]
-             * label = "Longest Class Loading"
-             * table = "COLUMN 'Time', 'Loaded Class', 'Load Time'
-             *          SELECT startTime,loadedClass, duration AS D
-             *          FROM ClassLoad ORDER BY D DESC LIMIT 25"
-            */
-            new View("longest-class-loading",
-                    "application",
-                    "Longest Class Loading",
-                    "longest-class-loading",
-                    """
+                        "Compilation",
+                        "Method",
+                        "Class"),
+                /**
+                 * [application.longest-class-loading] label = "Longest Class Loading" table =
+                 * "COLUMN 'Time', 'Loaded Class', 'Load Time' SELECT startTime,loadedClass,
+                 * duration AS D FROM ClassLoad ORDER BY D DESC LIMIT 25"
+                 */
+                new View(
+                        "longest-class-loading",
+                        "application",
+                        "Longest Class Loading",
+                        "longest-class-loading",
+                        """
                             CREATE VIEW "longest-class-loading" AS
                             SELECT
                                 startTime AS "Time",
@@ -2085,19 +2130,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             ORDER BY duration DESC
                             LIMIT 25
                             """,
-                    "ClassLoad", "Class"
-            ),
-            /**
-             * [environment.system-properties]
-             * label = "System Properties at Startup"
-             * table = "FORMAT none, cell-height:25
-             *         SELECT key AS K, value FROM InitialSystemProperty GROUP BY key ORDER by K"
-            */
-            new View("system-properties",
-                    "environment",
-                    "System Properties at Startup",
-                    "system-properties",
-                    """
+                        "ClassLoad",
+                        "Class"),
+                /**
+                 * [environment.system-properties] label = "System Properties at Startup" table =
+                 * "FORMAT none, cell-height:25 SELECT key AS K, value FROM InitialSystemProperty
+                 * GROUP BY key ORDER by K"
+                 */
+                new View(
+                        "system-properties",
+                        "environment",
+                        "System Properties at Startup",
+                        "system-properties",
+                        """
                             CREATE VIEW "system-properties" AS
                             SELECT
                                 key AS "Key",
@@ -2106,21 +2151,19 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY key, value
                             ORDER BY key ASC
                             """,
-                    "InitialSystemProperty"
-            ),
-            /**
-             * [application.socket-writes-by-host]
-             * label = "Socket Writes by Host"
-             * table = "COLUMN 'Host', 'Writes', 'Total Written'
-             *          FORMAT cell-height:2, none, none
-             *          SELECT host, COUNT(*), SUM(bytesWritten) AS S FROM SocketWrite
-             *          GROUP BY host ORDER BY S DESC"
-            */
-            new View("socket-writes-by-host",
-                    "application",
-                    "Socket Writes by Host",
-                    "socket-writes-by-host",
-                    """
+                        "InitialSystemProperty"),
+                /**
+                 * [application.socket-writes-by-host] label = "Socket Writes by Host" table =
+                 * "COLUMN 'Host', 'Writes', 'Total Written' FORMAT cell-height:2, none, none SELECT
+                 * host, COUNT(*), SUM(bytesWritten) AS S FROM SocketWrite GROUP BY host ORDER BY S
+                 * DESC"
+                 */
+                new View(
+                        "socket-writes-by-host",
+                        "application",
+                        "Socket Writes by Host",
+                        "socket-writes-by-host",
+                        """
                             CREATE VIEW "socket-writes-by-host" AS
                             SELECT
                                 host AS "Host",
@@ -2130,21 +2173,18 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY host
                             ORDER BY SUM(bytesWritten) DESC
                             """,
-                    "SocketWrite"
-            ),
-            /**
-             * [application.socket-reads-by-host]
-             * label = "Socket Reads by Host"
-             * table = "COLUMN 'Host', 'Reads', 'Total Read'
-             *          FORMAT cell-height:2, none, none
-             *          SELECT host, COUNT(*), SUM(bytesRead) AS S FROM SocketRead
-             *          GROUP BY host ORDER BY S DESC"
-            */
-            new View("socket-reads-by-host",
-                    "application",
-                    "Socket Reads by Host",
-                    "socket-reads-by-host",
-                    """
+                        "SocketWrite"),
+                /**
+                 * [application.socket-reads-by-host] label = "Socket Reads by Host" table = "COLUMN
+                 * 'Host', 'Reads', 'Total Read' FORMAT cell-height:2, none, none SELECT host,
+                 * COUNT(*), SUM(bytesRead) AS S FROM SocketRead GROUP BY host ORDER BY S DESC"
+                 */
+                new View(
+                        "socket-reads-by-host",
+                        "application",
+                        "Socket Reads by Host",
+                        "socket-reads-by-host",
+                        """
                             CREATE VIEW "socket-reads-by-host" AS
                             SELECT
                                 host AS "Host",
@@ -2154,24 +2194,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY host
                             ORDER BY SUM(bytesRead) DESC
                             """,
-                    "SocketRead"
-            ),
-            /**
-             * [environment.system-information]
-             * label = "System Information"
-             * form = "COLUMN 'Total Physical Memory Size', 'OS Version', 'Virtualization', 'CPU Type',
-             *                  'Number of Cores', 'Number of Hardware Threads',
-             *                  'Number of Sockets', 'CPU Description'
-             *         SELECT LAST(totalSize), LAST(osVersion), LAST(name), LAST(cpu),
-             *                LAST(cores), LAST(hwThreads),
-             *                LAST(sockets), LAST(description)
-             *         FROM CPUInformation, PhysicalMemory, OSInformation, VirtualizationInformation"
-            */
-            new View("system-information",
-                    "environment",
-                    "System Information",
-                    "system-information",
-                    """
+                        "SocketRead"),
+                /**
+                 * [environment.system-information] label = "System Information" form = "COLUMN
+                 * 'Total Physical Memory Size', 'OS Version', 'Virtualization', 'CPU Type', 'Number
+                 * of Cores', 'Number of Hardware Threads', 'Number of Sockets', 'CPU Description'
+                 * SELECT LAST(totalSize), LAST(osVersion), LAST(name), LAST(cpu), LAST(cores),
+                 * LAST(hwThreads), LAST(sockets), LAST(description) FROM CPUInformation,
+                 * PhysicalMemory, OSInformation, VirtualizationInformation"
+                 */
+                new View(
+                        "system-information",
+                        "environment",
+                        "System Information",
+                        "system-information",
+                        """
                             CREATE VIEW "system-information" AS
                             SELECT
                                 format_memory(LAST(pm.totalSize)) AS "Total Physical Memory Size",
@@ -2184,21 +2221,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 LAST(cii.description) AS "CPU Description"
                             FROM PhysicalMemory pm, OSInformation osi, CPUInformation cii, VirtualizationInformation vi
                             """,
-                    "PhysicalMemory", "OSInformation", "CPUInformation", "VirtualizationInformation"
-            ),
-            /**
-             * [environment.system-processes]
-             * label = "System Processes"
-             * table = "COLUMN 'First Observed', 'Last Observed', 'PID', 'Command Line'
-             *          SELECT FIRST(startTime), LAST(startTime),
-             *                 FIRST(pid), FIRST(commandLine)
-             *          FROM SystemProcess GROUP BY pid"
-            */
-            new View("system-processes",
-                    "environment",
-                    "System Processes",
-                    "system-processes",
-                    """
+                        "PhysicalMemory",
+                        "OSInformation",
+                        "CPUInformation",
+                        "VirtualizationInformation"),
+                /**
+                 * [environment.system-processes] label = "System Processes" table = "COLUMN 'First
+                 * Observed', 'Last Observed', 'PID', 'Command Line' SELECT FIRST(startTime),
+                 * LAST(startTime), FIRST(pid), FIRST(commandLine) FROM SystemProcess GROUP BY pid"
+                 */
+                new View(
+                        "system-processes",
+                        "environment",
+                        "System Processes",
+                        "system-processes",
+                        """
                             CREATE VIEW "system-processes" AS
                             SELECT
                                 FIRST(startTime) AS "First Observed",
@@ -2209,26 +2246,24 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY pid
                             ORDER BY FIRST(startTime) ASC
                             """,
-                    "SystemProcess"
-            ),
-            /**
-             * [jvm.tlabs]
-             * label = "Thread Local Allocation Buffers"
-             * form = "COLUMN 'Inside TLAB Count', 'Inside TLAB Minimum Size', 'Inside TLAB Average Size',
-             *                'Inside TLAB Maximum Size', 'Inside TLAB Total Allocation',
-             *                'Outside TLAB Count',  'OutSide TLAB Minimum Size', 'Outside TLAB Average Size',
-             *                'Outside TLAB Maximum Size', 'Outside TLAB Total Allocation'
-             *         SELECT  COUNT(I.tlabSize), MIN(I.tlabSize), AVG(I.tlabSize),
-             *                 MAX(I.tlabSize), SUM(I.tlabSize),
-             *                 COUNT(O.allocationSize), MIN(O.allocationSize), AVG(O.allocationSize),
-             *                 MAX(O.allocationSize), SUM(O.allocationSize)
-             *         FROM ObjectAllocationInNewTLAB AS I, ObjectAllocationOutsideTLAB AS O"
-            */
-            new View("tlabs",
-                    "jvm",
-                    "Thread Local Allocation Buffers",
-                    "tlabs",
-                    """
+                        "SystemProcess"),
+                /**
+                 * [jvm.tlabs] label = "Thread Local Allocation Buffers" form = "COLUMN 'Inside TLAB
+                 * Count', 'Inside TLAB Minimum Size', 'Inside TLAB Average Size', 'Inside TLAB
+                 * Maximum Size', 'Inside TLAB Total Allocation', 'Outside TLAB Count', 'OutSide
+                 * TLAB Minimum Size', 'Outside TLAB Average Size', 'Outside TLAB Maximum Size',
+                 * 'Outside TLAB Total Allocation' SELECT COUNT(I.tlabSize), MIN(I.tlabSize),
+                 * AVG(I.tlabSize), MAX(I.tlabSize), SUM(I.tlabSize), COUNT(O.allocationSize),
+                 * MIN(O.allocationSize), AVG(O.allocationSize), MAX(O.allocationSize),
+                 * SUM(O.allocationSize) FROM ObjectAllocationInNewTLAB AS I,
+                 * ObjectAllocationOutsideTLAB AS O"
+                 */
+                new View(
+                        "tlabs",
+                        "jvm",
+                        "Thread Local Allocation Buffers",
+                        "tlabs",
+                        """
                             CREATE VIEW "tlabs" AS
                             SELECT * FROM (SELECT
                                 COUNT(tlabSize) AS "Inside Count",
@@ -2245,21 +2280,20 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 format_memory(SUM(allocationSize)) AS "Outside Total Allocation"
                             FROM ObjectAllocationOutsideTLAB)
                             """,
-                    "ObjectAllocationInNewTLAB", "ObjectAllocationOutsideTLAB"
-            ),
-            /**
-             * [application.thread-allocation]
-             * label = "Thread Allocation Statistics"
-             * table = "COLUMN 'Thread', 'Allocated', 'Percentage'
-             *          FORMAT none, none, normalized
-             *          SELECT thread, LAST(allocated), LAST(allocated) AS A FROM ThreadAllocationStatistics
-             *          GROUP BY thread ORDER BY A DESC"
-            */
-            new View("thread-allocation", // TODO test
-                    "application",
-                    "Thread Allocation Statistics",
-                    "thread-allocation",
-                    """
+                        "ObjectAllocationInNewTLAB",
+                        "ObjectAllocationOutsideTLAB"),
+                /**
+                 * [application.thread-allocation] label = "Thread Allocation Statistics" table =
+                 * "COLUMN 'Thread', 'Allocated', 'Percentage' FORMAT none, none, normalized SELECT
+                 * thread, LAST(allocated), LAST(allocated) AS A FROM ThreadAllocationStatistics
+                 * GROUP BY thread ORDER BY A DESC"
+                 */
+                new View(
+                        "thread-allocation", // TODO test
+                        "application",
+                        "Thread Allocation Statistics",
+                        "thread-allocation",
+                        """
                             CREATE VIEW "thread-allocation" AS
                             SELECT
                                 thread AS "Thread",
@@ -2271,20 +2305,18 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY thread
                             ORDER BY "Allocated" DESC
                             """,
-                    "ThreadAllocationStatistics"
-            ),
-            /**
-             * [application.thread-cpu-load]
-             * label = "Thread CPU Load"
-             * table = "COLUMN 'Thread', 'System', 'User'
-             *          SELECT eventThread AS E, LAST(system), LAST(user) AS U
-             *          FROM ThreadCPULoad GROUP BY E ORDER BY U DESC"
-            */
-            new View("thread-cpu-load",
-                    "application",
-                    "Thread CPU Load",
-                    "thread-cpu-load",
-                    """
+                        "ThreadAllocationStatistics"),
+                /**
+                 * [application.thread-cpu-load] label = "Thread CPU Load" table = "COLUMN 'Thread',
+                 * 'System', 'User' SELECT eventThread AS E, LAST(system), LAST(user) AS U FROM
+                 * ThreadCPULoad GROUP BY E ORDER BY U DESC"
+                 */
+                new View(
+                        "thread-cpu-load",
+                        "application",
+                        "Thread CPU Load",
+                        "thread-cpu-load",
+                        """
                             CREATE VIEW "thread-cpu-load" AS
                             SELECT
                                 t.javaName AS "Thread",
@@ -2295,21 +2327,20 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY t.javaName
                             ORDER BY LAST(user) DESC, LAST(system) DESC
                             """,
-                    "ThreadCPULoad", "Thread"
-            ),
-            /**
-             * [application.thread-start]
-             * label = "Platform Thread Start by Method"
-             * table = "COLUMN 'Start Time','Stack Trace', 'Thread', 'Duration'
-             *          SELECT S.startTime, S.stackTrace, eventThread, DIFF(startTime) AS D
-             *          FROM ThreadStart AS S, ThreadEnd AS E GROUP
-             *          by eventThread ORDER BY D DESC"
-            */
-            new View("thread-start",
-                    "application",
-                    "Platform Thread Start by Method",
-                    "thread-start",
-                    """
+                        "ThreadCPULoad",
+                        "Thread"),
+                /**
+                 * [application.thread-start] label = "Platform Thread Start by Method" table =
+                 * "COLUMN 'Start Time','Stack Trace', 'Thread', 'Duration' SELECT S.startTime,
+                 * S.stackTrace, eventThread, DIFF(startTime) AS D FROM ThreadStart AS S, ThreadEnd
+                 * AS E GROUP by eventThread ORDER BY D DESC"
+                 */
+                new View(
+                        "thread-start",
+                        "application",
+                        "Platform Thread Start by Method",
+                        "thread-start",
+                        """
                             CREATE VIEW "thread-start" AS
                             SELECT
                                 CASE
@@ -2358,20 +2389,23 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                                 END,
                                 (j.te_start - j.ts_start) DESC NULLS LAST, j.ts_start ASC;
                             """,
-                    "Thread", "ThreadStart", "ThreadEnd", "Method", "Class"
-            ),
-            /**
-             * [jvm.vm-operations]
-             * label = "VM Operations"
-             * table = "COLUMN 'VM Operation', 'Average Duration', 'Longest Duration', 'Count' , 'Total Duration'
-             *          SELECT operation,  AVG(duration), MAX(duration), COUNT(*), SUM(duration)
-             *          FROM jdk.ExecuteVMOperation GROUP BY operation"
-            */
-            new View("vm-operations",
-                    "jvm",
-                    "VM Operations",
-                    "vm-operations",
-                    """
+                        "Thread",
+                        "ThreadStart",
+                        "ThreadEnd",
+                        "Method",
+                        "Class"),
+                /**
+                 * [jvm.vm-operations] label = "VM Operations" table = "COLUMN 'VM Operation',
+                 * 'Average Duration', 'Longest Duration', 'Count' , 'Total Duration' SELECT
+                 * operation, AVG(duration), MAX(duration), COUNT(*), SUM(duration) FROM
+                 * jdk.ExecuteVMOperation GROUP BY operation"
+                 */
+                new View(
+                        "vm-operations",
+                        "jvm",
+                        "VM Operations",
+                        "vm-operations",
+                        """
                             CREATE VIEW "vm-operations" AS
                             SELECT
                                 operation AS "VM Operation",
@@ -2383,18 +2417,21 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                             GROUP BY operation
                             ORDER BY SUM(duration) DESC
                             """,
-                    "ExecuteVMOperation"
-            ),
-    };
+                        "ExecuteVMOperation"),
+            };
 
     public static List<View> getViews() {
-        return Arrays.stream(views).takeWhile(v -> !v.name().equals("break")).filter(v -> !v.name().equals("break")).toList();
+        return Arrays.stream(views)
+                .takeWhile(v -> !v.name().equals("break"))
+                .filter(v -> !v.name().equals("break"))
+                .toList();
     }
 
     public static void addToDatabase(DuckDBConnection connection) throws SQLException {
         Set<String> existingTables = getTableNames(connection);
         // Remove existing views
-        try (ResultSet rs = connection.createStatement().executeQuery("SELECT view_name FROM duckdb_views;")) {
+        try (ResultSet rs =
+                connection.createStatement().executeQuery("SELECT view_name FROM duckdb_views;")) {
             while (rs.next()) {
                 String viewName = rs.getString(1);
                 connection.createStatement().execute("DROP VIEW IF EXISTS \"" + viewName + "\"");
@@ -2408,26 +2445,31 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
                         Statement stmt = connection.createStatement();
                         stmt.execute(alternative);
                         if (view.description() != null) {
-                            stmt.execute("COMMENT ON VIEW \"" + view.name() + "\" IS " + stmt.enquoteLiteral(view.description()) + ";");
+                            stmt.execute(
+                                    "COMMENT ON VIEW \""
+                                            + view.name()
+                                            + "\" IS "
+                                            + stmt.enquoteLiteral(view.description())
+                                            + ";");
                         }
                     } catch (SQLException e) {
                         throw new RuntimeSQLException(alternative, e);
                     }
-                } else {
-                    /*System.err.println("Skipping view " + view.name() + " because it references missing tables: " +
-                                       view.referencedTables().stream()
-                                               .filter(t -> !existingTables.contains(t))
-                                               .collect(Collectors.joining(", ")));*/
                 }
             } else {
                 try {
                     connection.createStatement().execute(view.definition());
                 } catch (SQLException e) {
-                    throw new RuntimeSQLException("Error creating view " + view.name() + "   " + view.referencedTables(), e);
+                    throw new RuntimeSQLException(
+                            "Error creating view " + view.name() + "   " + view.referencedTables(),
+                            e);
                 }
             }
         }
-        connection.createStatement().execute("""
+        connection
+                .createStatement()
+                .execute(
+                        """
                 CREATE TABLE IF NOT EXISTS jfr$views (
                     name VARCHAR PRIMARY KEY,
                     category VARCHAR,
@@ -2448,8 +2490,7 @@ form = "SELECT LAST(fastTimeAutoEnabled), LAST(fastTimeEnabled),
     }
 
     public static Map<String, List<View>> getViewsByCategory() {
-        return Arrays.stream(views)
-                .collect(Collectors.groupingBy(View::category));
+        return Arrays.stream(views).collect(Collectors.groupingBy(View::category));
     }
 
     public static View getView(String name) {
