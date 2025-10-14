@@ -16,10 +16,8 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import jdk.jfr.EventType;
-import jdk.jfr.FlightRecorder;
-import jdk.jfr.Timespan;
-import jdk.jfr.ValueDescriptor;
+
+import jdk.jfr.*;
 import jdk.jfr.consumer.*;
 import me.bechberger.jfr.duckdb.definitions.MacroCollection;
 import me.bechberger.jfr.duckdb.definitions.ViewCollection;
@@ -69,6 +67,7 @@ public class BasicParallelImporter {
         final List<Column> columns;
         final DuckDBAppender appender;
         private final AtomicInteger counter = new AtomicInteger(0);
+        private @Nullable String description = null;
 
         /**
          * Wrapper for {@link RecordedObject} that implements {@link Object#hashCode()} and {@link
@@ -150,13 +149,18 @@ public class BasicParallelImporter {
          * @param appendDefault a function that appends the default value of the field to the
          *     DuckDBAppender
          * @param referencedTable optional SQL reference to other tables (for foreign keys)
+         *                        (only for documentation purposes, not enforced)
+         * @param dataTypes optional additional type information
+         * @param description optional description of the column
          */
         record Column(
                 String name,
                 String type,
                 AppendFunction append,
                 @Nullable AppendDefaultValueFunction appendDefault,
-                @Nullable String referencedTable) {
+                @Nullable String referencedTable,
+                @Nullable String description,
+                @Nullable String... dataTypes) {
 
             @Override
             public String toString() {
@@ -164,21 +168,31 @@ public class BasicParallelImporter {
             }
 
             public @Nullable String extraComment() {
+                String prefix = "Column \"" + name + "\": ";
+                List<String> parts = new ArrayList<>();
                 if (referencedTable != null) {
                     if (type.contains("[")) {
-                        return "Array of foreign keys to \"" + referencedTable + "\"(_id)";
+                        parts.add("Array of references to \"" + referencedTable + "\"(_id)");
+                    } else {
+                        parts.add("references \""
+                                + referencedTable
+                                + "\"(_id)");
                     }
-                    return "FOREIGN KEY (\""
-                            + name
-                            + "\") REFERENCES \""
-                            + referencedTable
-                            + "\"(_id)";
                 }
-                return null;
+                if (dataTypes != null && dataTypes.length > 0) {
+                    parts.add(String.join(", ", dataTypes));
+                }
+                if (description != null && !description.isBlank()) {
+                    parts.add("DESCRIPTION(" + description + ")");
+                }
+                if (parts.isEmpty()) {
+                    return null;
+                }
+                return prefix + String.join(" with ", parts);
             }
 
             public Column prependName(String prefix) {
-                return new Column(prefix + name, type, append, appendDefault, referencedTable);
+                return new Column(prefix + name, type, append, appendDefault, referencedTable, description, dataTypes);
             }
 
             public Column(
@@ -186,8 +200,39 @@ public class BasicParallelImporter {
                     String type,
                     AppendFunction append,
                     @Nullable AppendDefaultValueFunction appendDefault) {
-                this(name, type, append, appendDefault, null);
+                this(name, type, append, appendDefault, null, null);
             }
+
+            public Column(
+                    String name,
+                    String type,
+                    AppendFunction append,
+                    @Nullable AppendDefaultValueFunction appendDefault,
+                    @Nullable String referencedTable) {
+                this(name, type, append, appendDefault, referencedTable, null);
+            }
+
+            public Column withDataTypes(String... dataTypes) {
+                if (dataTypes == null || dataTypes.length == 0) {
+                    return this;
+                }
+                return new Column(name, type, append, appendDefault, referencedTable, description, dataTypes);
+            }
+
+            public Column withDescription(String description) {
+                if (description == null || description.isBlank()) {
+                    return this;
+                }
+                return new Column(name, type, append, appendDefault, referencedTable, description, dataTypes);
+            }
+        }
+
+        public Table addDescription(String description) {
+            if (description == null || description.isBlank()) {
+                return this;
+            }
+            this.description = description;
+            return this;
         }
 
         @Override
@@ -213,6 +258,7 @@ public class BasicParallelImporter {
                                     + "\" IS "
                                     + stmt.enquoteLiteral(comment)
                                     + ";");
+                    System.out.println("Created table " + name + " with comment: " + comment);
                 }
             } catch (Exception e) {
                 throw new RuntimeSQLException("Failed to create table " + name, e);
@@ -220,10 +266,15 @@ public class BasicParallelImporter {
         }
 
         private String getComment() {
-            return columns.stream()
+            List<String> comments = new ArrayList<>();
+            if (description != null && description.contains(" ")) {
+                comments.add("DESCRIPTION(" + description + ")");
+            }
+            columns.stream()
                     .map(Column::extraComment)
                     .filter(Objects::nonNull)
-                    .collect(Collectors.joining(", "));
+                    .forEach(comments::add);
+            return String.join("; ", comments);
         }
 
         private void appendNullRowIfNeeded() {
@@ -448,6 +499,51 @@ public class BasicParallelImporter {
         return columns;
     }
 
+    private static final Set<Class> ignoredContentAnnotations = Set.of(
+            Unsigned.class,
+            BooleanFlag.class,
+            Timestamp.class,
+            Timespan.class
+    );
+
+    private @Nullable String[] parseContentTypeAnnotations(ValueDescriptor descriptor) {
+        // get all the annotations that are annoted with @ContentType
+        return descriptor.getAnnotationElements().stream()
+                .filter(a -> a.getAnnotation(jdk.jfr.ContentType.class) != null)
+                .filter(a -> {
+                    try {
+                        return !ignoredContentAnnotations.contains(Class.forName(a.getTypeName()));
+                    } catch (ClassNotFoundException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .map(this::formatContentTypeAnnotation)
+                .toArray(String[]::new);
+    }
+
+    private String formatContentTypeAnnotation(AnnotationElement annotation) {
+        switch (annotation.getTypeName()) {
+            case "jdk.jfr.Timestamp" -> {
+                return "Timestamp";
+            }
+            case "jdk.jfr.Timespan" -> {
+                return "Timespan";
+            }
+            default -> {
+                Label labelAnnotation = annotation.getAnnotation(Label.class);
+                String label = labelAnnotation != null
+                        ? labelAnnotation.value()
+                        : annotation.getTypeName();
+                String formattedLabel = label.substring(label.lastIndexOf('.') + 1).replace(" ", "");
+                String parts = annotation.getValues().stream().map(Objects::toString).collect(Collectors.joining(", "));
+                if (parts.isBlank()) {
+                    return formattedLabel;
+                }
+                return formattedLabel + "(" + parts + ")";
+            }
+        }
+    }
+
     @SuppressWarnings("RedundantLabeledSwitchRuleCodeBlock")
     private List<Table.Column> createColumnsForTypeIgnoringArrays(
             ValueDescriptor descriptor, Function<RecordedObject, RecordedObject> getBaseObject) {
@@ -639,7 +735,7 @@ public class BasicParallelImporter {
                 return null;
             }
         }
-        return List.of(col);
+        return List.of(col.withDataTypes(parseContentTypeAnnotations(descriptor)).withDescription(descriptor.getDescription()));
     }
 
     private ValueDescriptor getField(ValueDescriptor descriptor, String fieldName) {
@@ -931,7 +1027,7 @@ public class BasicParallelImporter {
                 eventType.getName().startsWith("jdk.")
                         ? eventType.getName().substring(4)
                         : eventType.getName();
-        return createTable(tableName, eventType.getFields(), false);
+        return createTable(tableName, eventType.getFields(), false).addDescription(eventType.getDescription());
     }
 
     private void writeEventCounts() {

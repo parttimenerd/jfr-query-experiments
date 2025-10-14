@@ -81,7 +81,6 @@ public class QueryCommand implements Runnable {
                     try {
                         Files.delete(path);
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
                     }
                     try {
                         BasicParallelImporter.createFile(Path.of(inputFile), path, commonOptions);
