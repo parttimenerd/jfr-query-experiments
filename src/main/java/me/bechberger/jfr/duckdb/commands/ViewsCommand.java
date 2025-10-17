@@ -21,10 +21,10 @@ public class ViewsCommand implements Runnable {
         out.println("Not all views are available for every file, as they depend");
         out.println("on the events present in the JFR recording and the options");
         out.println("used during import.");
-        out.println();
         ViewCollection.getViewsByCategory()
                 .forEach(
                         (category, views) -> {
+                            out.println();
                             out.println(category + ":");
                             List<View> sortedViews =
                                     views.stream()
@@ -57,6 +57,6 @@ public class ViewsCommand implements Runnable {
                         });
         out.println();
         out.println("Use the 'query' command to execute a view, e.g.:");
-        out.println("  duckdb query recording.jfr jfr$active-recordings");
+        out.println("  query recording.jfr active-recordings");
     }
 }

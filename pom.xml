@@ -27,62 +27,6 @@
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                     <compilerArgs>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.commons=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.util=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.event=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.vm.annotation=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.xml.sax=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.util.xml=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.util.xml.impl=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.org.xml.sax.helpers=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>jdk.jfr/jdk.jfr.internal=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>jdk.jfr/jdk.jfr.events=ALL-UNNAMED</arg>
-                        <arg>--add-exports</arg>
-                        <arg>java.base/jdk.internal.module=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.commons=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.tree=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.objectweb.asm.util=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.event=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.vm.annotation=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.xml.sax=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.util.xml=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.util.xml.impl=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.org.xml.sax.helpers=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>jdk.jfr/jdk.jfr.internal=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>java.base/jdk.internal.module=ALL-UNNAMED</arg>
-                        <arg>--add-opens</arg>
-                        <arg>jdk.jfr/jdk.jfr.events=ALL-UNNAMED</arg>
                     </compilerArgs>
                 </configuration>
             </plugin>
