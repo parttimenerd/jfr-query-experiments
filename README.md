@@ -37,12 +37,13 @@ Directly query a JFR file (implicitly creating a DuckDB file, disable via `--no-
 
 ```
 > java -jar target/query.jar query jfr_files/metal.jfr "hot-methods" 
-╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╤═════════╤═════════╗
-║ Method                                                                                                              │ Samples │ Percent ║
-╠═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╪═════════╪═════════╣
-║ java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.WorkQueue, int)                                           │ 1066    │ 8.09%   ║
-╟─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────┼─────────╢
-║ scala.collection.immutable.RedBlackTree$.lookup(RedBlackTree.Tree, Object, Ordering)                                │ 695     │ 5.27%   ║
+Method                                                                                                   Samples Percent
+-------------------------------------------------------------------------------------------------------- ------- -------
+java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.WorkQueue, int)                                   1066   8.09%
+scala.collection.immutable.RedBlackTree$.lookup(RedBlackTree.Tree, Object, Ordering)                         695   5.27%
+akka.actor.dungeon.Children.initChild(ActorRef)                                                              678   5.14%
+scala.collection.immutable.RedBlackTree$.upd(RedBlackTree.Tree, Object, Object, boolean, Ordering)           453   3.44%
+akka.actor.dungeon.Children.reserveChild(String)                                                             379   2.88%
 ```
 
 View names are directly replaced by `SELECT * FROM <view name>`, so `hot-methods` is
@@ -60,10 +61,6 @@ Limitations:
 
 TODO
 - performance comparison with Calcite based Gunnar Morling stuff and other tools (like jfr)
-- better table printer
-- support for annotating data types
-   - maybe also a simple data flow analysis to track types and find the actual types of columns 
-     (like memory or duration)
 - write basic blog post
 
 License

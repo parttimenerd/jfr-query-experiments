@@ -258,7 +258,6 @@ public class BasicParallelImporter {
                                     + "\" IS "
                                     + stmt.enquoteLiteral(comment)
                                     + ";");
-                    System.out.println("Created table " + name + " with comment: " + comment);
                 }
             } catch (Exception e) {
                 throw new RuntimeSQLException("Failed to create table " + name, e);
@@ -499,7 +498,7 @@ public class BasicParallelImporter {
         return columns;
     }
 
-    private static final Set<Class> ignoredContentAnnotations = Set.of(
+    private static final Set<Class<?>> ignoredContentAnnotations = Set.of(
             Unsigned.class,
             BooleanFlag.class,
             Timestamp.class,
