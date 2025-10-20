@@ -12,7 +12,11 @@ import org.duckdb.DuckDBConnection;
 public class SQLUtil {
 
     public static Set<String> getTableNames(DuckDBConnection connection) throws SQLException {
-        ResultSet rs = connection.createStatement().executeQuery("SHOW TABLES");
+        ResultSet rs = connection.createStatement().executeQuery("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_type = 'BASE TABLE';
+                """);
         Set<String> tableNames = new HashSet<>();
         while (rs.next()) {
             tableNames.add(rs.getString(1));

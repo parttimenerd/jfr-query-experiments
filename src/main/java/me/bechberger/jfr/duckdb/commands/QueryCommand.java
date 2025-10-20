@@ -10,19 +10,24 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+
 import me.bechberger.jfr.duckdb.BasicParallelImporter;
 import me.bechberger.jfr.duckdb.Options;
+import me.bechberger.jfr.duckdb.RuntimeSQLException;
 import me.bechberger.jfr.duckdb.query.QueryExecutor;
 import me.bechberger.jfr.duckdb.util.TextUtil;
 import org.duckdb.DuckDBConnection;
 import picocli.CommandLine;
+
+import static me.bechberger.jfr.duckdb.util.SQLUtil.getTableNames;
 
 @CommandLine.Command(
         name = "query",
         mixinStandardHelpOptions = true,
         description =
                 "Execute a SQL query or view on the JFR DuckDB database and print the results.")
-public class QueryCommand implements Runnable {
+public class QueryCommand implements Callable<Integer> {
 
     @CommandLine.Parameters(index = "0", description = "The JFR file (or .db file) to query.")
     private String inputFile;
@@ -30,14 +35,13 @@ public class QueryCommand implements Runnable {
     @CommandLine.Parameters(
             index = "1",
             description =
-                    "The SQL query to execute, if query is just a single word, it is interpreted as a view name and empty query lists available tables and views."
+                    "The SQL query to execute, if query is just a single word, it is interpreted as a view name and empty query lists available tables and views.",
+            defaultValue = ""
     )
     private String query;
 
-    @CommandLine.Option(
-            names = {"-f", "--format"},
-            description = "Output format: ${COMPLETION-CANDIDATES} (default: ${DEFAULT-VALUE})")
-    private QueryExecutor.OutputFormat format = QueryExecutor.OutputFormat.TABLE;
+    @CommandLine.Option(names = "--csv", description = "Output format: CSV")
+    private boolean formatCsv = false;
 
     @CommandLine.Option(
             names = {"-o", "--output"},
@@ -52,7 +56,7 @@ public class QueryCommand implements Runnable {
     @CommandLine.Mixin private Options commonOptions;
 
     @Override
-    public void run() {
+    public Integer call() {
         // we have three scenarios:
         // 1. inputFile is a .db file -> open it directly
         // 2. inputFile is a .jfr file and noCache is false -> create/open a .db file next to it
@@ -60,17 +64,25 @@ public class QueryCommand implements Runnable {
         if (inputFile.endsWith(".db")) {
             try (DuckDBConnection conn =
                     (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:" + inputFile)) {
-                runWithDB(conn);
-            } catch (Exception e) {
-                throw new RuntimeException("Error opening database file: " + inputFile, e);
+                return runWithDB(conn, inputFile);
+            } catch (SQLException e) {
+                System.err.println("Error opening database file: " + inputFile);
+                System.err.println(e.getMessage());
+                return 1;
             }
         } else if (noCache) {
             try (DuckDBConnection conn =
                     (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:")) {
                 BasicParallelImporter.importIntoConnection(Path.of(inputFile), conn, commonOptions);
-                runWithDB(conn);
-            } catch (Exception e) {
-                throw new RuntimeException("Error importing JFR file: " + inputFile, e);
+                runWithDB(conn, inputFile);
+            } catch (SQLException e) {
+                System.err.println("Error opening database file: " + inputFile);
+                System.err.println(e.getMessage());
+                return 1;
+            } catch (IOException e) {
+                System.err.println("Error transforming JFR file into a database: " + inputFile);
+                System.err.println(e.getMessage());
+                return 1;
             }
         } else {
             String dbFile = inputFile.replace(".jfr", ".db");
@@ -84,22 +96,42 @@ public class QueryCommand implements Runnable {
                     }
                     try {
                         BasicParallelImporter.createFile(Path.of(inputFile), path, commonOptions);
-                    } catch (IOException | SQLException e) {
-                        throw new RuntimeException("Error importing JFR file: ", e);
+                    } catch (IOException e) {
+                        if (e.getMessage().equals("Not a complete Chunk header") || e.getMessage().equals("Chunk contains no data")) {
+                            System.err.println("Error transforming JFR file into a database: " + inputFile + " (not a valid JFR file)");
+                            return 1;
+                        }
+                        System.err.println("Error transforming JFR file into a database: " + e.getMessage());
+                        return 1;
+                    } catch (SQLException e) {
+                        System.err.println("Error creating database for JFR file: " + inputFile);
+                        System.err.println(e.getMessage());
+                        return 1;
                     }
                 }
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
             try (DuckDBConnection conn = (DuckDBConnection) DriverManager.getConnection("jdbc:duckdb:" + dbFile)) {
-                runWithDB(conn);
+                return runWithDB(conn, inputFile);
             } catch (SQLException e) {
-                throw new RuntimeException(e);
+                System.err.println("Error opening database file: " + dbFile);
+                System.err.println(e.getMessage());
+                return 1;
             }
+        }
+        return 0;
+    }
+
+    private QueryExecutor.OutputFormat getFormat() {
+        if (formatCsv) {
+            return QueryExecutor.OutputFormat.CSV;
+        } else {
+            return QueryExecutor.OutputFormat.TABLE;
         }
     }
 
-    private void runWithDB(DuckDBConnection conn) {
+    private int runWithDB(DuckDBConnection conn, String file) {
         QueryExecutor executor = new QueryExecutor(conn);
         try (PrintStream out =
                 outputFile != null
@@ -108,7 +140,7 @@ public class QueryCommand implements Runnable {
                         : System.out) {
             if (query.isEmpty()) {
                 System.out.println("Available tables:");
-                for (String table : getAvailableTables(conn)) {
+                for (String table : getTableNames(conn).stream().sorted().toList()) {
                     System.out.println(" - " + table);
                 }
 
@@ -116,32 +148,52 @@ public class QueryCommand implements Runnable {
                 for (String view : getAvailableViews(conn)) {
                     System.out.println(" - " + view);
                 }
+                return 0;
             }
             if (!query.contains(" ")) {
                 // interpret as view name
                 handleView(conn, out, query);
-                return;
+                return 0;
             }
-            executor.executeQuery(query, format, out);
+            executor.executeQuery(query, getFormat(), out);
+        } catch (SQLException e) {
+            System.err.println("Error executing query '" + query + "' on file " + file);
+            System.err.println(e.getMessage());
+            return 1;
+        } catch (RuntimeSQLException e) {
+            System.err.println("Error executing query '" + query + "' on file " + file);
+            System.err.println(e.getCause().getMessage());
+            return 1;
+        } catch (ViewNotFoundException e) {
+            System.err.println("Error for file " + file + ":");
+            System.err.println(e.getMessage());
+            return 1;
         } catch (Exception e) {
-            throw new RuntimeException("Error executing query: " + query, e);
+            throw new RuntimeSQLException("Error executing query: " + query, e);
+        }
+        return 0;
+    }
+
+    private class ViewNotFoundException extends RuntimeException {
+        public ViewNotFoundException(String message) {
+            super(message);
         }
     }
 
     private void handleView(DuckDBConnection conn, PrintStream out, String query)
             throws SQLException {
-        List<String> availableViews = getAvailableViews(conn);
-        if (availableViews.contains(query)) {
+        List<String> availableViewsAndTables = getAvailableTablesAndViews(conn);
+        if (availableViewsAndTables.stream().anyMatch(v -> v.equalsIgnoreCase(query))) {
             QueryExecutor executor = new QueryExecutor(conn);
-            executor.executeQuery("SELECT * FROM \"" + query + "\"", format, out);
+            executor.executeQuery("SELECT * FROM \"" + query + "\"", getFormat(), out);
         } else {
             List<String> suggestions =
-                    TextUtil.findClosestMatches(query, getAvailableTablesAndViews(conn), 3, 5);
+                    TextUtil.findClosestMatches(query, availableViewsAndTables, 3, 5);
             String suggestionText =
                     suggestions.isEmpty()
                             ? ""
-                            : " Did you mean: " + String.join(", ", suggestions) + "?";
-            throw new IllegalArgumentException(query + " not found: " + query + suggestionText);
+                            : ": Did you mean: " + String.join(", ", suggestions) + "?";
+            throw new ViewNotFoundException("View " + query + " not found" + suggestionText);
         }
     }
 
@@ -156,20 +208,9 @@ public class QueryCommand implements Runnable {
         }
     }
 
-    private List<String> getAvailableTables(DuckDBConnection conn) throws SQLException {
-        try (var stmt = conn.createStatement();
-                var rs = stmt.executeQuery("SHOW TABLES")) {
-            List<String> tables = new ArrayList<>();
-            while (rs.next()) {
-                tables.add(rs.getString(1));
-            }
-            return tables;
-        }
-    }
-
     private List<String> getAvailableTablesAndViews(DuckDBConnection conn) throws SQLException {
         List<String> combined = new ArrayList<>();
-        combined.addAll(getAvailableTables(conn));
+        combined.addAll(getTableNames(conn).stream().sorted().toList());
         combined.addAll(getAvailableViews(conn));
         return combined;
     }

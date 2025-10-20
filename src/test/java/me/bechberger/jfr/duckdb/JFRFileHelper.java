@@ -10,8 +10,9 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.duckdb.DuckDBConnection;
 
-class JFRFileHelper {
+public class JFRFileHelper {
     private final JFRViewResultCache jfrViewResultCache;
+    private final JFRFile jfrFile;
     private final Path dbFile;
     private final List<DuckDBConnection> openConnections = new ArrayList<>();
 
@@ -19,7 +20,7 @@ class JFRFileHelper {
         if (!Files.exists(jfrFile.getPath())) {
             throw new IOException("Test file not found: " + jfrFile.getPath().toAbsolutePath());
         }
-
+        this.jfrFile = jfrFile;
         // Create cached database file next to the JFR file
         String jfrFileName = jfrFile.getPath().getFileName().toString();
         String dbFileName = jfrFileName.replaceAll("\\.[^.]+$", ".db");
@@ -99,5 +100,13 @@ class JFRFileHelper {
                                 "jdbc:duckdb:" + dbFile.toAbsolutePath());
         openConnections.add(con);
         return con;
+    }
+
+    public Path getDbFile() {
+        return dbFile;
+    }
+
+    public Path getJfrFile() {
+        return jfrFile.getPath();
     }
 }
