@@ -111,10 +111,6 @@ jobs:
             ```
             java -jar query.jar
             -> shows the help
-            
-            java -jar query.jar web recording.jfr
-            -> starts a web server on port 8080
-            -> open http://localhost:8080
             ```
           name: JFR Query Tool - Latest Snapshot
         env:

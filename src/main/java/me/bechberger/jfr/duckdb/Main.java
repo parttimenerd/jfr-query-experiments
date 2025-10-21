@@ -22,6 +22,7 @@ import picocli.CommandLine;
             QueryCommand.class,
             MacrosCommand.class,
             ViewsCommand.class,
+            ContextCommand.class,
             CommandLine.HelpCommand.class
         })
 public class Main implements Runnable {

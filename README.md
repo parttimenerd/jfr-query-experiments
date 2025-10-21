@@ -47,7 +47,7 @@ akka.actor.dungeon.Children.reserveChild(String)                                
 ```
 
 View names are directly replaced by `SELECT * FROM <view name>`, so `hot-methods` is
-`SELECT * FROM "Hot Methods"`.
+`SELECT * FROM hot-methods`.
 
 The full list of views is available via the `views` command the full list of macros `macros`.
 
