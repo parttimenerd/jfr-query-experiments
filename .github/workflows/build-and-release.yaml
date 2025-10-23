@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-    branches: [ main, duckdb ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch: # Allow manual triggering
