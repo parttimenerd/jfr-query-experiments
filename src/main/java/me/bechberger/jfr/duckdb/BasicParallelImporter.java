@@ -1,6 +1,6 @@
 package me.bechberger.jfr.duckdb;
 
-import static me.bechberger.jfr.duckdb.util.JFRUtil.decodeBytecodeClassName;
+import static me.bechberger.jfr.duckdb.util.JFRUtil.*;
 import static me.bechberger.jfr.duckdb.util.SQLUtil.append;
 
 import java.io.IOException;
@@ -129,15 +129,26 @@ public class BasicParallelImporter {
                 String name,
                 List<Column> columns,
                 ConnectionSupplier connectionSupplier,
-                boolean cache)
+                boolean cache,
+                @Nullable String description)
                 throws SQLException {
             this.name = name;
             this.columns = columns;
             var connection = connectionSupplier.get();
             this.cache = cache;
+            this.description = description;
             createTable(connection);
             this.appender = connection.createAppender(name);
             appendNullRowIfNeeded();
+        }
+
+        Table(
+                String name,
+                List<Column> columns,
+                ConnectionSupplier connectionSupplier,
+                boolean cache)
+                throws SQLException {
+            this(name, columns, connectionSupplier, cache, null);
         }
 
         /**
@@ -183,7 +194,9 @@ public class BasicParallelImporter {
                     parts.add(String.join(", ", dataTypes));
                 }
                 if (description != null && !description.isBlank()) {
-                    parts.add("DESCRIPTION(" + description + ")");
+                    parts.add("DESCRIPTION(" +
+                            description.replace("(", "\\(").replace(")", "\\)")
+                            + ")");
                 }
                 if (parts.isEmpty()) {
                     return null;
@@ -219,25 +232,18 @@ public class BasicParallelImporter {
                 return new Column(name, type, append, appendDefault, referencedTable, description, dataTypes);
             }
 
-            public Column withDescription(String description) {
-                if (description == null || description.isBlank()) {
+            public Column withDescription(String label, String description) {
+                String combinedDescription = combineDescription(name, label, description);
+                if (combinedDescription == null) {
                     return this;
                 }
-                return new Column(name, type, append, appendDefault, referencedTable, description, dataTypes);
+                return new Column(name, type, append, appendDefault, referencedTable, combinedDescription, dataTypes);
             }
-        }
-
-        public Table addDescription(String description) {
-            if (description == null || description.isBlank()) {
-                return this;
-            }
-            this.description = description;
-            return this;
         }
 
         @Override
         public String toString() {
-            String idPrefix = doesUseCaching() ? "_id INTEGER PRIMARY KEY, " : "";
+            String idPrefix = doesUseCaching() ? "_id UINTEGER PRIMARY KEY, " : "";
             return "CREATE TABLE IF NOT EXISTS \""
                     + name
                     + "\" ("
@@ -267,7 +273,8 @@ public class BasicParallelImporter {
         private String getComment() {
             List<String> comments = new ArrayList<>();
             if (description != null && description.contains(" ")) {
-                comments.add("DESCRIPTION(" + description + ")");
+                comments.add("DESCRIPTION(" + description
+                        .replace("(", "\\(").replace(")", "\\)") + ")");
             }
             columns.stream()
                     .map(Column::extraComment)
@@ -734,7 +741,7 @@ public class BasicParallelImporter {
                 return null;
             }
         }
-        return List.of(col.withDataTypes(parseContentTypeAnnotations(descriptor)).withDescription(descriptor.getDescription()));
+        return List.of(col.withDataTypes(parseContentTypeAnnotations(descriptor)).withDescription(descriptor.getLabel(), descriptor.getDescription()));
     }
 
     private ValueDescriptor getField(ValueDescriptor descriptor, String fieldName) {
@@ -787,7 +794,7 @@ public class BasicParallelImporter {
                     cols.add(
                             new Table.Column(
                                     fieldName + "$" + name,
-                                    "INTEGER",
+                                    "UINTEGER",
                                     (obj, app) -> {
                                         RecordedStackTrace stackTrace =
                                                 getBaseObject.apply(obj).getValue(fieldName);
@@ -873,7 +880,7 @@ public class BasicParallelImporter {
         cols.add(
                 new Table.Column(
                         fieldName + "$methods",
-                        "INTEGER[" + options.getMaxStackTraceDepth() + "]",
+                        "UINTEGER[" + options.getMaxStackTraceDepth() + "]",
                         (obj, app) -> {
                             RecordedStackTrace stackTrace =
                                     getBaseObject.apply(obj).getValue(fieldName);
@@ -917,7 +924,7 @@ public class BasicParallelImporter {
             return List.of(
                     new Table.Column(
                             descriptor.getName(),
-                            "INTEGER",
+                            "UINTEGER",
                             (obj, app) -> {
                                 RecordedObject struct =
                                         getBaseObject.apply(obj).getValue(descriptor.getName());
@@ -952,7 +959,7 @@ public class BasicParallelImporter {
             structTypeToTable.put(descriptor.getTypeName(), null);
             structTypeToTable.put(
                     descriptor.getTypeName(),
-                    createTable(descriptor.getTypeName(), descriptor.getFields(), true));
+                    createTable(descriptor.getTypeName(), descriptor.getFields(), true, JFRUtil.getCombinedTypeDescription(descriptor)));
         }
         return structTypeToTable.get(descriptor.getTypeName());
     }
@@ -999,7 +1006,7 @@ public class BasicParallelImporter {
         }
     }
 
-    private Table createTable(String name, List<ValueDescriptor> fields, boolean cache) {
+    private Table createTable(String name, List<ValueDescriptor> fields, boolean cache, @Nullable String description) {
         List<Table.Column> columns =
                 Stream.concat(
                                 fields.stream()
@@ -1015,7 +1022,7 @@ public class BasicParallelImporter {
         }
         String tableName = normalizeTableName(name);
         try {
-            return new Table(tableName, columns, connectionSupplier, cache);
+            return new Table(tableName, columns, connectionSupplier, cache, description);
         } catch (SQLException e) {
             throw new RuntimeSQLException("Failed to create table for type " + name, e);
         }
@@ -1026,7 +1033,8 @@ public class BasicParallelImporter {
                 eventType.getName().startsWith("jdk.")
                         ? eventType.getName().substring(4)
                         : eventType.getName();
-        return createTable(tableName, eventType.getFields(), false).addDescription(eventType.getDescription());
+        return createTable(tableName, eventType.getFields(), false,
+                combineDescription(eventType.getName(), eventType.getLabel(), eventType.getDescription()));
     }
 
     private void writeEventCounts() {

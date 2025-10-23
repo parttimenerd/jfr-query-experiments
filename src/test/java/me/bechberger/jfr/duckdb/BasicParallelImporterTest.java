@@ -200,7 +200,7 @@ class BasicParallelImporterTest {
                                                                         "stackTrace$methods")
                                                                 .getValue()))
                                                 .getArray())
-                        .mapToInt(o -> (int) o)
+                        .mapToInt(o -> (int) (long) o)
                         .toArray();
         System.out.println(Arrays.toString(arr));
         //        assertArrayEquals(new int[]{1, 2, 3, 4}, arr);

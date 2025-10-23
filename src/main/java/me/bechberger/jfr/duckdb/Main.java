@@ -84,6 +84,8 @@ public class Main implements Runnable {
                             javaBin,
                             "--add-opens",
                             "jdk.jfr/jdk.jfr.consumer=ALL-UNNAMED",
+                            "--add-opens",
+                            "jdk.jfr/jdk.jfr=ALL-UNNAMED",
                             "--enable-native-access=ALL-UNNAMED", // for good measure
                             "-cp",
                             classPath,

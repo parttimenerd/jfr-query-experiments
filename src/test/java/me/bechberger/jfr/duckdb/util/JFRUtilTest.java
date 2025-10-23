@@ -50,4 +50,17 @@ class JFRUtilTest {
     void simplifyMethodDescriptor(String input, String expected) {
         assertEquals(expected, JFRUtil.simplifyDescriptor(input));
     }
+
+    static Stream<Arguments> provideCombineDescriptionsTests() {
+        return Stream.of(
+                Arguments.of("Bla", "This is a test.", "Additional info.", "This is a test. Additional info."),
+                Arguments.of("BlaBla", "Single description.", null, null)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideCombineDescriptionsTests")
+    void combineDescriptions(String entityName, String label, String description, String expected) {
+        assertEquals(expected, JFRUtil.combineDescription(entityName, label, description));
+    }
 }

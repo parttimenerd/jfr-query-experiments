@@ -60,6 +60,7 @@
                 <configuration>
                     <argLine>
                         --add-opens jdk.jfr/jdk.jfr.consumer=ALL-UNNAMED
+                        --add-opens jdk.jfr/jdk.jfr=ALL-UNNAMED
                     </argLine>
                 </configuration>
             </plugin>
